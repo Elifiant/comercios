@@ -1,0 +1,396 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f2f2f2;
+  color: black !important;
+}
+
+.app {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.contenedor {
+  max-width: 600px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+h1 {
+  font-size: 32px;
+  margin: 10px 0;
+}
+
+.subtitulo {
+  font-size: 18px;
+  color: #555;
+  margin-bottom: 25px;
+}
+
+.activar-manejo {
+  width: 100%;
+  min-height: 75px;
+  border: none;
+  border-radius: 18px;
+  font-size: 21px;
+  font-weight: 800;
+  cursor: pointer;
+  background: #222;
+  color: white;
+  margin-bottom: 18px;
+  padding: 15px;
+}
+
+.boton-ubicacion {
+  width: 100%;
+  min-height: 150px;
+  border: none;
+  border-radius: 25px;
+  font-size: 30px;
+  font-weight: 800;
+  cursor: pointer;
+  background: #111;
+  color: white;
+  box-shadow: 0 6px 0 #555;
+  padding: 20px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.boton-ubicacion:active,
+.boton-manejo:active {
+  transform: translateY(5px);
+  box-shadow: 0 1px 0 #555;
+}
+
+.mensaje {
+  margin: 25px 0;
+  padding: 18px;
+  border-radius: 15px;
+  background: white;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.info {
+  margin-top: 30px;
+  padding: 15px;
+  background: white;
+  border-radius: 15px;
+  color: #555;
+  text-align: left;
+}
+
+.lista {
+  margin-top: 30px;
+  text-align: left;
+}
+
+.lista h2 {
+  text-align: center;
+}
+
+.registro {
+  background: white;
+  border-radius: 15px;
+  padding: 18px;
+  margin-bottom: 15px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.registro strong {
+  font-size: 20px;
+}
+
+.registro p {
+  margin: 8px 0;
+}
+
+/* =========================
+   MODO MANEJO
+   ========================= */
+
+.modo-manejo {
+  min-height: 100vh;
+  background: #111;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 25px 20px;
+  text-align: center;
+}
+
+.manejo-superior {
+  font-size: 22px;
+  font-weight: 800;
+  padding: 10px;
+}
+
+.boton-manejo {
+  width: 100%;
+  max-width: 500px;
+  min-height: 300px;
+  border: none;
+  border-radius: 40px;
+  background: white;
+  color: #111;
+  font-size: 38px;
+  font-weight: 900;
+  line-height: 1.15;
+  box-shadow: 0 8px 0 #777;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.icono-manejo {
+  font-size: 85px;
+}
+
+.mensaje-manejo {
+  min-height: 70px;
+  font-size: 24px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.salir-manejo {
+  width: 100%;
+  max-width: 500px;
+  min-height: 65px;
+  border: 2px solid white;
+  border-radius: 18px;
+  background: transparent;
+  color: white;
+  font-size: 17px;
+  font-weight: 700;
+  padding: 12px;
+}
+.boton-mapa {
+  width: 100%;
+  min-height: 75px;
+  border: none;
+  border-radius: 18px;
+  font-size: 21px;
+  font-weight: 800;
+  cursor: pointer;
+  background: #444;
+  color: white;
+  margin-top: 18px;
+  padding: 15px;
+}
+
+.pantalla-mapa {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f2f2f2;
+}
+
+.cabecera-mapa {
+  min-height: 80px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+  z-index: 1000;
+}
+
+.cabecera-mapa h1 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.volver-mapa {
+  border: none;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font-weight: 700;
+  background: #222;
+  color: white;
+}
+
+.mapa {
+  flex: 1;
+  width: 100%;
+  min-height: calc(100vh - 80px);
+}
+
+.mapa-vacio {
+  text-align: center;
+  padding: 40px 25px;
+}
+.pantalla-ficha {
+  min-height: 100vh;
+  background: #f2f2f2;
+  color: black;
+}
+
+.cabecera-ficha {
+  min-height: 75px;
+  background: white;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 10px 20px;
+}
+
+.cabecera-ficha h1 {
+  margin: 0;
+  font-size: 25px;
+}
+
+.volver-ficha {
+  border: none;
+  border-radius: 12px;
+  background: #222;
+  color: white;
+  padding: 12px 16px;
+  font-weight: 700;
+}
+
+.formulario {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.formulario label {
+  display: block;
+  text-align: left;
+  font-weight: 700;
+  font-size: 17px;
+  margin-top: 20px;
+  color: #222 !important;
+}
+
+.formulario input,
+.formulario textarea {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 15px;
+  border: 1px solid #ccc;
+  border-radius: 12px;
+  font-size: 17px;
+  font-family: inherit;
+  background: white;
+}
+
+.ubicacion-info,
+.ubicacion-exacta {
+  background: white;
+  border-radius: 15px;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.ubicacion-info h2,
+.ubicacion-exacta h2 {
+  margin-top: 0;
+  font-size: 20px;
+}
+
+.ubicacion-info p,
+.ubicacion-exacta p {
+  margin: 8px 0;
+}
+
+.boton-corregir,
+.guardar-ficha {
+  width: 100%;
+  min-height: 65px;
+  border: none;
+  border-radius: 16px;
+  font-size: 19px;
+  font-weight: 800;
+  margin-top: 10px;
+}
+
+.boton-corregir {
+  background: #444;
+  color: white;
+}
+
+.guardar-ficha {
+  background: #111;
+  color: white;
+  margin-top: 25px;
+}
+
+.editar-texto {
+  font-weight: 700;
+  color: #555;
+}
+
+.registro {
+  cursor: pointer;
+}
+
+.popup-editar {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: #222;
+  color: white;
+  font-weight: 700;
+}
+.pantalla-editor-ubicacion {
+  min-height: 100vh;
+  background: #f2f2f2;
+  display: flex;
+  flex-direction: column;
+}
+
+.instrucciones-ubicacion {
+  background: white;
+  padding: 15px 20px;
+}
+
+.instrucciones-ubicacion h2 {
+  margin: 0 0 8px;
+}
+
+.instrucciones-ubicacion p {
+  margin: 5px 0;
+}
+
+.mapa-editor {
+  width: 100%;
+  height: 60vh;
+  min-height: 400px;
+}
+
+.ubicacion-seleccionada {
+  background: white;
+  padding: 15px 20px;
+}
+
+.ubicacion-seleccionada p {
+  text-align: center;
+  font-weight: 700;
+}
+
+.guardar-ubicacion-exacta {
+  width: 100%;
+  min-height: 65px;
+  border: none;
+  border-radius: 16px;
+  background: #111;
+  color: white;
+  font-size: 18px;
+  font-weight: 800;
+}
