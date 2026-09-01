@@ -1,5 +1,5 @@
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   MapContainer,
   TileLayer,
@@ -25,7 +25,33 @@ L.Icon.Default.mergeOptions({
 
 function App() {
   console.log('✅ Supabase está disponible:', supabase)
+  console.log('🚨 ESTA ES MI VERSION LOCAL')
     console.log('🔑 Supabase auth:', supabase.auth)
+
+    supabase.auth.getSession().then(({ data }) => {
+  if (data.session) {
+    console.log('🟢 HAY UNA SESIÓN ACTIVA')
+  } else {
+    console.log('🔴 NO HAY SESIÓN')
+  }
+})
+    supabase.auth.getSession().then(({ data }) => console.log('SESION:', data.session))
+    supabase.auth.getSession().then(({ data }) => {
+  console.log('👤 Sesión actual:', data.session)
+})
+    console.log(
+  '🔐 Tipo de clave:',
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.startsWith('sb_')
+    ? 'Publishable Key correcta'
+    : 'NO parece Publishable Key'
+)
+    console.log(
+  '🔐 Tipo de clave:',
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.startsWith('sb_')
+    ? 'Publishable Key correcta'
+    : 'NO parece Publishable Key'
+)
+    console.log('🌐 URL Supabase:', import.meta.env.VITE_SUPABASE_URL)
   const [registros, setRegistros] = useState(() => {
     const guardados = localStorage.getItem('registrosComercios')
     return guardados ? JSON.parse(guardados) : []
@@ -36,6 +62,30 @@ function App() {
   const [mostrarMapa, setMostrarMapa] = useState(false)
   const [registroSeleccionado, setRegistroSeleccionado] = useState(null)
   const [corregirUbicacion, setCorregirUbicacion] = useState(false)
+   useEffect(() => {
+    let wakeLock = null
+
+    const mantenerPantallaEncendida = async () => {
+      try {
+        if ('wakeLock' in navigator && modoManejo) {
+          wakeLock = await navigator.wakeLock.request('screen')
+          console.log('📱 Pantalla mantenida encendida')
+        }
+      } catch (error) {
+        console.log('⚠️ No se pudo mantener la pantalla encendida:', error)
+      }
+    }
+
+    mantenerPantallaEncendida()
+
+    return () => {
+      if (wakeLock) {
+        wakeLock.release()
+        wakeLock = null
+        console.log('🔒 Wake Lock liberado')
+      }
+    }
+  }, [modoManejo])
 
   const guardarUbicacion = () => {
     if (!navigator.geolocation) {
@@ -44,9 +94,34 @@ function App() {
     }
 
     setMensaje('📍 Obteniendo ubicación...')
+    const reproducirSonido = () => {
+      const AudioContext =
+        window.AudioContext || window.webkitAudioContext
 
+      if (!AudioContext) return
+
+      const audioContext = new AudioContext()
+      const oscilador = audioContext.createOscillator()
+      const ganancia = audioContext.createGain()
+
+      oscilador.type = 'sine'
+      oscilador.frequency.value = 1200
+
+      ganancia.gain.setValueAtTime(1.5, audioContext.currentTime)
+      ganancia.gain.exponentialRampToValueAtTime(
+        0.001,
+        audioContext.currentTime + 0.35
+      )
+
+      oscilador.connect(ganancia)
+      ganancia.connect(audioContext.destination)
+
+      oscilador.start()
+      oscilador.stop(audioContext.currentTime + 0.5)
+    }
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        reproducirSonido()
         const nuevoRegistro = {
           id: Date.now(),
           fecha: new Date().toLocaleString('es-AR'),
@@ -65,6 +140,7 @@ function App() {
         const nuevosRegistros = [nuevoRegistro, ...registros]
 
         setRegistros(nuevosRegistros)
+        console.log('🧪 Intentando INSERT en Supabase...')
          const { data, error } = await supabase
           .from('comercios')
           .insert({
@@ -87,17 +163,19 @@ function App() {
           .single()
 
         if (error) {
-          console.error('❌ Error guardando en Supabase:', error)
-        } else {
-          console.log('☁️ Comercio guardado en Supabase')
-        }
+  console.error('❌ Error guardando en Supabase:', error)
+  setMensaje('❌ SUPABASE: ' + error.message)
+} else {
+  console.log('☁️ Comercio guardado en Supabase')
+  setMensaje('☁️ ¡GUARDADO EN SUPABASE!')
+}
 
         localStorage.setItem(
           'registrosComercios',
           JSON.stringify(nuevosRegistros)
         )
 
-        setMensaje('✅ ¡UBICACIÓN GUARDADA!')
+        
       },
       () => {
         setMensaje(
@@ -143,6 +221,28 @@ function App() {
     setRegistroSeleccionado(null)
     setCorregirUbicacion(false)
     setMensaje('✅ Ficha guardada correctamente')
+  }
+  const eliminarComercio = (id) => {
+    const confirmar = window.confirm(
+      '¿Seguro que querés eliminar este comercio?'
+    )
+
+    if (!confirmar) return
+
+    const nuevosRegistros = registros.filter(
+      (registro) => registro.id !== id
+    )
+
+    setRegistros(nuevosRegistros)
+
+    localStorage.setItem(
+      'registrosComercios',
+      JSON.stringify(nuevosRegistros)
+    )
+
+    setRegistroSeleccionado(null)
+    setCorregirUbicacion(false)
+    setMensaje('🗑️ Comercio eliminado')
   }
 
   if (modoManejo) {
@@ -205,11 +305,12 @@ function App() {
 
     return (
       <FichaComercio
-        registro={registroSeleccionado}
-        onGuardar={guardarFicha}
-        onVolver={() => setRegistroSeleccionado(null)}
-        onCorregirUbicacion={() => setCorregirUbicacion(true)}
-      />
+  registro={registroSeleccionado}
+  onGuardar={guardarFicha}
+  onEliminar={eliminarComercio}
+  onVolver={() => setRegistroSeleccionado(null)}
+  onCorregirUbicacion={() => setCorregirUbicacion(true)}
+/>
     )
   }
 
@@ -393,6 +494,7 @@ function App() {
 function FichaComercio({
   registro,
   onGuardar,
+  onEliminar,
   onVolver,
   onCorregirUbicacion,
 }) {
@@ -530,6 +632,12 @@ function FichaComercio({
         >
           💾 GUARDAR FICHA
         </button>
+        <button
+  className="eliminar-ficha"
+  onClick={() => onEliminar(registro.id)}
+>
+  🗑️ ELIMINAR COMERCIO
+</button>
       </div>
     </div>
   )
