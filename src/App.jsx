@@ -94,31 +94,46 @@ function App() {
     }
 
     setMensaje('📍 Obteniendo ubicación...')
-    const reproducirSonido = () => {
-      const AudioContext =
-        window.AudioContext || window.webkitAudioContext
+  const reproducirSonido = () => {
+  const AudioContext =
+    window.AudioContext || window.webkitAudioContext
 
-      if (!AudioContext) return
+  if (!AudioContext) return
 
-      const audioContext = new AudioContext()
-      const oscilador = audioContext.createOscillator()
-      const ganancia = audioContext.createGain()
+    const audioContext = new AudioContext()
 
-      oscilador.type = 'sine'
-      oscilador.frequency.value = 1200
+    const crearBip = (frecuencia, inicio, duracion) => {
+    const oscilador = audioContext.createOscillator()
+    const ganancia = audioContext.createGain()
 
-      ganancia.gain.setValueAtTime(1.5, audioContext.currentTime)
-      ganancia.gain.exponentialRampToValueAtTime(
-        0.001,
-        audioContext.currentTime + 0.35
-      )
+    oscilador.type = 'square'
+    oscilador.frequency.value = frecuencia
 
-      oscilador.connect(ganancia)
-      ganancia.connect(audioContext.destination)
+    ganancia.gain.setValueAtTime(
+      3.0,
+      audioContext.currentTime + inicio
+    )
 
-      oscilador.start()
-      oscilador.stop(audioContext.currentTime + 0.5)
-    }
+    ganancia.gain.exponentialRampToValueAtTime(
+      0.001,
+      audioContext.currentTime + inicio + duracion
+    )
+
+    oscilador.connect(ganancia)
+    ganancia.connect(audioContext.destination)
+
+    oscilador.start(
+      audioContext.currentTime + inicio
+    )
+
+    oscilador.stop(
+      audioContext.currentTime + inicio + duracion
+    )
+  }
+
+  crearBip(1100, 0, 0.45)
+  crearBip(850, 0.48, 0.45)
+}
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         reproducirSonido()
