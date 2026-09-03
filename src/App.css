@@ -120,8 +120,8 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 25px 20px;
+  justify-content: flex-start;
+  padding: 25px 20px 120px;
   text-align: center;
 }
 
@@ -176,6 +176,12 @@ h1 {
   font-size: 17px;
   font-weight: 700;
   padding: 12px;
+
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
 }
 .boton-mapa {
   width: 100%;
@@ -393,4 +399,20 @@ h1 {
   color: white;
   font-size: 18px;
   font-weight: 800;
+}
+.eliminar-ficha {
+  width: 100%;
+  margin-top: 18px;
+  padding: 18px 12px;
+  font-size: 20px;
+  font-weight: bold;
+  border: 3px solid #b00020;
+  border-radius: 12px;
+  background-color: #d32f2f;
+  color: white;
+  cursor: pointer;
+}
+
+.eliminar-ficha:active {
+  transform: scale(0.98);
 }

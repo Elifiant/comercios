@@ -25,6 +25,48 @@ L.Icon.Default.mergeOptions({
 
 function App() {
   console.log('✅ Supabase está disponible:', supabase)
+    const cargarComerciosDesdeSupabase = async () => {
+    const { data, error } = await supabase
+      .from('comercios')
+      .select('*')
+      .order('id', { ascending: false })
+
+    if (error) {
+      console.error('❌ Error cargando comercios:', error)
+      return
+    }
+
+    if (data) {
+      const registrosSupabase = data.map((comercio) => ({
+        id: comercio.id,
+        fecha: comercio.fecha_registro,
+        latitud: comercio.latitud,
+        longitud: comercio.longitud,
+        precision: comercio.precision,
+        nombre: comercio.nombre || '',
+        contacto: comercio.contacto || '',
+        telefono: comercio.telefono || '',
+        whatsapp: comercio.whatsapp || '',
+        notas: comercio.notas || '',
+        ubicacionExactaLatitud:
+          comercio.ubicacion_exacta_latitud ?? null,
+        ubicacionExactaLongitud:
+          comercio.ubicacion_exacta_longitud ?? null,
+      }))
+
+      setRegistros(registrosSupabase)
+
+      localStorage.setItem(
+        'registrosComercios',
+        JSON.stringify(registrosSupabase)
+      )
+
+      console.log(
+        '☁️ Comercios cargados desde Supabase:',
+        registrosSupabase.length
+      )
+    }
+  }
   console.log('🚨 ESTA ES MI VERSION LOCAL')
     console.log('🔑 Supabase auth:', supabase.auth)
 
@@ -62,7 +104,11 @@ function App() {
   const [mostrarMapa, setMostrarMapa] = useState(false)
   const [registroSeleccionado, setRegistroSeleccionado] = useState(null)
   const [corregirUbicacion, setCorregirUbicacion] = useState(false)
-   useEffect(() => {
+    useEffect(() => {
+    cargarComerciosDesdeSupabase()
+  }, [])
+
+  useEffect(() => {
     let wakeLock = null
 
     const mantenerPantallaEncendida = async () => {
@@ -174,8 +220,7 @@ function App() {
             ubicacion_exacta_longitud:
               nuevoRegistro.ubicacionExactaLongitud,
           })
-          .select()
-          .single()
+ 
 
         if (error) {
   console.error('❌ Error guardando en Supabase:', error)
@@ -192,9 +237,13 @@ function App() {
 
         
       },
-      () => {
+      (error) => {
+        console.error('📍 ERROR DE GEOLOCALIZACIÓN:', error)
         setMensaje(
-          '❌ No pudimos obtener tu ubicación. Revisá los permisos.'
+          '❌ Error de ubicación: código ' +
+          error.code +
+          ' - ' +
+          error.message
         )
       },
       {
