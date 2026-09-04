@@ -25,7 +25,7 @@ L.Icon.Default.mergeOptions({
 
 function App() {
   console.log('✅ Supabase está disponible:', supabase)
-    const cargarComerciosDesdeSupabase = async () => {
+ const cargarComerciosDesdeSupabase = async () => {
     const { data, error } = await supabase
       .from('comercios')
       .select('*')
@@ -37,33 +37,74 @@ function App() {
     }
 
     if (data) {
-      const registrosSupabase = data.map((comercio) => ({
-        id: comercio.id,
-        fecha: comercio.fecha_registro,
-        latitud: comercio.latitud,
-        longitud: comercio.longitud,
-        precision: comercio.precision,
-        nombre: comercio.nombre || '',
-        contacto: comercio.contacto || '',
-        telefono: comercio.telefono || '',
-        whatsapp: comercio.whatsapp || '',
-        notas: comercio.notas || '',
-        ubicacionExactaLatitud:
-          comercio.ubicacion_exacta_latitud ?? null,
-        ubicacionExactaLongitud:
-          comercio.ubicacion_exacta_longitud ?? null,
-      }))
+      const eliminadosGuardados =
+        localStorage.getItem('comerciosEliminados')
 
-      setRegistros(registrosSupabase)
+      const comerciosEliminados = eliminadosGuardados
+        ? JSON.parse(eliminadosGuardados)
+        : []
+        console.log('🗑️ COMERCIOS ELIMINADOS:', comerciosEliminados)
+
+      const registrosSupabase = data
+        .filter(
+          (comercio) =>
+            !comerciosEliminados.includes(comercio.id)
+        )
+        .map((comercio) => ({
+          id: comercio.id,
+          fecha: comercio.fecha_registro,
+          latitud: comercio.latitud,
+          longitud: comercio.longitud,
+          precision: comercio.precision,
+          nombre: comercio.nombre || '',
+          contacto: comercio.contacto || '',
+          telefono: comercio.telefono || '',
+          whatsapp: comercio.whatsapp || '',
+          notas: comercio.notas || '',
+          ubicacionExactaLatitud:
+            comercio.ubicacion_exacta_latitud ?? null,
+          ubicacionExactaLongitud:
+            comercio.ubicacion_exacta_longitud ?? null,
+        }))
+
+      const registrosLocalesGuardados =
+        localStorage.getItem('registrosComercios')
+
+      const registrosLocales = registrosLocalesGuardados
+        ? JSON.parse(registrosLocalesGuardados)
+        : []
+
+      const mapaRegistros = new Map()
+
+      registrosLocales.forEach((registro) => {
+        if (!comerciosEliminados.includes(registro.id)) {
+          mapaRegistros.set(registro.id, registro)
+        }
+      })
+
+      registrosSupabase.forEach((registro) => {
+        mapaRegistros.set(registro.id, registro)
+      })
+
+      const registrosCombinados = Array.from(
+        mapaRegistros.values()
+      ).sort((a, b) => b.id - a.id)
+
+      setRegistros(registrosCombinados)
 
       localStorage.setItem(
         'registrosComercios',
-        JSON.stringify(registrosSupabase)
+        JSON.stringify(registrosCombinados)
       )
 
       console.log(
         '☁️ Comercios cargados desde Supabase:',
         registrosSupabase.length
+      )
+
+      console.log(
+        '🔄 Registros combinados:',
+        registrosCombinados.length
       )
     }
   }
@@ -156,7 +197,7 @@ function App() {
     oscilador.frequency.value = frecuencia
 
     ganancia.gain.setValueAtTime(
-      3.0,
+      10.0,
       audioContext.currentTime + inicio
     )
 
@@ -254,15 +295,19 @@ function App() {
     )
   }
 
-  const guardarFicha = async (datosActualizados) => {
+    const guardarFicha = async (datosActualizados) => {
     const nuevosRegistros = registros.map((registro) =>
       registro.id === datosActualizados.id
         ? datosActualizados
         : registro
     )
 
-    setRegistros(nuevosRegistros)
-    const { data, error } = await supabase
+   console.log('📍 UBICACIÓN QUE VOY A GUARDAR:', {
+  id: datosActualizados.id,
+  latitud: datosActualizados.ubicacionExactaLatitud,
+  longitud: datosActualizados.ubicacionExactaLongitud,
+})
+    const { error } = await supabase
       .from('comercios')
       .update({
         nombre: datosActualizados.nombre,
@@ -277,25 +322,11 @@ function App() {
       })
       .eq('id', datosActualizados.id)
 
-    localStorage.setItem(
-      'registrosComercios',
-      JSON.stringify(nuevosRegistros)
-    )
-
-    setRegistroSeleccionado(null)
-    setCorregirUbicacion(false)
-    setMensaje('✅ Ficha guardada correctamente')
-  }
-  const eliminarComercio = (id) => {
-    const confirmar = window.confirm(
-      '¿Seguro que querés eliminar este comercio?'
-    )
-
-    if (!confirmar) return
-
-    const nuevosRegistros = registros.filter(
-      (registro) => registro.id !== id
-    )
+    if (error) {
+      console.error('❌ Error actualizando comercio:', error)
+      setMensaje('❌ SUPABASE: ' + error.message)
+      return
+    }
 
     setRegistros(nuevosRegistros)
 
@@ -306,9 +337,69 @@ function App() {
 
     setRegistroSeleccionado(null)
     setCorregirUbicacion(false)
-    setMensaje('🗑️ Comercio eliminado')
+    setMensaje('✅ Ficha guardada correctamente')
+  }
+const eliminarComercio = async (id) => {
+  const confirmar = window.confirm(
+    '¿Seguro que querés eliminar este comercio?'
+  )
+
+  if (!confirmar) return
+
+  const { error } = await supabase
+    .from('comercios')
+    .delete()
+    .eq('id', id)
+
+  if (error) {
+    console.error('❌ Error eliminando comercio:', error)
+    setMensaje('❌ SUPABASE: ' + error.message)
+    return
   }
 
+  // Guardamos el ID como texto para evitar problemas
+  // si Supabase lo devuelve como número o como texto.
+  const idEliminado = String(id)
+
+  const eliminadosGuardados =
+    localStorage.getItem('comerciosEliminados')
+
+  const comerciosEliminados = eliminadosGuardados
+    ? JSON.parse(eliminadosGuardados)
+    : []
+
+  const idsNormalizados =
+    comerciosEliminados.map((id) => String(id))
+
+  if (!idsNormalizados.includes(idEliminado)) {
+    idsNormalizados.push(idEliminado)
+  }
+
+  localStorage.setItem(
+    'comerciosEliminados',
+    JSON.stringify(idsNormalizados)
+  )
+
+  const nuevosRegistros = registros.filter(
+    (registro) => String(registro.id) !== idEliminado
+  )
+
+  setRegistros(nuevosRegistros)
+
+  localStorage.setItem(
+    'registrosComercios',
+    JSON.stringify(nuevosRegistros)
+  )
+
+  setRegistroSeleccionado(null)
+  setCorregirUbicacion(false)
+  setMensaje('🗑️ Comercio eliminado correctamente')
+
+  console.log(
+    '🗑️ ID eliminado guardado:',
+    idEliminado
+  )
+}
   if (modoManejo) {
     return (
       <div className="modo-manejo">
@@ -539,9 +630,9 @@ function App() {
                 <p>🕐 {registro.fecha}</p>
 
                 <p>
-                  📍 {registro.latitud.toFixed(6)},{' '}
-                  {registro.longitud.toFixed(6)}
-                </p>
+  📍 {(registro.ubicacionExactaLatitud ?? registro.latitud).toFixed(6)},{' '}
+  {(registro.ubicacionExactaLongitud ?? registro.longitud).toFixed(6)}
+</p>
 
                 <p className="editar-texto">
                   ✏️ Tocar para editar
