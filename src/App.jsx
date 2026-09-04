@@ -25,89 +25,48 @@ L.Icon.Default.mergeOptions({
 
 function App() {
   console.log('✅ Supabase está disponible:', supabase)
- const cargarComerciosDesdeSupabase = async () => {
-    const { data, error } = await supabase
-      .from('comercios')
-      .select('*')
-      .order('id', { ascending: false })
+const cargarComerciosDesdeSupabase = async () => {
+  const { data, error } = await supabase
+    .from('comercios')
+    .select('*')
+    .order('id', { ascending: false })
 
-    if (error) {
-      console.error('❌ Error cargando comercios:', error)
-      return
-    }
-
-    if (data) {
-      const eliminadosGuardados =
-        localStorage.getItem('comerciosEliminados')
-
-      const comerciosEliminados = eliminadosGuardados
-        ? JSON.parse(eliminadosGuardados)
-        : []
-        console.log('🗑️ COMERCIOS ELIMINADOS:', comerciosEliminados)
-
-      const registrosSupabase = data
-        .filter(
-          (comercio) =>
-            !comerciosEliminados.includes(comercio.id)
-        )
-        .map((comercio) => ({
-          id: comercio.id,
-          fecha: comercio.fecha_registro,
-          latitud: comercio.latitud,
-          longitud: comercio.longitud,
-          precision: comercio.precision,
-          nombre: comercio.nombre || '',
-          contacto: comercio.contacto || '',
-          telefono: comercio.telefono || '',
-          whatsapp: comercio.whatsapp || '',
-          notas: comercio.notas || '',
-          ubicacionExactaLatitud:
-            comercio.ubicacion_exacta_latitud ?? null,
-          ubicacionExactaLongitud:
-            comercio.ubicacion_exacta_longitud ?? null,
-        }))
-
-      const registrosLocalesGuardados =
-        localStorage.getItem('registrosComercios')
-
-      const registrosLocales = registrosLocalesGuardados
-        ? JSON.parse(registrosLocalesGuardados)
-        : []
-
-      const mapaRegistros = new Map()
-
-      registrosLocales.forEach((registro) => {
-        if (!comerciosEliminados.includes(registro.id)) {
-          mapaRegistros.set(registro.id, registro)
-        }
-      })
-
-      registrosSupabase.forEach((registro) => {
-        mapaRegistros.set(registro.id, registro)
-      })
-
-      const registrosCombinados = Array.from(
-        mapaRegistros.values()
-      ).sort((a, b) => b.id - a.id)
-
-      setRegistros(registrosCombinados)
-
-      localStorage.setItem(
-        'registrosComercios',
-        JSON.stringify(registrosCombinados)
-      )
-
-      console.log(
-        '☁️ Comercios cargados desde Supabase:',
-        registrosSupabase.length
-      )
-
-      console.log(
-        '🔄 Registros combinados:',
-        registrosCombinados.length
-      )
-    }
+  if (error) {
+    console.error('❌ Error cargando comercios:', error)
+    return
   }
+
+  if (data) {
+    const registrosSupabase = data.map((comercio) => ({
+      id: comercio.id,
+      fecha: comercio.fecha_registro,
+      latitud: comercio.latitud,
+      longitud: comercio.longitud,
+      precision: comercio.precision,
+      nombre: comercio.nombre || '',
+      contacto: comercio.contacto || '',
+      telefono: comercio.telefono || '',
+      whatsapp: comercio.whatsapp || '',
+      notas: comercio.notas || '',
+      ubicacionExactaLatitud:
+        comercio.ubicacion_exacta_latitud ?? null,
+      ubicacionExactaLongitud:
+        comercio.ubicacion_exacta_longitud ?? null,
+    }))
+
+    setRegistros(registrosSupabase)
+
+    localStorage.setItem(
+      'registrosComercios',
+      JSON.stringify(registrosSupabase)
+    )
+
+    console.log(
+      '☁️ Comercios cargados desde Supabase:',
+      registrosSupabase.length
+    )
+  }
+}
   console.log('🚨 ESTA ES MI VERSION LOCAL')
     console.log('🔑 Supabase auth:', supabase.auth)
 
