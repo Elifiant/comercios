@@ -1,134 +1,141 @@
 const fs = require('fs');
+
 let code = fs.readFileSync('src/App.jsx', 'utf8');
 
-// 1. Inyectar vista completa de Modo Manejo con Mapa Leaflet, GPS en vivo y boton gigante
-const modoManejoNuevo = `      {modoManejo && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: '#0f172a', color: '#fff', display: 'flex', flexDirection: 'column' }}>
-          {/* Barra superior de control */}
-          <div style={{ padding: '12px 16px', background: '#1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155' }}>
+// 1. REEMPLAZO DEL BLOQUE MODO MANEJO POR EL MAPA COMPLETO DE LEAFLET
+const startMM = code.indexOf('if (modoManejo) {');
+const endMM = code.indexOf('\n  return (', startMM);
+
+if (startMM !== -1 && endMM !== -1) {
+  const nuevoModoManejo = `if (modoManejo) {
+    return (
+      <div style={{ height: '100vh', width: '100vw', backgroundColor: '#020617', color: '#fff', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+        {/* Cabecera flotante */}
+        <header style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000, padding: '12px 16px', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+          <div>
+            <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#38bdf8', letterSpacing: '1px', textTransform: 'uppercase' }}>🚗 Modo Manejo Activo</span>
+            <div style={{ fontSize: '13px', color: '#94a3b8' }}>{comercios.length} comercios en radar</div>
+          </div>
+          <button 
+            onClick={() => setModoManejo(false)} 
+            style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
+          >
+            ✕ Salir
+          </button>
+        </header>
+
+        {/* Alerta flotante de comercio cercano si existe */}
+        {comercioCercano && (
+          <div style={{ position: 'absolute', top: '70px', left: '16px', right: '16px', zIndex: 1000, background: '#15803d', color: '#fff', padding: '14px 18px', borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: 'pulse 1.5s infinite' }}>
             <div>
-              <div style={{ fontWeight: 'bold', fontSize: '16px', color: '#38bdf8' }}>🚗 Modo Manejo Activo</div>
-              <div style={{ fontSize: '12px', color: '#94a3b8' }}>GPS en vivo • Radar de cercanía</div>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', opacity: 0.9 }}>📍 ¡Comercio muy cercano!</div>
+              <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{comercioCercano.nombre || 'Comercio'}</div>
+              <div style={{ fontSize: '12px', opacity: 0.9 }}>A solo {comercioCercano.distancia} metros</div>
             </div>
             <button 
-              onClick={() => setModoManejo(false)} 
-              style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
+              onClick={() => setComercioSeleccionado(comercioCercano)}
+              style={{ background: '#fff', color: '#15803d', border: 'none', padding: '8px 14px', borderRadius: '10px', fontWeight: 'bold', fontSize: '13px' }}
             >
-              Salir
+              Ver Ficha
             </button>
           </div>
+        )}
 
-          {/* Mapa Leaflet interactivo en vivo */}
-          <div style={{ flex: 1, position: 'relative', width: '100%' }}>
-            {ubicacionActual ? (
-              <MapContainer 
-                center={ubicacionActual} 
-                zoom={17} 
-                style={{ width: '100%', height: '100%' }}
-                zoomControl={false}
-              >
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <Marker position={ubicacionActual}>
-                  <Popup>📍 Estás aquí (Vehículo)</Popup>
+        {/* Mapa interactivo de Leaflet */}
+        <div style={{ flex: 1, width: '100%', height: '100%' }}>
+          <MapContainer 
+            center={posicionGPS || [-34.6037, -58.3816]} 
+            zoom={17} 
+            zoomControl={false}
+            style={{ width: '100%', height: '100%' }}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            
+            {/* Marcador del auto / usuario */}
+            {posicionGPS && (
+              <Marker position={posicionGPS}>
+                <Popup>Tu ubicación actual</Popup>
+              </Marker>
+            )}
+
+            {/* Marcadores de los comercios */}
+            {comercios.map((c) => {
+              const lat = parseFloat(c.ubicacion_exacta_latitud || c.latitud);
+              const lng = parseFloat(c.ubicacion_exacta_longitud || c.longitud);
+              if (isNaN(lat) || isNaN(lng)) return null;
+              return (
+                <Marker key={c.id} position={[lat, lng]}>
+                  <Popup>
+                    <div style={{ color: '#0f172a' }}>
+                      <strong>{c.nombre || 'Sin nombre'}</strong><br/>
+                      {c.rubro || 'General'}<br/>
+                      <button onClick={() => setComercioSeleccionado(c)} style={{ marginTop: '6px', background: '#2563eb', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>Abrir</button>
+                    </div>
+                  </Popup>
                 </Marker>
-                {comercios.map(c => {
-                  const lat = c.ubicacion_exacta_latitud || c.latitud;
-                  const lng = c.ubicacion_exacta_longitud || c.longitud;
-                  if (!lat || !lng) return null;
-                  return (
-                    <Marker key={c.id} position={[lat, lng]}>
-                      <Popup>
-                        <strong>{c.nombre || 'Comercio'}</strong><br/>
-                        {c.rubro || 'General'}
-                      </Popup>
-                    </Marker>
-                  );
-                })}
-              </MapContainer>
-            ) : (
-              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '15px' }}>
-                📡 Buscando señal GPS...
-              </div>
-            )}
-
-            {/* Tarjeta flotante de proximidad si hay un comercio cerca */}
-            {comercioCercano && (
-              <div style={{ position: 'absolute', top: 12, left: 12, right: 12, zIndex: 1000, background: 'rgba(15, 23, 42, 0.95)', border: '2px solid #38bdf8', padding: '14px', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
-                <div style={{ color: '#38bdf8', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🚨 Comercio Cercano Detectado</div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '2px', color: '#fff' }}>{comercioCercano.nombre || 'Comercio'}</div>
-                <div style={{ fontSize: '13px', color: '#94a3b8' }}>Rubro: {comercioCercano.rubro || 'General'}</div>
-              </div>
-            )}
-          </div>
-
-          {/* Boton gigante para registrar comercio en marcha */}
-          <div style={{ padding: '16px', background: '#1e293b', borderTop: '1px solid #334155' }}>
-            <button 
-              onClick={guardarComercioRapido} 
-              style={{ width: '100%', minHeight: '85px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '16px', fontSize: '20px', fontWeight: 'bold', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', boxShadow: '0 4px 16px rgba(37,99,235,0.4)', cursor: 'pointer' }}
-            >
-              <span>➕ REGISTRAR COMERCIO AQUÍ</span>
-              <span style={{ fontSize: '12px', fontWeight: 'normal', opacity: 0.85 }}>Captura GPS exacto con un toque</span>
-            </button>
-          </div>
+              );
+            })}
+          </MapContainer>
         </div>
-      )}`;
 
-// Reemplazar bloque de modo manejo viejo
-code = code.replace(/\{modoManejo && \([\s\S]*?recorriendo ruta[\s\S]*?\)\}/g, modoManejoNuevo);
+        {/* Botón Gigante de Guardar Comercio */}
+        <div style={{ position: 'absolute', bottom: '24px', left: '16px', right: '16px', zIndex: 1000 }}>
+          <button 
+            onClick={agregarComercioInmediato} 
+            style={{ width: '100%', height: '84px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '22px', fontSize: '20px', fontWeight: '900', boxShadow: '0 8px 30px rgba(37,99,235,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer' }}
+          >
+            <span style={{ fontSize: '28px' }}>➕</span> GUARDAR COMERCIO AQUÍ
+          </button>
+        </div>
+      </div>
+    );
+  }`;
 
-// 2. Mejorar tarjetas de la lista principal con fotos, rubros, direccion y WhatsApp directo
-const tarjetaComercioNueva = `            <div key={c.id} style={{ display: 'flex', gap: '12px', background: '#fff', padding: '12px', borderRadius: '12px', marginBottom: '10px', boxShadow: '0 2px 6px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', alignItems: 'center' }}>
+  code = code.slice(0, startMM) + nuevoModoManejo + code.slice(endMM);
+  console.log('✅ MODO_MANEJO_ACTUALIZADO_CON_MAPA');
+}
+
+// 2. REEMPLAZO DE LA LISTA DE COMERCIOS PARA MOSTRAR MINIATURA DE FOTO
+const targetItem = 'onClick={() => setComercioSeleccionado(c)}';
+const idxItem = code.indexOf(targetItem);
+
+if (idxItem !== -1) {
+  // Buscamos el bloque del div de la tarjeta
+  const cardStart = code.lastIndexOf('<div', idxItem);
+  const cardEnd = code.indexOf('</div>', idxItem + 200);
+  
+  if (cardStart !== -1 && cardEnd !== -1) {
+    const nuevaTarjeta = `<div
+              key={c.id}
+              onClick={() => setComercioSeleccionado(c)}
+              style={{ padding: '12px', background: '#131b2e', borderRadius: '16px', border: '1px solid #1e293b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}
+            >
               {/* Miniatura de Foto o Icono */}
-              <div style={{ width: '64px', height: '64px', borderRadius: '8px', overflow: 'hidden', background: '#f1f5f9', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '56px', height: '56px', borderRadius: '12px', backgroundColor: '#1e293b', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {c.foto_url ? (
-                  <img src={c.foto_url} alt="Fachada" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <img src={c.foto_url} alt="Comercio" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
                   <span style={{ fontSize: '24px' }}>🏪</span>
                 )}
               </div>
 
-              {/* Datos principales */}
+              {/* Información */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <h3 style={{ margin: '0 0 3px 0', fontSize: '15px', fontWeight: 'bold', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {c.nombre || 'Comercio sin nombre'}
-                </div>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '3px', flexWrap: 'wrap' }}>
-                  <span style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '11px', padding: '2px 8px', borderRadius: '6px', fontWeight: '600' }}>
-                    {c.rubro || 'General'}
-                  </span>
-                  {c.direccion && (
-                    <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>
-                      📍 {c.direccion}
-                    </span>
-                  )}
-                </div>
+                </h3>
+                <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {c.rubro || 'General'} {c.direccion ? '• ' + c.direccion : ''}
+                </p>
               </div>
 
-              {/* Acciones rapidas: WhatsApp y Abrir Ficha */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0 }}>
-                {c.telefono && (
-                  <button 
-                    onClick={() => {
-                      const num = c.telefono.replace(/\\D/g, '');
-                      window.open('https://wa.me/' + num, '_blank');
-                    }}
-                    style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
-                  >
-                    WA
-                  </button>
-                )}
-                <button 
-                  onClick={() => setComercioSeleccionado(c)} 
-                  style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  Ver
-                </button>
-              </div>
+              <span style={{ fontSize: '20px', color: '#475569', paddingRight: '4px' }}>›</span>
             </div>`;
 
-// Reemplazar el renderizado de la tarjeta en la lista
-code = code.replace(/\{listaFiltrada\.map\(c => \([\s\S]*?\}\)\)/, '{listaFiltrada.map(c => (\n' + tarjetaComercioNueva + '\n          ))}');
+    code = code.slice(0, cardStart) + nuevaTarjeta + code.slice(cardEnd + 6);
+    console.log('✅ LISTA_ACTUALIZADA_CON_MINIATURAS');
+  }
+}
 
 fs.writeFileSync('src/App.jsx', code, 'utf8');
-console.log('🎉 APP_ACTUALIZADA_CON_FOTOS_Y_MAPA_DE_MANEJO');
+console.log('🎉 APP_JSX_ACTUALIZADO_CON_EXITO');

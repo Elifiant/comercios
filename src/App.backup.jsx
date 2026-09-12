@@ -295,108 +295,35 @@ export default function App() {
 
   if (modoManejo) {
     return (
-      <div style={{ height: '100vh', width: '100vw', backgroundColor: '#020617', color: '#fff', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-        {/* Cabecera flotante */}
-        <header style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000, padding: '12px 16px', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-          <div>
-            <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#38bdf8', letterSpacing: '1px', textTransform: 'uppercase' }}>🚗 Modo Manejo Activo</span>
-            <div style={{ fontSize: '13px', color: '#94a3b8' }}>{comercios.length} comercios en radar</div>
-          </div>
-          <button 
-            onClick={() => setModoManejo(false)} 
-            style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
-          >
-            ✕ Salir
-          </button>
+      <div style={{ height: '100vh', backgroundColor: '#020617', color: '#fff', display: 'flex', flexDirection: 'column' }}>
+        <header style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b' }}>
+          <h1 style={{ margin: 0, fontSize: '18px', color: '#38bdf8' }}>🙗 MODO MANEJO</h1>
+          <button onClick={() => setModoManejo(false)} style={{ background: '#334155', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px' }}>✕ Salir</button>
         </header>
-
-        {/* Alerta flotante de comercio cercano si existe */}
-        {comercioCercano && (
-          <div style={{ position: 'absolute', top: '70px', left: '16px', right: '16px', zIndex: 1000, background: '#15803d', color: '#fff', padding: '14px 18px', borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: 'pulse 1.5s infinite' }}>
-            <div>
-              <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', opacity: 0.9 }}>📍 ¡Comercio muy cercano!</div>
-              <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{comercioCercano.nombre || 'Comercio'}</div>
-              <div style={{ fontSize: '12px', opacity: 0.9 }}>A solo {comercioCercano.distancia} metros</div>
+        <div style={{ padding: '16px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          {comercioCercano ? (
+            <div style={{ padding: '20px', borderRadius: '16px', background: '#1e293b', border: '2px solid #22c55e', textAlign: 'center' }}>
+              <h2>🝔 ¡Cercano!</h2>
+              <p style={{ fontSize: '18px', fontWeight: 'bold' }}>{comercioCercano.nombre}</p>
+              <p>A {comercioCercano.distancia} metros</p>
+              <button onClick={() => setComercioSeleccionado(comercioCercano)} style={{ padding: '12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', width: '100%' }}>Abrir Ficha</button>
             </div>
-            <button 
-              onClick={() => setComercioSeleccionado(comercioCercano)}
-              style={{ background: '#fff', color: '#15803d', border: 'none', padding: '8px 14px', borderRadius: '10px', fontWeight: 'bold', fontSize: '13px' }}
-            >
-              Ver Ficha
-            </button>
-          </div>
-        )}
-
-        {/* Mapa interactivo de Leaflet */}
-        <div style={{ flex: 1, width: '100%', height: '100%' }}>
-          <MapContainer 
-            center={posicionGPS || [-34.6037, -58.3816]} 
-            zoom={17} 
-            zoomControl={false}
-            style={{ width: '100%', height: '100%' }}
-          >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            
-            {/* Marcador del auto / usuario */}
-            {posicionGPS && (
-              <Marker position={posicionGPS}>
-                <Popup>Tu ubicación actual</Popup>
-              </Marker>
-            )}
-
-            {/* Marcadores de los comercios */}
-            {comercios.map((c) => {
-              const lat = parseFloat(c.ubicacion_exacta_latitud || c.latitud);
-              const lng = parseFloat(c.ubicacion_exacta_longitud || c.longitud);
-              if (isNaN(lat) || isNaN(lng)) return null;
-              return (
-                <Marker key={c.id} position={[lat, lng]}>
-                  <Popup>
-                    <div
-              key={c.id}
-              onClick={() => setComercioSeleccionado(c)}
-              style={{ padding: '12px', background: '#131b2e', borderRadius: '16px', border: '1px solid #1e293b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}
-            >
-              {/* Miniatura de Foto o Icono */}
-              <div style={{ width: '56px', height: '56px', borderRadius: '12px', backgroundColor: '#1e293b', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {c.foto_url ? (
-                  <img src={c.foto_url} alt="Comercio" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <span style={{ fontSize: '24px' }}>🏪</span>
-                )}
-              </div>
-
-              {/* Información */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <h3 style={{ margin: '0 0 3px 0', fontSize: '15px', fontWeight: 'bold', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {c.nombre || 'Comercio sin nombre'}
-                </h3>
-                <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {c.rubro || 'General'} {c.direccion ? '• ' + c.direccion : ''}
-                </p>
-              </div>
-
-              <span style={{ fontSize: '20px', color: '#475569', paddingRight: '4px' }}>›</span>
+          ) : (
+            <div style={{ textAlign: 'center', color: '#64748b' }}>
+              <div style={{ fontSize: '40px' }}>➽</div>
+              <p>Recorriendo ruta... aviso por cercania activo</p>
             </div>
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
+          )}
         </div>
-
-        {/* Botón Gigante de Guardar Comercio */}
-        <div style={{ position: 'absolute', bottom: '24px', left: '16px', right: '16px', zIndex: 1000 }}>
-          <button 
-            onClick={agregarComercioInmediato} 
-            style={{ width: '100%', height: '84px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '22px', fontSize: '20px', fontWeight: '900', boxShadow: '0 8px 30px rgba(37,99,235,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer' }}
-          >
-            <span style={{ fontSize: '28px' }}>➕</span> GUARDAR COMERCIO AQUÍ
+        <div style={{ padding: '20px' }}>
+          <button onClick={agregarComercioInmediato} style={{ width: '100%', height: '90px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '18px', fontSize: '20px', fontWeight: '900' }}>
+            ➕ GUARDAR COMERCIO AQUI
           </button>
         </div>
       </div>
     );
   }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', display: 'flex', flexDirection: 'column' }}>
       <header style={{ padding: '16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
