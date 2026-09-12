@@ -328,7 +328,58 @@ export default function App() {
   });
 
   
-    if (comercioSeleccionado) {
+      if (editandoUbicacion && comercioSeleccionado) {
+    const posInicial = [
+      Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719),
+      Number(comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.265)
+    ];
+
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#0b1120', color: '#fff' }}>
+        <header style={{ padding: '12px 16px', background: '#0f172a', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1000 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '15px', fontWeight: 'bold', color: '#f8fafc' }}>Ajustar Ubicación</h2>
+            <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>Arrastrá el pin hasta la puerta del local</p>
+          </div>
+          <button
+            onClick={() => setEditandoUbicacion(false)}
+            style={{ background: '#334155', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            ✕ Volver
+          </button>
+        </header>
+
+        <div style={{ flex: 1, position: 'relative', width: '100%' }}>
+          <MapContainer center={posInicial} zoom={18} style={{ height: '100%', width: '100%' }}>
+            <TileLayer
+              attribution='&copy; OpenStreetMap contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            <MarcadorArrastrable
+              posicion={posInicial}
+              setPosicion={(nuevaPos) => {
+                actualizarUbicacionComercio(nuevaPos);
+              }}
+            />
+          </MapContainer>
+        </div>
+
+        <div style={{ padding: '16px', background: '#0f172a', borderTop: '1px solid #1e293b' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setEditandoUbicacion(false);
+            }}
+            style={{ width: '100%', padding: '14px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
+          >
+            ✓ Confirmar y Volver a la Ficha
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (comercioSeleccionado) {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif', paddingBottom: '40px' }}>
         <header style={{ padding: '14px 16px', background: '#131b2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', position: 'sticky', top: 0, zIndex: 10 }}>
