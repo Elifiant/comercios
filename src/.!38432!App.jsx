@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { wuseState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
-const Marcar = () => null;
+Markar=()=>null;
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -126,7 +126,7 @@ export default function App() {
       };
       const { data, error } = await supabase.from('comercios').insert([nuevo]).select();
       if (!error && data) {
-        setComercios(data[0] ? [data[0], ...comercios] : comercios);
+        setComercios([data[0], ...comercios]);
         setComercioSeleccionado(data[0]);
         reproducirAlerta();
       } else {
@@ -157,14 +157,12 @@ export default function App() {
     if (!error) {
       setComercios(comercios.filter((c) => c.id !== id));
       setComercioSeleccionado(null);
-      return;
     }
   };
 
   const guardarUbicacionExacta = async () => {
     if (!nuevaPosicion) return;
     const { error } = await supabase.from('comercios').update({
-      nombre: comercioSeleccionado.nombre,
       ubicacion_exacta_latitud: nuevaPosicion[0],
       ubicacion_exacta_longitud: nuevaPosicion[1],
     }).eq('id', comercioSeleccionado.id);
@@ -208,21 +206,22 @@ export default function App() {
     return (c.nombre || '').toLowerCase().includes(t) || (c.rubro || '').toLowerCase().includes(t) || (c.direccion || '').toLowerCase().includes(t);
   });
 
+
   if (editandoUbicacion && comercioSeleccionado) {
     const lat = comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.6037;
     const lng = comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.3816;
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', color: '#fff' }}>
+      <div style:{{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', color: '#fff' }}>
         <header style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b' }}>
-          <button onClick={() => setEditandoUbicacion(false)} style={{ background: '#1e293b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>← Volver</button>
+          <button onClick={() => setEditandoUbicacion(false)} style:{{ background: '#1e293b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>← Volver</button>
           <div style={{ textAlign: 'center' }}>
             <h2 style={{ margin: 0, fontSize: '15px' }}>Ajustar Ubicacion</h2>
             <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>{comercioSeleccionado.nombre}</p>
           </div>
-          <button onClick={guardarUbicacionExacta} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>Guardar</button>
+          <button onClick={guardarUbicacionExacta} style:{{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>Guardar</button>
         </header>
         <div style={{ flex: 1, position: 'relative' }}>
-          <MapContainer center={[lat, lng]} zoom={18} style={{ height: '100%', width: '100%' }}>
+          <MapContainer center={[lat, lng]} zoom={18} style:{{ height: '100%', width: '100%' }}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="OSM" />
             <MarcadorArrastrable posicion={nuevaPosicion || [lat, lng]} setPosicion={setNuevaPosicion} />
           </MapContainer>
@@ -235,19 +234,19 @@ export default function App() {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', paddingBottom: '30px' }}>
         <header style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b' }}>
-          <button onClick={() => setComercioSeleccionado(null)} style={{ background: '#1e293b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>← Lista</button>
+          <button onClick={() => setComercioSeleccionado(null)} style:{{ background: '#1e293b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>← Lista</button>
           <h2 style={{ margin: 0, fontSize: '16px' }}>Ficha de Comercio</h2>
-          <button onClick={() => eliminarComercio(comercioSeleccionado.id)} style={{ background: '#7f1d1e', color: '#fecaca', border: 'none', padding: '8px 12px', borderRadius: '8px' }}>Eliminar</button>
+          <button onClick={() => eliminarComercio(comercioSeleccionado.id)} style:{{ background: '#7f1d1d', color: '#fecaca', border: 'none', padding: '8px 12px', borderRadius: '8px' }}>Eliminar</button>
         </header>
-        <div style={{ padding: '16px', maxWidth: '500px', margin: '0 auto' }}>
-          <div style={{ marginBottom: '20px', borderRadius: '14px', overflow: 'hidden', border: '1px solid #1e293b', background: '#131b2e' }}>
+        <div style:{{ padding: '16px', maxWidth: '500px', margin: '0 auto' }}>
+          <div style:{{ marginBottom: '20px', borderRadius: '14px', overflow: 'hidden', border: '1px solid #1e293b', background: '#131b2e' }}>
             {comercioSeleccionado.foto_url ? (
               <img src={comercioSeleccionado.foto_url} alt="Fachada" style={{ width: '100%', height: '220px', objectFit: 'cover' }} />
             ) : (
               <div style={{ height: '140px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Sin foto</div>
-            )}
+           #)}
             <div style={{ padding: '10px 14px', background: '#0b1120', display: 'flex', justifyContent: 'space-between' }}>
-              <label style={{ cursor: 'pointer', background: '#2563eb', color: '#fff', padding: '8px 14px', borderRadius: '8px', fontSize: '13px' }}>
+              <label style:{{ cursor: 'pointer', background: '#2563eb', color: '#fff', padding: '8px 14px', borderRadius: '8px', fontSize: '13px' }}>
                 📷 {comercioSeleccionado.foto_url ? 'Cambiar Foto' : 'Tomar Foto'}
                 <input type="file" accept="image/*" capture="environment" onChange={manejarSubidaFoto} style={{ display: 'none' }} />
               </label>
@@ -256,138 +255,10 @@ export default function App() {
               )}
             </div>
           </div>
-          <button onClick={() => {
+          <button onClick={{() => {
             setNuevaPosicion([
               comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.6037,
               comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.3816,
             ]);
             setEditandoUbicacion(true);
-          }} style={{ width: '100%', marginBottom: '20px', padding: '14px', background: '#1e293b', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '12px', fontWeight: 'bold' }}>
-           �d Corregir Ubicacion en Mapa
-          </button>
-          <form onSubmit={guardarEdicion} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>NOMBRE</label>
-              <input type="text" value={comercioSeleccionado.nombre || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, nombre: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>RUBRO</label>
-              <input type="text" value={comercioSeleccionado.rubro || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, rubro: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>TELEFONO</label>
-              <input type="text" value={comercioSeleccionado.telefono || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, telefono: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>DIRECCION</label>
-              <input type="text" value={comercioSeleccionado.direccion || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, direccion: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>NOTAS</label>
-              <textarea rows={3} value={comercioSeleccionado.nomas || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, notas: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <button type="submit" style={{ padding: '14px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold' }}>GUARDAR CAMBIOS</button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  if (modoManejo) {
-    return (
-      <div style={{ height: '100vh', backgroundColor: '#020617', color: '#fff', display: 'flex', flexDirection: 'column' }}>
-        <header style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b' }}>
-          <h1 style={{ margin: 0, fontSize: '18px', color: '#38bdf8' }}>🙗 MODO MANEJO</h1>
-          <button onClick={() => setModoManejo(false)} style={{ background: '#334155', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px' }}>✕ Salir</button>
-        </header>
-        <div style={{ padding: '16px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          {comercioCercano ? (
-            <div style={{ padding: '20px', borderRadius: '16px', background: '#1e293b', border: '2px solid #22c55e', textAlign: 'center' }}>
-              <h2>🝔 ¡Cercano!</h2>
-              <p style={{ fontSize: '18px', fontWeight: 'bold' }}>{comercioCercano.nombre}</p>
-              <p>A {comercioCercano.distancia} metros</p>
-              <button onClick={() => setComercioSeleccionado(comercioCercano)} style={{ padding: '12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', width: '100%' }}>Abrir Ficha</button>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', color: '#64748b' }}>
-              <div style={{ fontSize: '40px' }}>➽</div>
-              <p>Recorriendo ruta... aviso por cercania activo</p>
-            </div>
-          )}
-        </div>
-        <div style={{ padding: '20px' }}>
-          <button onClick={agregarComercioInmediato} style={{ width: '100%', height: '90px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '18px', fontSize: '20px', fontWeight: '900' }}>
-            ➕ GUARDAR COMERCIO AQUI
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ padding: '16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '18px' }}>📉 RutaComercio</h1>
-          <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>{comercios.length} comercios</p>
-        </div>
-        <button onClick={() => setModoManejo(true)} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold' }}>🙗 Modo Manejo</button>
-      </header>
-      <div style={{ padding: '10px 16px', background: '#131b2e', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <span style={{ fontSize: '11px', color: '#94a3b8' }}>JORNADA:</span>
-          <p style={{ margin: 0, fontSize: '13px', fontWeight: 'bold', color: jornadaActiva ? '#4ade80' : '#f87171' }}>{jornadaActiva ? '🟭 Activa (' + horaInicioJornada + ')' : '🟴 Inactiva'}</p>
-        </div>
-        <button onClick={() => {
-          if (!jornadaActiva) {
-            setJornadaActiva(true);
-            setHoraInicioJornada(new Date().toLocaleTimeString([], { hour: '2digit', minute: '2digit' }));
-          } else {
-            if (window.confirm('Cerrar jornada?')) setJornadaActiva(false);
-          }
-        }}>
-          {jornadaActiva ? "Cerrar Jornada" : "Iniciar Jornada"}
-        </button>
-      </div>
-
-      <div style={{ padding: '12px 16px', background: '#090d16' }}>
-        <input
-          type="text"
-          placeholder="🔍 Buscar por nombre, rubro o calle..."
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-        />
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 16px 80px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {cargando ? (
-          <p style={{ textAlign: 'center', color: '#94a3b8', marginTop: '30px' }}>Cargando comercios...</p>
-        ) : listaFiltrada.length === 0 ? (
-          <p style={{ textAlign: 'center', color: '#64748b', marginTop: '30px' }}>No se encontraron comercios</p>
-        ) : (
-          listaFiltrada.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => setComercioSeleccionado(c)}
-              style={{ padding: '14px', background: '#131b2e', borderRadius: '12px', border: '1px solid #1e293b', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-            >
-              <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: '15px', color: '#f8fafc' }}>{c.nombre || 'Comercio sin nombre'}</h3>
-                <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8' }}>{c.rubro || 'General'} {c.direccion ? '• ' + c.direccion : ''}</p>
-              </div>
-              <span style={{ fontSize: '18px', color: '#64748b' }}>›</span>
-            </div>
-          ))
-        )}
-      </div>
-
-      <button
-        onClick={agregarComercioInmediato}
-        style={{ position: 'fixed', bottom: '24px', right: '20px', width: '56px', height: '56px', borderRadius: '28px', background: '#2563eb', color: '#fff', border: 'none', fontSize: '26px', boxShadow: '0 4px 14px rgba(37,99,235,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-      >
-        ➕
-      </button>
-    </div>
-  );
-}
+          }} style:{{ width: '100%', marginBottom: '20px', padding: '14px', background: '#1e293b', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '12px', fontWeight: 'bold' }}>
