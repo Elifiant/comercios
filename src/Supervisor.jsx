@@ -1,0 +1,1 @@
+export default function Supervisor() { return <div>Panel Supervisor</div>; }

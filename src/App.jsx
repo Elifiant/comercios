@@ -1,3 +1,4 @@
+import Supervisor from './Supervisor';
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
@@ -33,6 +34,10 @@ function MarcadorArrastrable({ posicion, setPosicion }) {
 }
 
 export default function App() {
+  if (typeof window !== 'undefined' && window.location.pathname.includes('supervisor')) {
+    return <Supervisor />;
+  }
+
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -508,7 +513,8 @@ if (modoManejo) {
     const centroDefecto = posicionActual || (comercios.length > 0 && comercios[0].latitud ? [comercios[0].latitud, comercios[0].longitud] : [-34.6037, -58.3816]);
     return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif' }}>
-        <header style={{ padding: '12px 16px', background: '#131b2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b' }}>
+        {/* Cabecera compacta de Modo Manejo */}
+        <header style={{ padding: '10px 16px', background: '#131b2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b' }}>
           <div>
             <span style={{ fontSize: '15px', fontWeight: 'bold' }}>🚗 Modo Manejo</span>
             <p style={{ margin: 0, fontSize: '11px', color: '#38bdf8' }}>GPS en vivo • Alerta de cercanía</p>
@@ -521,7 +527,87 @@ if (modoManejo) {
           </button>
         </header>
 
-        <div style={{ height: '48vh', width: '100%', position: 'relative', background: '#0f172a' }}>
+        {/* BOTÓN GIGANTE ARRIBA DEL MAPA (fácil de tocar al manejar sin scrollear) */}
+        <div style={{ padding: '10px 14px 6px 14px', background: '#090d16' }}>
+          <button
+            onClick={agregarComercioInmediato}
+            style={{
+              width: '100%',
+              height: '72px',
+              borderRadius: '16px',
+              background: '#2563eb',
+              color: '#fff',
+              border: 'none',
+              fontSize: '19px',
+              fontWeight: 'bold',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              boxShadow: '0 6px 20px rgba(37,99,235,0.5)',
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ fontSize: '24px' }}>➕</span> AGREGAR COMERCIO AQUÍ
+          </button>
+        </div>
+
+        {/* Tarjeta de alerta de cercanía */}
+        <div style={{ padding: '0 14px 8px 14px', background: '#090d16' }}>
+          <div style={{
+            padding: '10px 12px',
+            background: comercioCercano ? 'rgba(234,179,8,0.18)' : '#131b2e',
+            border: comercioCercano ? '1px solid #eab308' : '1px solid #1e293b',
+            borderRadius: '12px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            {comercioCercano ? (
+              <div style={{ flex: 1, paddingRight: '10px' }}>
+                <p style={{ margin: '0 0 2px 0', fontSize: '11px', color: '#eab308', fontWeight: 'bold' }}>
+                  🔔 COMERCIO CERCANO {distanciaCercano ? ' (a ' + distanciaCercano + 'm)' : ''}:
+                </p>
+                <h3 style={{ margin: '0 0 2px 0', fontSize: '15px', color: '#fff' }}>
+                  {comercioCercano.nombre || comercioCercano.direccion || ('Comercio #' + (comercioCercano.id || ''))}
+                </h3>
+                <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>
+                  {comercioCercano.rubro || 'General'}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p style={{ margin: '0 0 2px 0', fontSize: '11px', color: '#38bdf8', fontWeight: 'bold' }}>🛣️ RECORRIENDO RUTA</p>
+                <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>Aviso sonoro automático al aproximarse a comercios</p>
+              </div>
+            )}
+
+            {comercioCercano && (
+              <button
+                onClick={() => {
+                  setComercioSeleccionado(comercioCercano);
+                  setModoManejo(false);
+                }}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  background: '#eab308',
+                  color: '#000',
+                  border: 'none',
+                  fontWeight: 'bold',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                ✏️ Ver Ficha
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* MAPA INTERACTIVO OCUPANDO TODO EL ESPACIO RESTANTE */}
+        <div style={{ flex: 1, width: '100%', position: 'relative', background: '#0f172a' }}>
           <MapContainer center={centroDefecto} zoom={16} style={{ height: '100%', width: '100%' }}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {posicionActual && (
@@ -533,44 +619,32 @@ if (modoManejo) {
               const lat = c.ubicacion_exacta_latitud || c.latitud;
               const lng = c.ubicacion_exacta_longitud || c.longitud;
               if (!lat || !lng) return null;
+              const etiqueta = c.nombre || c.direccion || ('Comercio #' + c.id);
               return (
                 <Marker key={c.id} position={[lat, lng]}>
                   <Popup>
-                    <strong>{c.nombre || 'Comercio'}</strong><br/>
-                    {c.rubro || 'General'}
+                    <strong>{etiqueta}</strong><br/>
+                    {c.rubro || 'General'}<br/>
+                    <button
+                      onClick={() => {
+                        setComercioSeleccionado(c);
+                        setModoManejo(false);
+                      }}
+                      style={{ marginTop: '6px', padding: '4px 8px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                    >
+                      Ver Ficha
+                    </button>
                   </Popup>
                 </Marker>
               );
             })}
           </MapContainer>
         </div>
-
-        <div style={{ flex: 1, padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', backgroundColor: '#090d16' }}>
-          <div style={{ padding: '12px 14px', background: comercioCercano ? 'rgba(234,179,8,0.15)' : '#131b2e', border: comercioCercano ? '1px solid #eab308' : '1px solid #1e293b', borderRadius: '12px' }}>
-            {comercioCercano ? (
-              <div>
-                <p style={{ margin: '0 0 2px 0', fontSize: '12px', color: '#eab308', fontWeight: 'bold' }}>🔔 COMERCIO CERCANO {distanciaCercano ? ' (a ' + distanciaCercano + 'm)' : ''}:</p>
-                <h3 style={{ margin: '0 0 2px 0', fontSize: '16px', color: '#fff' }}>{comercioCercano.nombre || 'Comercio sin nombre'}</h3>
-                <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>{comercioCercano.rubro || 'General'}</p>
-              </div>
-            ) : (
-              <div>
-                <p style={{ margin: '0 0 2px 0', fontSize: '12px', color: '#38bdf8', fontWeight: 'bold' }}>🛣️ RECORRIENDO RUTA</p>
-                <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>Aviso sonoro automático al aproximarse a comercios</p>
-              </div>
-            )}
-          </div>
-
-          <button
-            onClick={agregarComercioInmediato}
-            style={{ width: '100%', height: '80px', borderRadius: '16px', background: '#2563eb', color: '#fff', border: 'none', fontSize: '20px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', boxShadow: '0 6px 20px rgba(37,99,235,0.5)', cursor: 'pointer' }}
-          >
-            {textoBotonAgregar || "➕ AGREGAR COMERCIO"}
-          </button>
-        </div>
       </div>
     );
   }
+
+  
 
   return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', color: '#fff' }}>
@@ -609,7 +683,7 @@ if (modoManejo) {
               style={{ padding: '14px', background: '#131b2e', borderRadius: '12px', border: '1px solid #1e293b', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
             >
               <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: '15px', color: '#f8fafc' }}>{c.nombre || 'Comercio sin nombre'}</h3>
+                <h3 style={{ margin: '0 0 4px 0', fontSize: '15px', color: '#f8fafc' }}>{c.nombre || c.direccion || ('Comercio #' + (c.id || ''))}</h3>
                 <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8' }}>{c.rubro || 'General'} {c.direccion ? '• ' + c.direccion : ''}</p>
               </div>
               <span style={{ fontSize: '18px', color: '#64748b' }}>›</span>
