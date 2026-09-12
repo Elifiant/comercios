@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -32,18 +32,7 @@ function MarcadorArrastrable({ posicion, setPosicion }) {
   ) : null;
 }
 
-export default 
-function ForzarAjusteMapa() {
-  const map = useMap();
-  useEffect(() => {
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 200);
-  }, [map]);
-  return null;
-}
-
-function App() {
+export default function App() {
   const [comercios, setComercios] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
@@ -305,92 +294,70 @@ function App() {
   }
 
   if (modoManejo) {
-    const centroSeguro = posicionGPS || (comercios.length > 0 && comercios[0].latitud ? [parseFloat(comercios[0].latitud), parseFloat(comercios[0].longitud)] : [-34.6037, -58.3816]);
-
+    const centroManejo = ([-34.72, -58.26] && [-34.72, -58.26][0]) ? [-34.72, -58.26] : [-34.72, -58.26];
     return (
-      <div style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', zIndex: 9999, backgroundColor: '#0f172a', overflow: 'hidden' }}>
-        
-        {/* MAPA DE LEAFLET */}
-        <MapContainer 
-          center={centroSeguro} 
-          zoom={17} 
-          zoomControl={false}
-          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}
-        >
-          <TileLayer 
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
-            attribution="&copy; OpenStreetMap"
-          />
-          <ForzarAjusteMapa />
-          
-          {posicionGPS && (
-            <Marker position={posicionGPS}>
-              <Popup>📍 Estás aquí</Popup>
-            </Marker>
-          )}
-
-          {comercios.map((c) => {
-            const lat = parseFloat(c.ubicacion_exacta_latitud || c.latitud);
-            const lng = parseFloat(c.ubicacion_exacta_longitud || c.longitud);
-            if (isNaN(lat) || isNaN(lng)) return null;
-            return (
-              <Marker key={c.id} position={[lat, lng]}>
-                <Popup>
-                  <div style={{ color: '#0f172a' }}>
-                    <strong>{c.nombre || 'Sin nombre'}</strong><br/>
-                    {c.rubro || 'General'}<br/>
-                    <button onClick={() => setComercioSeleccionado(c)} style={{ marginTop: '6px', background: '#2563eb', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>Ver Ficha</button>
-                  </div>
-                </Popup>
-              </Marker>
-            );
-          })}
-        </MapContainer>
-
-        {/* CABECERA FLOTANTE */}
-        <header style={{ position: 'absolute', top: 'env(safe-area-inset-top, 12px)', left: '12px', right: '12px', zIndex: 10000, padding: '12px 16px', background: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(10px)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '900', color: '#38bdf8', letterSpacing: '1px', textTransform: 'uppercase' }}>🚗 Modo Manejo</div>
-            <div style={{ fontSize: '13px', color: '#cbd5e1' }}>{comercios.length} comercios en radar</div>
+      <div style={{ height: "100vh", backgroundColor: "#020617", color: "#fff", display: "flex", flexDirection: "column" }}>
+        <header style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #1e293b", backgroundColor: "#0f172a", zIndex: 1000 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "18px" }}>🚗</span>
+            <h1 style={{ margin: 0, fontSize: "16px", fontWeight: "bold", color: "#38bdf8", letterSpacing: "0.5px" }}>MODO MANEJO</h1>
           </div>
-          <button 
-            onClick={() => setModoManejo(false)} 
-            style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
-          >
-            ✕ Salir
-          </button>
+          <button onClick={() => setModoManejo(false)} style={{ background: "#334155", color: "#fff", border: "none", padding: "8px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", cursor: "pointer" }}>✕ Salir</button>
         </header>
 
-        {/* ALERTA DE COMERCIO CERCANO */}
-        {comercioCercano && (
-          <div style={{ position: 'absolute', top: '82px', left: '14px', right: '14px', zIndex: 10000, background: '#16a34a', color: '#fff', padding: '12px 16px', borderRadius: '14px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: '11px', textTransform: 'uppercase', opacity: 0.9 }}>📍 ¡Comercio muy cercano!</div>
-              <div style={{ fontSize: '15px', fontWeight: 'bold' }}>{comercioCercano.nombre || 'Comercio'}</div>
-              <div style={{ fontSize: '12px', opacity: 0.9 }}>A {comercioCercano.distancia} metros</div>
-            </div>
-            <button 
-              onClick={() => setComercioSeleccionado(comercioCercano)}
-              style={{ background: '#fff', color: '#16a34a', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '13px' }}
-            >
-              Ficha
-            </button>
-          </div>
-        )}
+        <div style={{ flex: 1, position: "relative", width: "100%", overflow: "hidden" }}>
+          <MapContainer center={centroManejo} zoom={16} style={{ width: "100%", height: "100%" }} zoomControl={false}>
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
+            {[-34.72, -58.26] && [-34.72, -58.26][0] && (
+              <Marker position={[-34.72, -58.26]}>
+                <Popup>📍 Mi ubicación en vivo</Popup>
+              </Marker>
+            )}
+            {comercios.map((com) => {
+              const lat = com.ubicacion_exacta_latitud || com.latitud;
+              const lng = com.ubicacion_exacta_longitud || com.longitud;
+              if (!lat || !lng) return null;
+              return (
+                <Marker key={com.id} position={[lat, lng]}>
+                  <Popup>
+                    <div style={{ color: "#0f172a" }}>
+                      <strong>{com.nombre || "Sin nombre"}</strong>
+                      <br />
+                      <button onClick={() => setComercioSeleccionado(com)} style={{ marginTop: "4px", padding: "4px 8px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "4px", fontSize: "11px", cursor: "pointer" }}>Ver Ficha</button>
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MapContainer>
 
-        {/* BOTÓN GIGANTE GUARDAR */}
-        <div style={{ position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 15px) + 15px)', left: '16px', right: '16px', zIndex: 10000 }}>
-          <button 
-            onClick={agregarComercioInmediato} 
-            style={{ width: '100%', height: '84px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '22px', fontSize: '20px', fontWeight: '900', boxShadow: '0 8px 30px rgba(37,99,235,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer' }}
-          >
-            <span style={{ fontSize: '28px' }}>➕</span> GUARDAR COMERCIO AQUÍ
-          </button>
+          {/* Tarjeta flotante de cercanía */}
+          <div style={{ position: "absolute", top: "12px", left: "12px", right: "12px", zIndex: 1000 }}>
+            {comercioCercano ? (
+              <div style={{ padding: "14px", borderRadius: "14px", background: "rgba(15, 23, 42, 0.92)", border: "2px solid #22c55e", backdropFilter: "blur(6px)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", textAlign: "center" }}>
+                <span style={{ fontSize: "11px", fontWeight: "900", color: "#4ade80", textTransform: "uppercase", letterSpacing: "1px" }}>🚨 Comercio Cercano</span>
+                <p style={{ fontSize: "16px", fontWeight: "bold", margin: "4px 0", color: "#fff" }}>{comercioCercano.nombre}</p>
+                <p style={{ fontSize: "13px", color: "#94a3b8", margin: "0 0 8px" }}>A solo <strong>{comercioCercano.distancia} metros</strong></p>
+                <button onClick={() => setComercioSeleccionado(comercioCercano)} style={{ padding: "10px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", width: "100%", fontWeight: "bold", fontSize: "13px", cursor: "pointer" }}>Abrir Ficha</button>
+              </div>
+            ) : (
+              <div style={{ padding: "8px 14px", borderRadius: "20px", background: "rgba(15, 23, 42, 0.85)", border: "1px solid #334155", backdropFilter: "blur(4px)", display: "inline-flex", alignItems: "center", gap: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }}></span>
+                <span style={{ fontSize: "12px", color: "#cbd5e1", fontWeight: "500" }}>Radar activo: buscando comercios cercanos...</span>
+              </div>
+            )}
+          </div>
         </div>
 
+        <div style={{ padding: "16px 20px", backgroundColor: "#0f172a", borderTop: "1px solid #1e293b", zIndex: 1000 }}>
+          <button onClick={agregarComercioInmediato} style={{ width: "100%", height: "90px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "18px", fontSize: "20px", fontWeight: "900", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", boxShadow: "0 6px 20px rgba(37, 99, 235, 0.4)", cursor: "pointer" }}>
+            <span>➕</span> GUARDAR COMERCIO AQUI
+          </button>
+        </div>
       </div>
     );
   }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', display: 'flex', flexDirection: 'column' }}>
       <header style={{ padding: '16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
