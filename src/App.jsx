@@ -32,7 +32,18 @@ function MarcadorArrastrable({ posicion, setPosicion }) {
   ) : null;
 }
 
-export default function App() {
+export default 
+function ForzarAjusteMapa() {
+  const map = useMap();
+  useEffect(() => {
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
+  }, [map]);
+  return null;
+}
+
+function App() {
   const [comercios, setComercios] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
@@ -294,13 +305,53 @@ export default function App() {
   }
 
   if (modoManejo) {
+    const centroSeguro = posicionGPS || (comercios.length > 0 && comercios[0].latitud ? [parseFloat(comercios[0].latitud), parseFloat(comercios[0].longitud)] : [-34.6037, -58.3816]);
+
     return (
-      <div style={{ height: '100vh', width: '100vw', backgroundColor: '#020617', color: '#fff', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-        {/* Cabecera flotante */}
-        <header style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000, padding: '12px 16px', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+      <div style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', zIndex: 9999, backgroundColor: '#0f172a', overflow: 'hidden' }}>
+        
+        {/* MAPA DE LEAFLET */}
+        <MapContainer 
+          center={centroSeguro} 
+          zoom={17} 
+          zoomControl={false}
+          style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}
+        >
+          <TileLayer 
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
+            attribution="&copy; OpenStreetMap"
+          />
+          <ForzarAjusteMapa />
+          
+          {posicionGPS && (
+            <Marker position={posicionGPS}>
+              <Popup>📍 Estás aquí</Popup>
+            </Marker>
+          )}
+
+          {comercios.map((c) => {
+            const lat = parseFloat(c.ubicacion_exacta_latitud || c.latitud);
+            const lng = parseFloat(c.ubicacion_exacta_longitud || c.longitud);
+            if (isNaN(lat) || isNaN(lng)) return null;
+            return (
+              <Marker key={c.id} position={[lat, lng]}>
+                <Popup>
+                  <div style={{ color: '#0f172a' }}>
+                    <strong>{c.nombre || 'Sin nombre'}</strong><br/>
+                    {c.rubro || 'General'}<br/>
+                    <button onClick={() => setComercioSeleccionado(c)} style={{ marginTop: '6px', background: '#2563eb', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer' }}>Ver Ficha</button>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+        </MapContainer>
+
+        {/* CABECERA FLOTANTE */}
+        <header style={{ position: 'absolute', top: 'env(safe-area-inset-top, 12px)', left: '12px', right: '12px', zIndex: 10000, padding: '12px 16px', background: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(10px)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
           <div>
-            <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#38bdf8', letterSpacing: '1px', textTransform: 'uppercase' }}>🚗 Modo Manejo Activo</span>
-            <div style={{ fontSize: '13px', color: '#94a3b8' }}>{comercios.length} comercios en radar</div>
+            <div style={{ fontSize: '12px', fontWeight: '900', color: '#38bdf8', letterSpacing: '1px', textTransform: 'uppercase' }}>🚗 Modo Manejo</div>
+            <div style={{ fontSize: '13px', color: '#cbd5e1' }}>{comercios.length} comercios en radar</div>
           </div>
           <button 
             onClick={() => setModoManejo(false)} 
@@ -310,90 +361,33 @@ export default function App() {
           </button>
         </header>
 
-        {/* Alerta flotante de comercio cercano si existe */}
+        {/* ALERTA DE COMERCIO CERCANO */}
         {comercioCercano && (
-          <div style={{ position: 'absolute', top: '70px', left: '16px', right: '16px', zIndex: 1000, background: '#15803d', color: '#fff', padding: '14px 18px', borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: 'pulse 1.5s infinite' }}>
+          <div style={{ position: 'absolute', top: '82px', left: '14px', right: '14px', zIndex: 10000, background: '#16a34a', color: '#fff', padding: '12px 16px', borderRadius: '14px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', opacity: 0.9 }}>📍 ¡Comercio muy cercano!</div>
-              <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{comercioCercano.nombre || 'Comercio'}</div>
-              <div style={{ fontSize: '12px', opacity: 0.9 }}>A solo {comercioCercano.distancia} metros</div>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', opacity: 0.9 }}>📍 ¡Comercio muy cercano!</div>
+              <div style={{ fontSize: '15px', fontWeight: 'bold' }}>{comercioCercano.nombre || 'Comercio'}</div>
+              <div style={{ fontSize: '12px', opacity: 0.9 }}>A {comercioCercano.distancia} metros</div>
             </div>
             <button 
               onClick={() => setComercioSeleccionado(comercioCercano)}
-              style={{ background: '#fff', color: '#15803d', border: 'none', padding: '8px 14px', borderRadius: '10px', fontWeight: 'bold', fontSize: '13px' }}
+              style={{ background: '#fff', color: '#16a34a', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold', fontSize: '13px' }}
             >
-              Ver Ficha
+              Ficha
             </button>
           </div>
         )}
 
-        {/* Mapa interactivo de Leaflet */}
-        <div style={{ flex: 1, width: '100%', height: '100%' }}>
-          <MapContainer 
-            center={posicionGPS || [-34.6037, -58.3816]} 
-            zoom={17} 
-            zoomControl={false}
-            style={{ width: '100%', height: '100%' }}
-          >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            
-            {/* Marcador del auto / usuario */}
-            {posicionGPS && (
-              <Marker position={posicionGPS}>
-                <Popup>Tu ubicación actual</Popup>
-              </Marker>
-            )}
-
-            {/* Marcadores de los comercios */}
-            {comercios.map((c) => {
-              const lat = parseFloat(c.ubicacion_exacta_latitud || c.latitud);
-              const lng = parseFloat(c.ubicacion_exacta_longitud || c.longitud);
-              if (isNaN(lat) || isNaN(lng)) return null;
-              return (
-                <Marker key={c.id} position={[lat, lng]}>
-                  <Popup>
-                    <div
-              key={c.id}
-              onClick={() => setComercioSeleccionado(c)}
-              style={{ padding: '12px', background: '#131b2e', borderRadius: '16px', border: '1px solid #1e293b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}
-            >
-              {/* Miniatura de Foto o Icono */}
-              <div style={{ width: '56px', height: '56px', borderRadius: '12px', backgroundColor: '#1e293b', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {c.foto_url ? (
-                  <img src={c.foto_url} alt="Comercio" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <span style={{ fontSize: '24px' }}>🏪</span>
-                )}
-              </div>
-
-              {/* Información */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <h3 style={{ margin: '0 0 3px 0', fontSize: '15px', fontWeight: 'bold', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {c.nombre || 'Comercio sin nombre'}
-                </h3>
-                <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {c.rubro || 'General'} {c.direccion ? '• ' + c.direccion : ''}
-                </p>
-              </div>
-
-              <span style={{ fontSize: '20px', color: '#475569', paddingRight: '4px' }}>›</span>
-            </div>
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
-        </div>
-
-        {/* Botón Gigante de Guardar Comercio */}
-        <div style={{ position: 'absolute', bottom: '24px', left: '16px', right: '16px', zIndex: 1000 }}>
+        {/* BOTÓN GIGANTE GUARDAR */}
+        <div style={{ position: 'absolute', bottom: 'calc(env(safe-area-inset-bottom, 15px) + 15px)', left: '16px', right: '16px', zIndex: 10000 }}>
           <button 
             onClick={agregarComercioInmediato} 
-            style={{ width: '100%', height: '84px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '22px', fontSize: '20px', fontWeight: '900', boxShadow: '0 8px 30px rgba(37,99,235,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer' }}
+            style={{ width: '100%', height: '84px', backgroundColor: '#2563eb', color: '#fff', border: 'none', borderRadius: '22px', fontSize: '20px', fontWeight: '900', boxShadow: '0 8px 30px rgba(37,99,235,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer' }}
           >
             <span style={{ fontSize: '28px' }}>➕</span> GUARDAR COMERCIO AQUÍ
           </button>
         </div>
+
       </div>
     );
   }
