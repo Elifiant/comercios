@@ -37,11 +37,33 @@ export default function App() {
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [modoManejo, setModoManejo] = useState(false);
+  const [textoBotonAgregar, setTextoBotonAgregar] = useState('➕ AGREGAR COMERCIO');
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
   const [nuevaPosicion, setNuevaPosicion] = useState(null);
   const [busqueda, setBusqueda] = useState('');
   const [jornadaActiva, setJornadaActiva] = useState(false);
-  const [horaInicioJornada, setIoraInicioJornada] = useState(null);
+  const [horaInicioJornada, setHoraInicioJornada] = useState(() => localStorage.getItem('hora_inicio_jornada') || '');
+  const [tiempoTranscurrido, setTiempoTranscurrido] = useState('0m');
+  // Cronometro de jornada en vivo
+  useEffect(() => {
+    let timer;
+    const actualizar = () => {
+      const inicioTimestamp = localStorage.getItem('timestamp_inicio_jornada');
+      if (jornadaActiva && inicioTimestamp) {
+        const diffMs = Date.now() - parseInt(inicioTimestamp, 10);
+        const minsTotal = Math.floor(diffMs / 60000);
+        const horas = Math.floor(minsTotal / 60);
+        const mins = minsTotal % 60;
+        setTiempoTranscurrido(horas > 0 ? `${horas}h ${mins}m` : `${mins}m`);
+      }
+    };
+    if (jornadaActiva) {
+      actualizar();
+      timer = setInterval(actualizar, 30000); // actualiza cada 30s
+    }
+    return () => clearInterval(timer);
+  }, [jornadaActiva]);
+  
   const [comercioCercano, setComercioCercano] = useState(null);
 
   const cargarComercios = async () => {
@@ -109,30 +131,86 @@ export default function App() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, [modoManejo, comercios, comercioCercano]);
 
-  const agregarComercioInmediato = async () => {
-    if (!navigator.geolocation) {
-      alert('Activa el GPS');
-      return;
+  
+  const iniciarJornada = () => {
+    const ahora = new Date();
+    const h = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' hs';
+    setJornadaActiva(true);
+    setHoraInicioJornada(h);
+    setTiempoTranscurrido('0m');
+    try {
+      localStorage.setItem('jornada_activa', 'true');
+      localStorage.setItem('hora_inicio_jornada', h);
+      localStorage.setItem('timestamp_inicio_jornada', ahora.getTime().toString());
+    } catch(e) {}
+  };
+
+  const cerrarJornada = () => {
+    const inicioTimestamp = localStorage.getItem('timestamp_inicio_jornada');
+    let resumen = '0m';
+    if (inicioTimestamp) {
+      const diffMs = Date.now() - parseInt(inicioTimestamp, 10);
+      const minsTotal = Math.floor(diffMs / 60000);
+      const horas = Math.floor(minsTotal / 60);
+      const mins = minsTotal % 60;
+      resumen = horas > 0 ? (horas + 'h ' + mins + 'm') : (mins + 'm');
     }
-    navigator.geolocation.getCurrentPosition(async (pos) => {
+    alert('🏁 Jornada cerrada. Tiempo total de trabajo: ' + resumen);
+    setJornadaActiva(false);
+    setHoraInicioJornada('');
+    setTiempoTranscurrido('0m');
+    try {
+      localStorage.removeItem('jornada_activa');
+      localStorage.removeItem('hora_inicio_jornada');
+      localStorage.removeItem('timestamp_inicio_jornada');
+    } catch(e) {}
+  };
+
+  const agregarComercioInmediato = async () => {
+    setTextoBotonAgregar('⏳ Guardando...');
+
+    const guardarEnSupabase = async (lat, lng, notaExtra) => {
+      const cod = Date.now().toString().slice(-4);
       const nuevo = {
-        nombre: 'Comercio #' + Date.now().toString().slice(-4),
-        latitud: pos.coords.latitude,
-        longitud: pos.coords.longitude,
-        ubicacion_exacta_latitud: pos.coords.latitude,
-        ubicacion_exacta_longitud: pos.coords.longitude,
+        nombre: 'Comercio #' + cod,
+        latitud: lat,
+        longitud: lng,
+        ubicacion_exacta_latitud: lat,
+        ubicacion_exacta_longitud: lng,
         fecha: new Date().toISOString(),
-        notas: 'Registrado desde movil',
+        notas: notaExtra || 'Registrado en Modo Manejo',
       };
       const { data, error } = await supabase.from('comercios').insert([nuevo]).select();
       if (!error && data) {
-        setComercios(data[0] ? [data[0], ...comercios] : comercios);
-        setComercioSeleccionado(data[0]);
-        reproducirAlerta();
+        setComercios((prev) => [data[0], ...prev]);
+        try { if (typeof reproducirAlerta === 'function') reproducirAlerta(); } catch(e){}
+        setTextoBotonAgregar('✅ ¡GUARDADO! #' + cod);
+        setTimeout(() => setTextoBotonAgregar('➕ AGREGAR COMERCIO'), 3000);
       } else {
-        alert('Error: ' + (error?.message || 'Error'));
+        setTextoBotonAgregar('⚠️ Error al guardar');
+        setTimeout(() => setTextoBotonAgregar('➕ AGREGAR COMERCIO'), 3000);
       }
-    });
+    };
+
+    if (!navigator.geolocation) {
+      // Fallback si no hay soporte de geolocalización
+      await guardarEnSupabase(-34.719, -58.265, 'Registro prueba (sin GPS)');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        await guardarEnSupabase(pos.coords.latitude, pos.coords.longitude, 'Registrado con GPS móvil');
+      },
+      async (err) => {
+        // Fallback si da timeout o error en Mac: toma la posición actual del estado si existe o la última coordenada
+        console.warn('GPS tardó o bloqueado, usando ubicación estimada para prueba:', err.message);
+        const latFallback = (typeof posicion !== 'undefined' && posicion && posicion[0]) ? posicion[0] : -34.719;
+        const lngFallback = (typeof posicion !== 'undefined' && posicion && posicion[1]) ? posicion[1] : -58.265;
+        await guardarEnSupabase(latFallback, lngFallback, 'Registrado (ubicación estimada)');
+      },
+      { enableHighAccuracy: false, timeout: 6000, maximumAge: 60000 }
+    );
   };
 
   const guardarEdicion = async (e) => {
@@ -208,191 +286,29 @@ export default function App() {
     return (c.nombre || '').toLowerCase().includes(t) || (c.rubro || '').toLowerCase().includes(t) || (c.direccion || '').toLowerCase().includes(t);
   });
 
-  if (editandoUbicacion && comercioSeleccionado) {
-    const lat = comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.6037;
-    const lng = comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.3816;
-    return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', color: '#fff' }}>
-        <header style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b' }}>
-          <button onClick={() => setEditandoUbicacion(false)} style={{ background: '#1e293b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>← Volver</button>
-          <div style={{ textAlign: 'center' }}>
-            <h2 style={{ margin: 0, fontSize: '15px' }}>Ajustar Ubicacion</h2>
-            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>{comercioSeleccionado.nombre}</p>
-          </div>
-          <button onClick={guardarUbicacionExacta} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>Guardar</button>
-        </header>
-        <div style={{ flex: 1, position: 'relative' }}>
-          <MapContainer center={[lat, lng]} zoom={18} style={{ height: '100%', width: '100%' }}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="OSM" />
-            <MarcadorArrastrable posicion={nuevaPosicion || [lat, lng]} setPosicion={setNuevaPosicion} />
-          </MapContainer>
-        </div>
-      </div>
-    );
-  }
-
-  if (comercioSeleccionado) {
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', paddingBottom: '30px' }}>
-        <header style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b' }}>
-          <button onClick={() => setComercioSeleccionado(null)} style={{ background: '#1e293b', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>← Lista</button>
-          <h2 style={{ margin: 0, fontSize: '16px' }}>Ficha de Comercio</h2>
-          <button onClick={() => eliminarComercio(comercioSeleccionado.id)} style={{ background: '#7f1d1e', color: '#fecaca', border: 'none', padding: '8px 12px', borderRadius: '8px' }}>Eliminar</button>
-        </header>
-        <div style={{ padding: '16px', maxWidth: '500px', margin: '0 auto' }}>
-          <div style={{ marginBottom: '20px', borderRadius: '14px', overflow: 'hidden', border: '1px solid #1e293b', background: '#131b2e' }}>
-            {comercioSeleccionado.foto_url ? (
-              <img src={comercioSeleccionado.foto_url} alt="Fachada" style={{ width: '100%', height: '220px', objectFit: 'cover' }} />
-            ) : (
-              <div style={{ height: '140px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Sin foto</div>
-            )}
-            <div style={{ padding: '10px 14px', background: '#0b1120', display: 'flex', justifyContent: 'space-between' }}>
-              <label style={{ cursor: 'pointer', background: '#2563eb', color: '#fff', padding: '8px 14px', borderRadius: '8px', fontSize: '13px' }}>
-                📷 {comercioSeleccionado.foto_url ? 'Cambiar Foto' : 'Tomar Foto'}
-                <input type="file" accept="image/*" capture="environment" onChange={manejarSubidaFoto} style={{ display: 'none' }} />
-              </label>
-              {comercioSeleccionado.telefono && (
-                <button onClick={enviarWhatsApp} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px' }}>WhatsApp</button>
-              )}
-            </div>
-          </div>
-          <button onClick={() => {
-            setNuevaPosicion([
-              comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.6037,
-              comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.3816,
-            ]);
-            setEditandoUbicacion(true);
-          }} style={{ width: '100%', marginBottom: '20px', padding: '14px', background: '#1e293b', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '12px', fontWeight: 'bold' }}>
-           �d Corregir Ubicacion en Mapa
-          </button>
-          <form onSubmit={guardarEdicion} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>NOMBRE</label>
-              <input type="text" value={comercioSeleccionado.nombre || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, nombre: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>RUBRO</label>
-              <input type="text" value={comercioSeleccionado.rubro || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, rubro: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>TELEFONO</label>
-              <input type="text" value={comercioSeleccionado.telefono || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, telefono: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>DIRECCION</label>
-              <input type="text" value={comercioSeleccionado.direccion || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, direccion: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', color: '#94a3b8' }}>NOTAS</label>
-              <textarea rows={3} value={comercioSeleccionado.nomas || ''} onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, notas: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff' }} />
-            </div>
-            <button type="submit" style={{ padding: '14px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold' }}>GUARDAR CAMBIOS</button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  if (modoManejo) {
-    const centroManejo = ([-34.72, -58.26] && [-34.72, -58.26][0]) ? [-34.72, -58.26] : [-34.72, -58.26];
-    return (
-      <div style={{ height: "100vh", backgroundColor: "#020617", color: "#fff", display: "flex", flexDirection: "column" }}>
-        <header style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #1e293b", backgroundColor: "#0f172a", zIndex: 1000 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "18px" }}>🚗</span>
-            <h1 style={{ margin: 0, fontSize: "16px", fontWeight: "bold", color: "#38bdf8", letterSpacing: "0.5px" }}>MODO MANEJO</h1>
-          </div>
-          <button onClick={() => setModoManejo(false)} style={{ background: "#334155", color: "#fff", border: "none", padding: "8px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", cursor: "pointer" }}>✕ Salir</button>
-        </header>
-
-        <div style={{ flex: 1, position: "relative", width: "100%", overflow: "hidden" }}>
-          <MapContainer center={centroManejo} zoom={16} style={{ width: "100%", height: "100%" }} zoomControl={false}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
-            {[-34.72, -58.26] && [-34.72, -58.26][0] && (
-              <Marker position={[-34.72, -58.26]}>
-                <Popup>📍 Mi ubicación en vivo</Popup>
-              </Marker>
-            )}
-            {comercios.map((com) => {
-              const lat = com.ubicacion_exacta_latitud || com.latitud;
-              const lng = com.ubicacion_exacta_longitud || com.longitud;
-              if (!lat || !lng) return null;
-              return (
-                <Marker key={com.id} position={[lat, lng]}>
-                  <Popup>
-                    <div style={{ color: "#0f172a" }}>
-                      <strong>{com.nombre || "Sin nombre"}</strong>
-                      <br />
-                      <button onClick={() => setComercioSeleccionado(com)} style={{ marginTop: "4px", padding: "4px 8px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "4px", fontSize: "11px", cursor: "pointer" }}>Ver Ficha</button>
-                    </div>
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
-
-          {/* Tarjeta flotante de cercanía */}
-          <div style={{ position: "absolute", top: "12px", left: "12px", right: "12px", zIndex: 1000 }}>
-            {comercioCercano ? (
-              <div style={{ padding: "14px", borderRadius: "14px", background: "rgba(15, 23, 42, 0.92)", border: "2px solid #22c55e", backdropFilter: "blur(6px)", boxShadow: "0 8px 24px rgba(0,0,0,0.5)", textAlign: "center" }}>
-                <span style={{ fontSize: "11px", fontWeight: "900", color: "#4ade80", textTransform: "uppercase", letterSpacing: "1px" }}>🚨 Comercio Cercano</span>
-                <p style={{ fontSize: "16px", fontWeight: "bold", margin: "4px 0", color: "#fff" }}>{comercioCercano.nombre}</p>
-                <p style={{ fontSize: "13px", color: "#94a3b8", margin: "0 0 8px" }}>A solo <strong>{comercioCercano.distancia} metros</strong></p>
-                <button onClick={() => setComercioSeleccionado(comercioCercano)} style={{ padding: "10px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", width: "100%", fontWeight: "bold", fontSize: "13px", cursor: "pointer" }}>Abrir Ficha</button>
-              </div>
-            ) : (
-              <div style={{ padding: "8px 14px", borderRadius: "20px", background: "rgba(15, 23, 42, 0.85)", border: "1px solid #334155", backdropFilter: "blur(4px)", display: "inline-flex", alignItems: "center", gap: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}>
-                <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }}></span>
-                <span style={{ fontSize: "12px", color: "#cbd5e1", fontWeight: "500" }}>Radar activo: buscando comercios cercanos...</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{ padding: "16px 20px", backgroundColor: "#0f172a", borderTop: "1px solid #1e293b", zIndex: 1000 }}>
-          <button onClick={agregarComercioInmediato} style={{ width: "100%", height: "90px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "18px", fontSize: "20px", fontWeight: "900", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", boxShadow: "0 6px 20px rgba(37, 99, 235, 0.4)", cursor: "pointer" }}>
-            <span>➕</span> GUARDAR COMERCIO AQUI
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ padding: '16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '18px' }}>📉 RutaComercio</h1>
-          <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>{comercios.length} comercios</p>
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', color: '#fff' }}>
+        <header style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px', borderBottom: '1px solid #1e293b', backgroundColor: '#090d16' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#fff' }}>📍 RutaComercio</h1>
+            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>{comercios.length} comercios cargados</p>
+          </div>
+          <button
+            onClick={() => setModoManejo(true)}
+            style={{ padding: '8px 14px', borderRadius: '8px', background: '#2563eb', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            🚗 Modo Manejo
+          </button>
         </div>
-        <button onClick={() => setModoManejo(true)} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontWeight: 'bold' }}>🙗 Modo Manejo</button>
-      </header>
-      <div style={{ padding: '10px 16px', background: '#131b2e', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <span style={{ fontSize: '11px', color: '#94a3b8' }}>JORNADA:</span>
-          <p style={{ margin: 0, fontSize: '13px', fontWeight: 'bold', color: jornadaActiva ? '#4ade80' : '#f87171' }}>{jornadaActiva ? '🟭 Activa (' + horaInicioJornada + ')' : '🟴 Inactiva'}</p>
-        </div>
-        <button onClick={() => {
-          if (!jornadaActiva) {
-            setJornadaActiva(true);
-            setHoraInicioJornada(new Date().toLocaleTimeString([], { hour: '2digit', minute: '2digit' }));
-          } else {
-            if (window.confirm('Cerrar jornada?')) setJornadaActiva(false);
-          }
-        }}>
-          {jornadaActiva ? "Cerrar Jornada" : "Iniciar Jornada"}
+        <button
+          onClick={() => { if (!jornadaActiva) { iniciarJornada(); } else { cerrarJornada(); } }}
+          style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', background: jornadaActiva ? '#1e293b' : '#10b981', border: '1px solid #334155', color: '#fff', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        >
+          <span>{jornadaActiva ? '⏱️ Jornada: ' + tiempoTranscurrido : '▶ Iniciar Jornada'}</span>
+          <span style={{ fontSize: '11px', opacity: 0.8 }}>{jornadaActiva ? 'Tocar para cerrar' : 'Comenzar día'}</span>
         </button>
-      </div>
-
-      <div style={{ padding: '12px 16px', background: '#090d16' }}>
-        <input
-          type="text"
-          placeholder="🔍 Buscar por nombre, rubro o calle..."
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          style={{ width: '100%', padding: '12px 14px', borderRadius: '10px', background: '#131b2e', border: '1px solid #1e293b', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-        />
-      </div>
+      </header>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 16px 80px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {cargando ? (
@@ -419,9 +335,7 @@ export default function App() {
       <button
         onClick={agregarComercioInmediato}
         style={{ position: 'fixed', bottom: '24px', right: '20px', width: '56px', height: '56px', borderRadius: '28px', background: '#2563eb', color: '#fff', border: 'none', fontSize: '26px', boxShadow: '0 4px 14px rgba(37,99,235,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-      >
-        ➕
-      </button>
+      >{textoBotonAgregar || "➕ AGREGAR COMERCIO"}</button>
     </div>
   );
 }
