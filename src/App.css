@@ -417,3 +417,8 @@ h1 {
 .eliminar-ficha:active {
   transform: scale(0.98);
 }
+.listas-precios,
+.listas-precios p,
+.listas-precios h2 {
+  color: black !important;
+}

@@ -1,12 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>comercios</title>
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    
+    <!-- Viewport bloqueado para que se sienta como app nativa (evita zoom accidental con dos dedos al manejar) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    
+    <title>RutaComercio</title>
+
+    <!-- Configuración para iPhone / iOS (Modo Pantalla Completa) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="RutaComercio" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+
+    <!-- Configuración PWA y color de barra superior -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2563eb" />
   </head>
-  <body>
+  <body style="margin: 0; padding: 0; background-color: #090d16;">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
