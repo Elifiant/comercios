@@ -164,7 +164,46 @@ export default function AdminClientes() {
             </div>
           )}
         </div>
-      </main>
+      
+ {/* TABLA DE EMPRESAS CLIENTES */}
+ <div style={{ backgroundColor: "#1e293b", borderRadius: "12px", border: "1px solid #334155", padding: "20px", marginBottom: "24px" }}>
+ <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+ <div>
+ <h3 style={{ margin: 0, fontSize: "16px", color: "#f8fafc" }}>🏢 Empresas Clientes Registradas</h3>
+ <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#94a3b8" }}>Control de tarifas, moneda pactada y facturación mensual estimada</p>
+ </div>
+ <button onClick={() => setMostrarModalEmpresa(true)} style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "8px 14px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}>+ Nueva Empresa</button>
+ </div>
+ <div style={{ overflowX: "auto" }}>
+ <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "14px" }}>
+ <thead>
+ <tr style={{ borderBottom: "1px solid #334155", color: "#94a3b8" }}>
+ <th style={{ padding: "10px" }}>Empresa</th>
+ <th style={{ padding: "10px" }}>Preventistas</th>
+ <th style={{ padding: "10px" }}>Modalidad de Cobro</th>
+ <th style={{ padding: "10px" }}>Tarifa Pactada</th>
+ <th style={{ padding: "10px", textAlign: "right" }}>Total Mensual Estimado</th>
+ </tr>
+ </thead>
+ <tbody>
+ {empresas.map((emp) => {
+ const cant = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase()).length;
+ return (
+ <tr key={emp} style={{ borderBottom: "1px solid #1e293b", color: "#e2e8f0" }}>
+ <td style={{ padding: "12px 10px", fontWeight: "bold" }}>{emp}</td>
+ <td style={{ padding: "12px 10px" }}><span style={{ backgroundColor: "#334155", padding: "2px 8px", borderRadius: "12px", fontSize: "12px" }}>{cant} activos</span></td>
+ <td style={{ padding: "12px 10px", color: "#38bdf8" }}>Por Preventista Activo</td>
+ <td style={{ padding: "12px 10px", color: "#10b981", fontWeight: "bold" }}>USD $15 / mes</td>
+ <td style={{ padding: "12px 10px", textAlign: "right", fontWeight: "bold", color: "#34d399", fontSize: "15px" }}>USD ${(cant * 15).toLocaleString()}</td>
+ </tr>
+ );
+ })}
+ </tbody>
+ </table>
+ </div>
+ </div>
+
+ </main>
 
       {mostrarModalEmpresa && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
