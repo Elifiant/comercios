@@ -51,11 +51,39 @@ export default function App() {
     return () => navigator.geolocation.clearWatch(wId);
   }, []);
 
-  const [comercios, setComercios] = useState([]);
+   const [sesion, setSesion] = useState(null);
+ const [cargandoAuth, setCargandoAuth] = useState(true);
+ const [emailLogin, setEmailLogin] = useState('');
+ const [passwordLogin, setPasswordLogin] = useState('');
+ const [errorLogin, setErrorLogin] = useState(null);
+ const [recordarSesion, setRecordarSesion] = useState(true);
+ const [comercios, setComercios] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [modoManejo, setModoManejo] = useState(false);
-  const [textoBotonAgregar, setTextoBotonAgregar] = useState('➕ AGREGAR COMERCIO');
+   useEffect(() => {
+ supabase.auth.getSession().then(({ data: { session } }) => {
+ setSesion(session);
+ setCargandoAuth(false);
+ });
+ const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+ setSesion(session);
+ setCargandoAuth(false);
+ });
+ return () => subscription.unsubscribe();
+ }, []);
+
+ const handleLogin = async (e) => {
+ e.preventDefault();
+ setErrorLogin(null);
+ const { error } = await supabase.auth.signInWithPassword({ email: emailLogin, password: passwordLogin });
+ if (error) setErrorLogin('Credenciales incorrectas o usuario no registrado.');
+ };
+
+ const handleCerrarSesion = async () => {
+ await supabase.auth.signOut();
+ };
+ const [textoBotonAgregar, setTextoBotonAgregar] = useState('➕ AGREGAR COMERCIO');
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
   const [nuevaPosicion, setNuevaPosicion] = useState(null);
   const [busqueda, setBusqueda] = useState('');
@@ -333,7 +361,11 @@ export default function App() {
   });
 
   
-      if (editandoUbicacion && comercioSeleccionado) {
+      if (cargandoAuth) { return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0f172a",color:"#fff",fontFamily:"sans-serif"}}>🛡️ Iniciando RutaComercio...</div>); }
+
+ if (sesion === null) { return (<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0f172a",padding:"20px",fontFamily:"sans-serif"}}><div style={{background:"#fff",width:"100%",maxWidth:"380px",borderRadius:"16px",padding:"28px 24px",boxShadow:"0 20px 25px rgba(0,0,0,0.5)"}}><div style={{textAlign:"center",marginBottom:"20px"}}><span style={{background:"#eff6ff",color:"#1d4ed8",padding:"4px 12px",borderRadius:"999px",fontSize:"12px",fontWeight:"bold"}}>🛡️ Servidor Seguro RutaComercio</span><h2 style={{margin:"12px 0 4px 0",fontSize:"22px",color:"#0f172a"}}>Bienvenido</h2><p style={{margin:0,fontSize:"13px",color:"#64748b"}}>Acceso exclusivo de preventa</p></div><form onSubmit={handleLogin} style={{display:"flex",flexDirection:"column",gap:"12px"}}><div><label style={{display:"block",fontSize:"12px",fontWeight:"bold",color:"#334155",marginBottom:"4px"}}>CORREO</label><input type="email" required value={emailLogin} onChange={(e)=>setEmailLogin(e.target.value)} placeholder="ejemplo@elifiant.com" style={{width:"100%",padding:"12px",borderRadius:"8px",border:"1px solid #cbd5e1",fontSize:"14px",boxSizing:"border-box"}}/></div><div><label style={{display:"block",fontSize:"12px",fontWeight:"bold",color:"#334155",marginBottom:"4px"}}>CONTRASEÑA</label><input type="password" required value={passwordLogin} onChange={(e)=>setPasswordLogin(e.target.value)} placeholder="••••••••" style={{width:"100%",padding:"12px",borderRadius:"8px",border:"1px solid #cbd5e1",fontSize:"14px",boxSizing:"border-box"}}/></div>{errorLogin && (<div style={{padding:"8px",background:"#fef2f2",color:"#b91c1c",borderRadius:"6px",fontSize:"12px",textAlign:"center"}}>{errorLogin}</div>)}<button type="submit" style={{marginTop:"8px",padding:"14px",background:"#2563eb",color:"#fff",border:"none",borderRadius:"10px",fontSize:"15px",fontWeight:"bold",cursor:"pointer"}}>Ingresar a RutaComercio</button></form><div style={{marginTop:"16px",textAlign:"center",fontSize:"11px",color:"#94a3b8"}}>RutaComercio v2.4 · Seguridad Encriptada Multi-Tenant</div></div></div>); }
+
+ if (editandoUbicacion && comercioSeleccionado) {
     const posInicial = [
       Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719),
       Number(comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.265)
