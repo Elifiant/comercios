@@ -34,9 +34,7 @@ function MarcadorArrastrable({ posicion, setPosicion }) {
 }
 
 export default function App() {
-  if (typeof window !== 'undefined' && window.location.pathname.includes('supervisor')) {
-    return <Supervisor />;
-  }
+  
 
 
   useEffect(() => {
@@ -48,7 +46,10 @@ export default function App() {
       (err) => console.log("GPS status:", err.message),
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
     );
-    return () => navigator.geolocation.clearWatch(wId);
+//     if (typeof window !== 'undefined' && window.location.pathname.includes('supervisor')) {
+//     return <Supervisor />;
+
+  return () => navigator.geolocation.clearWatch(wId);
   }, []);
 
    const [sesion, setSesion] = useState(null);
@@ -371,24 +372,11 @@ export default function App() {
             />
           </MapContainer>
         </div>
-
-        <div style={{ padding: "14px 16px", background: "#1e293b", borderTop: "1px solid #334155", display: "flex", gap: "10px" }}>
-          <button
-            onClick={async () => {
-              await guardarEdicion();
-              setEditandoUbicacion(false);
-            }}
-            style={{ flex: 1, background: "#2563eb", color: "#fff", border: "none", padding: "12px", borderRadius: "8px", fontWeight: "700", fontSize: "15px", cursor: "pointer" }}
-          >
-            📍 Confirmar y Guardar Ubicación
-          </button>
-        </div>
       </div>
     );
   }
 
-
-  if (comercioSeleccionado) {
+    if (comercioSeleccionado) {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif', paddingBottom: '40px' }}>
         <header style={{ padding: '14px 16px', background: '#131b2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', position: 'sticky', top: 0, zIndex: 10 }}>
@@ -513,163 +501,29 @@ export default function App() {
     );
   }
 
-
-  if (modoManejo) {
-    const centroDefecto = posicionActual || (comercios.length > 0 && comercios[0].latitud ? [comercios[0].latitud, comercios[0].longitud] : [-34.6037, -58.3816]);
-    return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif' }}>
-        {/* Cabecera compacta de Modo Manejo */}
-        <header style={{ padding: '10px 16px', background: '#131b2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b' }}>
-          <div>
-            <span style={{ fontSize: '15px', fontWeight: 'bold' }}>🚗 Modo Manejo</span>
-            <p style={{ margin: 0, fontSize: '11px', color: '#38bdf8' }}>GPS en vivo • Alerta de cercanía</p>
-          </div>
-          <button
-            onClick={() => setModoManejo(false)}
-            style={{ padding: '6px 14px', borderRadius: '8px', background: '#334155', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
-          >
-            ✕ Salir
-          </button>
-        </header>
-
-        {/* BOTÓN GIGANTE ARRIBA DEL MAPA (fácil de tocar al manejar sin scrollear) */}
-        <div style={{ padding: '10px 14px 6px 14px', background: '#090d16' }}>
-          <button
-            onClick={agregarComercioInmediato}
-            style={{
-              width: '100%',
-              height: '72px',
-              borderRadius: '16px',
-              background: '#2563eb',
-              color: '#fff',
-              border: 'none',
-              fontSize: '19px',
-              fontWeight: 'bold',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '10px',
-              boxShadow: '0 6px 20px rgba(37,99,235,0.5)',
-              cursor: 'pointer'
-            }}
-          >
-            <span style={{ fontSize: '24px' }}>➕</span> AGREGAR COMERCIO AQUÍ
-          </button>
-        </div>
-
-        {/* Tarjeta de alerta de cercanía */}
-        <div style={{ padding: '0 14px 8px 14px', background: '#090d16' }}>
-          <div style={{
-            padding: '10px 12px',
-            background: comercioCercano ? 'rgba(234,179,8,0.18)' : '#131b2e',
-            border: comercioCercano ? '1px solid #eab308' : '1px solid #1e293b',
-            borderRadius: '12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
-          }}>
-            {comercioCercano ? (
-              <div style={{ flex: 1, paddingRight: '10px' }}>
-                <p style={{ margin: '0 0 2px 0', fontSize: '11px', color: '#eab308', fontWeight: 'bold' }}>
-                  🔔 COMERCIO CERCANO {distanciaCercano ? ' (a ' + distanciaCercano + 'm)' : ''}:
-                </p>
-                <h3 style={{ margin: '0 0 2px 0', fontSize: '15px', color: '#fff' }}>
-                  {comercioCercano.nombre || comercioCercano.direccion || ('Comercio #' + (comercioCercano.id || ''))}
-                </h3>
-                <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>
-                  {comercioCercano.rubro || 'General'}
-                </p>
-              </div>
-            ) : (
-              <div>
-                <p style={{ margin: '0 0 2px 0', fontSize: '11px', color: '#38bdf8', fontWeight: 'bold' }}>🛣️ RECORRIENDO RUTA</p>
-                <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>Aviso sonoro automático al aproximarse a comercios</p>
-              </div>
-            )}
-
-            {comercioCercano && (
-              <button
-                onClick={() => {
-                  setComercioSeleccionado(comercioCercano);
-                  setModoManejo(false);
-                }}
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  background: '#eab308',
-                  color: '#000',
-                  border: 'none',
-                  fontWeight: 'bold',
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                ✏️ Ver Ficha
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* MAPA INTERACTIVO OCUPANDO TODO EL ESPACIO RESTANTE */}
-        <div style={{ flex: 1, width: '100%', position: 'relative', background: '#0f172a' }}>
-          <MapContainer center={centroDefecto} zoom={16} style={{ height: '100%', width: '100%' }}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            {posicionActual && (
-              <Marker position={posicionActual}>
-                <Popup>📍 Tu ubicación actual</Popup>
-              </Marker>
-            )}
-            {comercios.map((c) => {
-              const lat = c.ubicacion_exacta_latitud || c.latitud;
-              const lng = c.ubicacion_exacta_longitud || c.longitud;
-              if (!lat || !lng) return null;
-              const etiqueta = c.nombre || c.direccion || ('Comercio #' + c.id);
-              return (
-                <Marker key={c.id} position={[lat, lng]}>
-                  <Popup>
-                    <strong>{etiqueta}</strong><br/>
-                    {c.rubro || 'General'}<br/>
-                    <button
-                      onClick={() => {
-                        setComercioSeleccionado(c);
-                        setModoManejo(false);
-                      }}
-                      style={{ marginTop: '6px', padding: '4px 8px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-                    >
-                      Ver Ficha
-                    </button>
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
-        </div>
-      </div>
-    );
-  }
-
-  
-
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", backgroundColor: "#0b1329", color: "#f8fafc", fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif" }}>
-      {/* CABECERA CON PERFIL DE WALTER */}
-      <header style={{ padding: "14px 16px 12px", backgroundColor: "#0f172a", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 30 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <div style={{ width: "38px", height: "38px", borderRadius: "50%", background: "linear-gradient(135deg, #2563eb, #3b82f6)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "16px", color: "#fff", boxShadow: "0 2px 8px rgba(37,99,235,0.4)" }}>
-              W
-            </div>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ fontWeight: "700", fontSize: "15px", color: "#fff" }}>Walter</span>
-                <span style={{ fontSize: "10px", backgroundColor: "#1e3a8a", color: "#60a5fa", padding: "1px 6px", borderRadius: "10px", fontWeight: "600", textTransform: "uppercase" }}>Elifiant</span>
-              </div>
-              <div style={{ fontSize: "11px", color: "#94a3b8" }}>Preventa Móvil · Campo</div>
-            </div>
-          </div>
+    <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
+      <div style={{ padding: "14px 16px", background: "#1e293b", borderTop: "1px solid #334155", display: "flex", gap: "10px" }}>
           <button
-            onClick={() => supabase.auth.signOut()}
+            onClick={async () => {
+              try {
+                if (typeof supabase !== "undefined" && supabase.auth) {
+                  await supabase.auth.signOut();
+                }
+              } catch (err) {
+                console.error("Error al salir de Supabase:", err);
+              }
+              try {
+                for (let i = localStorage.length - 1; i >= 0; i--) {
+                  const k = localStorage.key(i);
+                  if (k && (k.includes("supabase") || k.includes("auth") || k.includes("token") || k.includes("sb-"))) {
+                    localStorage.removeItem(k);
+                  }
+                }
+              } catch (e) {}
+              if (typeof setPerfil === "function") setPerfil(null);
+              if (typeof setSesion === "function") setSesion(null);
+            }}
             style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}
           >
             ✕ Salir
@@ -763,7 +617,6 @@ export default function App() {
             style={{ width: "100%", padding: "10px 14px", backgroundColor: "#0b1329", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
           />
         </div>
-      </header>
 
       {/* LISTADO DE COMERCIOS */}
       <main style={{ flex: 1, overflowY: "auto", padding: "12px 16px 80px" }}>
@@ -818,5 +671,4 @@ export default function App() {
       </button>
     </div>
   );
-
 }
