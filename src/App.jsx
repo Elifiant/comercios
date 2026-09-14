@@ -753,6 +753,33 @@ if (modoManejo) {
           </div>
         </div>
 
+        {/* FRANJA DE MÉTRICAS DIARIAS DEL PREVENTISTA */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginTop: "10px" }}>
+          <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Visitas</div>
+            <div style={{ fontSize: "15px", fontWeight: "800", color: "#38bdf8", marginTop: "2px" }}>
+              {jornadaActiva ? "3 / 18" : "0 / 18"}
+            </div>
+            <div style={{ fontSize: "9px", color: "#64748b" }}>{jornadaActiva ? "En curso" : "Meta del día"}</div>
+          </div>
+
+          <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Venta Hoy</div>
+            <div style={{ fontSize: "15px", fontWeight: "800", color: "#4ade80", marginTop: "2px" }}>
+              {jornadaActiva ? "$ 148.5K" : "$ 0"}
+            </div>
+            <div style={{ fontSize: "9px", color: "#64748b" }}>Acumulado</div>
+          </div>
+
+          <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Efectividad</div>
+            <div style={{ fontSize: "15px", fontWeight: "800", color: "#facc15", marginTop: "2px" }}>
+              {jornadaActiva ? "44%" : "0%"}
+            </div>
+            <div style={{ fontSize: "9px", color: "#64748b" }}>Ruta diaria</div>
+          </div>
+        </div>
+
         {/* BUSCADOR */}
         <div style={{ marginTop: "12px", position: "relative" }}>
           <input
