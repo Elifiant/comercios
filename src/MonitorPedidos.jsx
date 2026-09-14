@@ -1,180 +1,187 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 
 const PEDIDOS_DEMO = [
-  { id: 'PED-1082', hora: '11:42 hs', preventista: 'Ian Torres', cliente: 'Almacén Los Nietos', direccion: 'Av. Calchaquí 1420, Quilmes', bultos: 18, items_count: 6, total: 148500, estado: 'Ingresado', items: [{ cod: 'ACE-094', nombre: 'Aceite Girasol 1.5L (Caja x12)', cant: '4 cjs', punit: 16200, subtotal: 64800 }, { cod: 'HAR-102', nombre: 'Harina 000 1kg (Fardo x10)', cant: '5 fdos', punit: 7500, subtotal: 37500 }, { cod: 'AZU-055', nombre: 'Azúcar Común 1kg', cant: '3 fdos', punit: 8400, subtotal: 25200 }], nota: 'Don Jorge pide entrega antes de las 13 hs. Paga contra entrega en efectivo.' },
-  { id: 'PED-1081', hora: '11:15 hs', preventista: 'Alex Gómez', cliente: 'Supermercado El Trébol', direccion: 'Zapiola 890, Bernal', bultos: 42, items_count: 14, total: 312000, estado: 'Despachado', items: [{ cod: 'ARR-020', nombre: 'Arroz Largo Fino', cant: '10 bjs', punit: 12000, subtotal: 120000 }, { cod: 'YER-045', nombre: 'Yerba Mate 1kg', cant: '8 cjs', punit: 24000, subtotal: 192000 }], nota: 'Dejar mercadería en depósito trasero.' },
-  { id: 'PED-1080', hora: '10:54 hs', preventista: 'Walter Pérez', cliente: 'Autoservicio Don Mario', direccion: 'Calle 137 N 230, Ezpeleta', bultos: 12, items_count: 4, total: 94200, estado: 'En Preparación', items: [{ cod: 'ACE-094', nombre: 'Aceite Girasol 1.5L', cant: '2 cjs', punit: 16200, subtotal: 32400 }], nota: 'Revisar vencimiento largo.' },
-  { id: 'PED-1079', hora: '10:20 hs', preventista: 'Ian Torres', cliente: 'Kiosco Central', direccion: 'Rivadavia 415, Quilmes', bultos: 8, items_count: 3, total: 58600, estado: 'Ingresado', items: [{ cod: 'GAL-012', nombre: 'Galletitas Dulces Surtidas', cant: '4 cjs', punit: 14650, subtotal: 58600 }], nota: 'Cobrar con transferencia bancaria.' }
+  { id: "PED-1082", hora: "11:42 hs", preventista: "Ian Torres", ruta: "Ruta 01 - Quilmes", cliente: "Almacén Los Nietos", direccion: "Av. Calchaquí 1420", condicion: "Resp. Inscripto", lista: "Mayorista A", bultos: 18, total: 148500, estado: "Ingresado", items: [
+    { nombre: "Aceite Girasol 1.5L", cant: "4 cjs", p_unit: 16200, subtotal: 64800 },
+    { nombre: "Harina 000 1kg", cant: "5 fdos", p_unit: 7500, subtotal: 37500 },
+    { nombre: "Azúcar Común 1kg", cant: "3 fdos", p_unit: 8400, subtotal: 25200 },
+    { nombre: "Fideos Guiseros 500g", cant: "6 cjs", p_unit: 3500, subtotal: 21000 }
+  ], nota: "Entregar antes de las 13:00 hs. Paga contra entrega en efectivo." },
+  { id: "PED-1081", hora: "11:15 hs", preventista: "Alex Gómez", ruta: "Ruta 03 - Bernal", cliente: "Supermercado El Trébol", direccion: "Zapiola 890", condicion: "Monotributo", lista: "Mayorista Especial", bultos: 32, total: 294800, estado: "En Preparación", items: [
+    { nombre: "Arroz Largo Fino 1kg", cant: "10 fdos", p_unit: 12500, subtotal: 125000 },
+    { nombre: "Puré de Tomate 520g", cant: "12 cjs", p_unit: 8900, subtotal: 106800 },
+    { nombre: "Galletitas Variadas", cant: "10 cjs", p_unit: 6300, subtotal: 63000 }
+  ], nota: "Descargar por portón lateral." },
+  { id: "PED-1080", hora: "10:54 hs", preventista: "Walter Pérez", ruta: "Ruta 02 - Ezpeleta", cliente: "Autoservicio Don Mario", direccion: "Calle 137 N° 230", condicion: "Resp. Inscripto", lista: "Mayorista A", bultos: 15, total: 112300, estado: "Ingresado", items: [
+    { nombre: "Yerba Mate 1kg", cant: "6 fdos", p_unit: 11200, subtotal: 67200 },
+    { nombre: "Café Molido 500g", cant: "4 cjs", p_unit: 11275, subtotal: 45100 }
+  ], nota: "Revisar vencimientos de la yerba." },
+  { id: "PED-1079", hora: "10:20 hs", preventista: "Ian Torres", ruta: "Ruta 01 - Quilmes", cliente: "Kiosco & Granja Central", direccion: "Rivadavia 415", condicion: "Consumidor Final", lista: "Minorista B", bultos: 9, total: 68400, estado: "En Depósito", items: [
+    { nombre: "Golosinas Surtidas", cant: "5 cjs", p_unit: 8200, subtotal: 41000 },
+    { nombre: "Chicles Menta x24", cant: "4 cjs", p_unit: 6850, subtotal: 27400 }
+  ], nota: "Cobro por transferencia al recibir." }
 ];
 
 export default function MonitorPedidos() {
-  const [pedidos, setPedidos] = useState(PEDIDOS_DEMO);
+  const [pedidos] = useState(PEDIDOS_DEMO);
+  const [filtroPreventista, setFiltroPreventista] = useState("Todos");
+  const [filtroEstado, setFiltroEstado] = useState("Todos");
   const [pedidoActivo, setPedidoActivo] = useState(PEDIDOS_DEMO[0]);
-  const [alertaFlotante, setAlertaFlotante] = useState(true);
-  const [filtro, setFiltro] = useState('Todos');
 
-  const preventistas = ['Todos', 'Ian Torres', 'Alex Gómez', 'Walter Pérez'];
-  const filtrados = filtro === 'Todos' ? pedidos : pedidos.filter(p => p.preventista === filtro);
-  const totalFacturado = pedidos.reduce((acc, p) => acc + p.total, 0);
-  const ticketPromedio = Math.round(totalFacturado / (pedidos.length || 1));
+  const listaFiltrada = pedidos.filter(p => {
+    const matchPrev = filtroPreventista === "Todos" || p.preventista === filtroPreventista;
+    const matchEst = filtroEstado === "Todos" || p.estado === filtroEstado;
+    return matchPrev && matchEst;
+  });
 
-  const cambiarEstado = (id, nuevo) => {
-    setPedidos(pedidos.map(p => p.id === id ? { ...p, estado: nuevo } : p));
-    if (pedidoActivo && pedidoActivo.id === id) setPedidoActivo({ ...pedidoActivo, estado: nuevo });
+  const preventistas = Array.from(new Set(pedidos.map(p => p.preventista)));
+  const totalFacturado = listaFiltrada.reduce((acc, p) => acc + p.total, 0);
+
+  const getBadgeColor = (estado) => {
+    switch(estado) {
+      case "Ingresado": return { bg: "#dcfce7", text: "#15803d", border: "#bbf7d0" };
+      case "En Preparación": return { bg: "#fef3c7", text: "#b45309", border: "#fde68a" };
+      case "En Depósito": return { bg: "#e0e7ff", text: "#4338ca", border: "#c7d2fe" };
+      default: return { bg: "#f1f5f9", text: "#475569", border: "#e2e8f0" };
+    }
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: '#f8fafc', fontFamily: 'sans-serif', overflow: 'hidden' }}>
-      {/* SIDEBAR */}
-      <aside style={{ width: '260px', background: '#ffffff', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '20px 16px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '28px', padding: '0 8px' }}>
-            <div style={{ width: '36px', height: '36px', background: '#2563eb', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold' }}>📍</div>
-            <div>
-              <div style={{ fontWeight: '800', fontSize: '16px', color: '#0f172a' }}>RutaComercio</div>
-              <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>CONTROL COCKPIT</div>
+    <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif", color: "#0f172a" }}>
+      <header style={{ background: "#0f172a", color: "#fff", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 100 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <a href="/supervisor" style={{ color: "#94a3b8", textDecoration: "none", fontSize: "12px", padding: "4px 8px", background: "#1e293b", borderRadius: "6px" }}>← Supervisor</a>
+          <a href="/web" style={{ color: "#94a3b8", textDecoration: "none", fontSize: "12px", padding: "4px 8px", background: "#1e293b", borderRadius: "6px" }}>← Web</a>
+          <span style={{ fontWeight: "800", fontSize: "14px", color: "#38bdf8" }}>RutaComercio</span>
+          <span style={{ background: "#d97706", color: "#fff", fontSize: "9px", fontWeight: "800", padding: "2px 6px", borderRadius: "4px" }}>DEMO</span>
+        </div>
+        <span style={{ fontSize: "12px", color: "#4ade80", fontWeight: "700" }}>● En vivo</span>
+      </header>
+
+      <main style={{ maxWidth: "1200px", margin: "0 auto", padding: "16px" }}>
+        <div style={{ marginBottom: "16px" }}>
+          <h1 style={{ fontSize: "20px", fontWeight: "800", margin: "0 0 4px 0", color: "#0f172a" }}>Monitor de Pedidos y Ventas Diarias</h1>
+          <p style={{ fontSize: "12px", color: "#64748b", margin: 0 }}>Recepción de comandas y preventas en tiempo real</p>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px", marginBottom: "16px" }}>
+          <div style={{ background: "#fff", padding: "12px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "700" }}>TOTAL FACTURADO</div>
+            <div style={{ fontSize: "18px", fontWeight: "800", color: "#2563eb", marginTop: "4px" }}>${totalFacturado.toLocaleString("es-AR")}</div>
+          </div>
+          <div style={{ background: "#fff", padding: "12px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "700" }}>PEDIDOS HOY</div>
+            <div style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a", marginTop: "4px" }}>{listaFiltrada.length} comandas</div>
+          </div>
+          <div style={{ background: "#fff", padding: "12px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "700" }}>TICKET PROMEDIO</div>
+            <div style={{ fontSize: "18px", fontWeight: "800", color: "#d97706", marginTop: "4px" }}>
+              ${listaFiltrada.length ? Math.round(totalFacturado / listaFiltrada.length).toLocaleString("es-AR") : 0}
             </div>
           </div>
-          <nav style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <a href='/supervisor' style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '8px', color: '#475569', textDecoration: 'none', fontSize: '13px', fontWeight: '600' }}>🗺️ Monitoreo en Vivo</a>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '8px', background: '#eff6ff', color: '#2563eb', fontSize: '13px', fontWeight: '700' }}>📦 Pedidos y Ventas</div>
-            <a href='/' style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '8px', color: '#475569', textDecoration: 'none', fontSize: '13px', fontWeight: '600' }}>📱 Vista Móvil</a>
-            <a href='/web' style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '8px', color: '#475569', textDecoration: 'none', fontSize: '13px', fontWeight: '600' }}>🌐 Web Comercial</a>
-          </nav>
         </div>
-        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '14px', fontSize: '11px', color: '#64748b' }}>Elifiant • Quilmes Ops</div>
-      </aside>
 
-      {/* PRINCIPAL */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '28px 32px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+        <div style={{ background: "#fff", padding: "10px 14px", borderRadius: "10px", border: "1px solid #e2e8f0", marginBottom: "16px", display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Vendedor:</span>
+            <select value={filtroPreventista} onChange={e => setFiltroPreventista(e.target.value)} style={{ padding: "6px 8px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#f8fafc", fontWeight: "600" }}>
+              <option value="Todos">Todos ({pedidos.length})</option>
+              {preventistas.map((p, i) => <option key={i} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Estado:</span>
+            <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ padding: "6px 8px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#f8fafc", fontWeight: "600" }}>
+              <option value="Todos">Todos los estados</option>
+              <option value="Ingresado">Ingresado</option>
+              <option value="En Preparación">En Preparación</option>
+              <option value="En Depósito">En Depósito</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px", alignItems: "start" }}>
           <div>
-            <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}>RECEPCIÓN EN DIRECTO</span>
-            <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', margin: '6px 0 0 0' }}>Monitor de Pedidos y Ventas Diarias</h1>
-          </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <a href='/supervisor' style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '8px', color: '#334155', textDecoration: 'none', fontSize: '13px', fontWeight: '600' }}>← Volver al Mapa</a>
-            <button onClick={() => alert('Lote sincronizado para depósito.')} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>🚀 Despachar Lote</button>
-          </div>
-        </div>
-
-        {/* METRICAS */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-          <div style={{ background: '#fff', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>FACTURACIÓN PREVENTA HOY</div>
-            <div style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', marginTop: '6px' }}>${totalFacturado.toLocaleString('es-AR')}</div>
-            <div style={{ fontSize: '12px', color: '#16a34a', marginTop: '4px', fontWeight: '600' }}>Meta cumplida al 88.9%</div>
-          </div>
-          <div style={{ background: '#fff', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>PEDIDOS HOY</div>
-            <div style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', marginTop: '6px' }}>{pedidos.length} comandas</div>
-            <div style={{ fontSize: '12px', color: '#2563eb', marginTop: '4px', fontWeight: '600' }}>Efectividad 90.4%</div>
-          </div>
-          <div style={{ background: '#fff', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>TICKET PROMEDIO</div>
-            <div style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', marginTop: '6px' }}>${ticketPromedio.toLocaleString('es-AR')}</div>
-            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Promedio 14 bultos/visita</div>
-          </div>
-          <div style={{ background: '#fff', padding: '18px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>LÍDER DE VENTAS</div>
-            <div style={{ fontSize: '20px', fontWeight: '800', color: '#0f172a', marginTop: '6px' }}>Ian Torres</div>
-            <div style={{ fontSize: '12px', color: '#2563eb', marginTop: '4px', fontWeight: '700' }}>$148.500 facturados</div>
-          </div>
-        </div>
-
-        {/* FILTRO */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-          <span style={{ fontSize: '12px', fontWeight: '700', color: '#475569' }}>PREVENTISTA:</span>
-          {preventistas.map(p => (
-            <button key={p} onClick={() => setFiltro(p)} style={{ border: filtro === p ? '1px solid #2563eb' : '1px solid #cbd5e1', background: filtro === p ? '#2563eb' : '#fff', color: filtro === p ? '#fff' : '#334155', padding: '5px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>{p}</button>
-          ))}
-        </div>
-
-        {/* TABLA */}
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '11px', textTransform: 'uppercase' }}>
-                <th style={{ padding: '12px 16px' }}>HORA / ID</th>
-                <th style={{ padding: '12px 16px' }}>PREVENTISTA</th>
-                <th style={{ padding: '12px 16px' }}>COMERCIO</th>
-                <th style={{ padding: '12px 16px' }}>BULTOS</th>
-                <th style={{ padding: '12px 16px' }}>TOTAL</th>
-                <th style={{ padding: '12px 16px' }}>ESTADO</th>
-                <th style={{ padding: '12px 16px', textAlign: 'right' }}>ACCIONES</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtrados.map(ped => (
-                <tr key={ped.id} onClick={() => setPedidoActivo(ped)} style={{ borderBottom: '1px solid #f1f5f9', background: pedidoActivo && pedidoActivo.id === ped.id ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
-                  <td style={{ padding: '12px 16px', fontWeight: '700', color: '#2563eb' }}>#{ped.id}<div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'normal' }}>{ped.hora}</div></td>
-                  <td style={{ padding: '12px 16px', fontWeight: '600', color: '#0f172a' }}>{ped.preventista}</td>
-                  <td style={{ padding: '12px 16px' }}><strong>{ped.cliente}</strong><div style={{ fontSize: '11px', color: '#64748b' }}>{ped.direccion}</div></td>
-                  <td style={{ padding: '12px 16px' }}>{ped.bultos} bultos</td>
-                  <td style={{ padding: '12px 16px', fontWeight: '800', color: '#0f172a' }}>${ped.total.toLocaleString('es-AR')}</td>
-                  <td style={{ padding: '12px 16px' }}><span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700', background: ped.estado === 'Ingresado' ? '#dbeafe' : ped.estado === 'En Preparación' ? '#fef3c7' : '#dcfce7', color: ped.estado === 'Ingresado' ? '#1d4ed8' : ped.estado === 'En Preparación' ? '#b45309' : '#15803d' }}>{ped.estado}</span></td>
-                  <td style={{ padding: '12px 16px', textAlign: 'right' }}><button onClick={(e) => { e.stopPropagation(); setPedidoActivo(ped); }} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '5px 10px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>Ver Detalle →</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* ALERTA FLOTANTE */}
-        {alertaFlotante && (
-          <div style={{ position: 'fixed', bottom: '24px', right: '450px', background: '#1e293b', color: '#fff', padding: '14px 18px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '14px', zIndex: 50, boxShadow: '0 10px 25px rgba(0,0,0,0.3)' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>🔔</div>
-            <div>
-              <div style={{ fontWeight: '700', fontSize: '13px' }}>Nuevo Pedido Ingresado</div>
-              <div style={{ fontSize: '12px', color: '#94a3b8' }}>Ian Torres • Almacén Los Nietos • <strong style={{ color: '#38bdf8' }}>$148.500</strong></div>
+            <div style={{ fontSize: "12px", fontWeight: "800", color: "#475569", marginBottom: "8px", textTransform: "uppercase" }}>
+              Comandas Activas ({listaFiltrada.length})
             </div>
-            <button onClick={() => setAlertaFlotante(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: '16px', cursor: 'pointer' }}>✕</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {listaFiltrada.map(p => {
+                const b = getBadgeColor(p.estado);
+                const activo = pedidoActivo && pedidoActivo.id === p.id;
+                return (
+                  <div key={p.id} onClick={() => setPedidoActivo(p)} style={{ background: activo ? "#eff6ff" : "#fff", border: activo ? "2px solid #2563eb" : "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", cursor: "pointer" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
+                      <div>
+                        <span style={{ fontWeight: "800", fontSize: "13px", color: "#2563eb" }}>#{p.id}</span>
+                        <span style={{ fontSize: "11px", color: "#64748b", marginLeft: "6px" }}>{p.hora}</span>
+                      </div>
+                      <span style={{ background: b.bg, color: b.text, border: "1px solid " + b.border, fontSize: "10px", fontWeight: "800", padding: "2px 8px", borderRadius: "12px" }}>
+                        {p.estado}
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: "700", fontSize: "14px", color: "#0f172a" }}>{p.cliente}</div>
+                    <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>📍 {p.direccion}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", paddingTop: "8px", borderTop: "1px solid #f1f5f9" }}>
+                      <span style={{ fontSize: "11px", color: "#475569" }}>👤 <strong>{p.preventista}</strong> ({p.bultos} bultos)</span>
+                      <span style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>${p.total.toLocaleString("es-AR")}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        )}
-      </main>
 
-      {/* PANEL DERECHO */}
-      {pedidoActivo && (
-        <aside style={{ width: '420px', background: '#ffffff', borderLeft: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '28px 24px', overflowY: 'auto' }}>
-          <div>
-            <h2 style={{ fontSize: '20px', fontWeight: '800', color: '#0f172a', margin: 0 }}>Pedido #{pedidoActivo.id}</h2>
-            <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '16px' }}>{pedidoActivo.hora} • Supabase Conectado</div>
-            <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
-              <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>CLIENTE</div>
-              <div style={{ fontWeight: '800', color: '#0f172a' }}>{pedidoActivo.cliente}</div>
-              <div style={{ fontSize: '12px', color: '#475569' }}>{pedidoActivo.direccion}</div>
-              <div style={{ marginTop: '8px', fontSize: '12px', color: '#334155' }}><strong>Preventista:</strong> {pedidoActivo.preventista}</div>
-            </div>
-            <div style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a', marginBottom: '8px' }}>DESGLOSE DE MERCADERÍA</div>
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', marginBottom: '16px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <tbody>
-                  {pedidoActivo.items.map((it, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px 10px' }}><strong>{it.nombre}</strong></td>
-                      <td style={{ padding: '8px 10px', textAlign: 'center' }}>{it.cant}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '700' }}>${it.subtotal.toLocaleString('es-AR')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {pedidoActivo.nota && (
-              <div style={{ background: '#fefce8', border: '1px solid #fef08a', padding: '10px', borderRadius: '8px', fontSize: '12px', color: '#854d0e', marginBottom: '16px' }}>
-                <strong>Nota:</strong> {pedidoActivo.nota}
+          {pedidoActivo && (
+            <div style={{ background: "#fff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "16px", position: "sticky", top: "70px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "10px", marginBottom: "12px" }}>
+                <div>
+                  <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "700" }}>DETALLE DE COMANDA</div>
+                  <div style={{ fontSize: "17px", fontWeight: "800", color: "#0f172a" }}>{pedidoActivo.id} - {pedidoActivo.cliente}</div>
+                </div>
+                <span style={{ background: "#dcfce7", color: "#15803d", fontSize: "11px", fontWeight: "800", padding: "4px 8px", borderRadius: "6px" }}>
+                  {pedidoActivo.lista}
+                </span>
               </div>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid #0f172a', paddingTop: '12px' }}>
-              <strong>TOTAL:</strong>
-              <strong style={{ fontSize: '20px', color: '#2563eb' }}>${pedidoActivo.total.toLocaleString('es-AR')}</strong>
+
+              <div style={{ fontSize: "12px", color: "#475569", marginBottom: "12px", lineHeight: 1.5 }}>
+                <div>📍 <strong>Dirección:</strong> {pedidoActivo.direccion}</div>
+                <div>👤 <strong>Preventista:</strong> {pedidoActivo.preventista} ({pedidoActivo.ruta})</div>
+                <div>📝 <strong>Nota de Entrega:</strong> <em>"{pedidoActivo.nota}"</em></div>
+              </div>
+
+              <div style={{ fontSize: "12px", fontWeight: "800", color: "#0f172a", marginBottom: "8px" }}>MERCADERÍA SOLICITADA ({pedidoActivo.items.length} ítems)</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "16px" }}>
+                {pedidoActivo.items.map((it, idx) => (
+                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#f8fafc", borderRadius: "6px", fontSize: "12px" }}>
+                    <div>
+                      <div style={{ fontWeight: "700", color: "#0f172a" }}>{it.nombre}</div>
+                      <div style={{ color: "#64748b", fontSize: "11px" }}>{it.cant} × ${it.p_unit.toLocaleString("es-AR")}</div>
+                    </div>
+                    <div style={{ fontWeight: "800", color: "#0f172a" }}>${it.subtotal.toLocaleString("es-AR")}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "#eff6ff", borderRadius: "8px", marginBottom: "14px" }}>
+                <div>
+                  <div style={{ fontSize: "11px", color: "#2563eb", fontWeight: "700" }}>TOTAL PEDIDO</div>
+                  <div style={{ fontSize: "11px", color: "#64748b" }}>{pedidoActivo.bultos} bultos totales</div>
+                </div>
+                <div style={{ fontSize: "20px", fontWeight: "900", color: "#1d4ed8" }}>
+                  ${pedidoActivo.total.toLocaleString("es-AR")}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button onClick={() => alert("Comanda lista para empaque y despacho.")} style={{ flex: 1, background: "#2563eb", color: "#fff", border: "none", padding: "10px", borderRadius: "8px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>
+                  📦 Pasar a Depósito
+                </button>
+              </div>
             </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '20px' }}>
-            <button onClick={() => cambiarEstado(pedidoActivo.id, 'Despachado')} style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: '700', cursor: 'pointer' }}>📦 Despachar a Depósito</button>
-            <button onClick={() => { const tel = '5491166646806'; window.open(`https://wa.me/${tel}?text=Hola%20${pedidoActivo.cliente}!%20Confirmamos%20tu%20Pedido%20%23${pedidoActivo.id}%20por%20$${pedidoActivo.total}.`, '_blank'); }} style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: '700', cursor: 'pointer' }}>💬 WhatsApp al Comercio</button>
-          </div>
-        </aside>
-      )}
+          )}
+        </div>
+      </main>
     </div>
   );
 }
