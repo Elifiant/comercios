@@ -503,32 +503,40 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
-      <div style={{ padding: "14px 16px", background: "#1e293b", borderTop: "1px solid #334155", display: "flex", gap: "10px" }}>
+      <header style={{ padding: "14px 16px", backgroundColor: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155", position: "sticky", top: 0, zIndex: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ width: "36px", height: "36px", borderRadius: "8px", backgroundColor: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", boxShadow: "0 2px 8px rgba(37,99,235,0.4)" }}>
+              📍
+            </div>
+            <div>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: "#fff", letterSpacing: "0.5px" }}>RutaComercio</div>
+              <div style={{ fontSize: "12px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>👤 {(typeof perfil !== "undefined" && perfil && perfil.nombre) ? perfil.nombre : "Walter"}</span>
+                <span>·</span>
+                <span style={{ color: "#38bdf8", fontWeight: "600" }}>{(typeof perfil !== "undefined" && perfil && perfil.empresa) ? perfil.empresa : "Elifiant"}</span>
+              </div>
+            </div>
+          </div>
           <button
             onClick={async () => {
               try {
                 if (typeof supabase !== "undefined" && supabase.auth) {
                   await supabase.auth.signOut();
                 }
-              } catch (err) {
-                console.error("Error al salir de Supabase:", err);
-              }
+              } catch (err) {}
               try {
-                for (let i = localStorage.length - 1; i >= 0; i--) {
-                  const k = localStorage.key(i);
-                  if (k && (k.includes("supabase") || k.includes("auth") || k.includes("token") || k.includes("sb-"))) {
-                    localStorage.removeItem(k);
-                  }
-                }
+                localStorage.clear();
+                sessionStorage.clear();
               } catch (e) {}
               if (typeof setPerfil === "function") setPerfil(null);
               if (typeof setSesion === "function") setSesion(null);
+              window.location.href = window.location.pathname;
             }}
-            style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}
+            style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
           >
             ✕ Salir
           </button>
-        </div>
+        </header>
 
         {/* TABLERO JORNADA Y MODO MANEJO */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
