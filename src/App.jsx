@@ -679,54 +679,140 @@ if (modoManejo) {
   
 
   return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#090d16', color: '#fff' }}>
-        <header style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px', borderBottom: '1px solid #1e293b', backgroundColor: '#090d16' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#fff' }}>📍 RutaComercio</h1>
-            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>{comercios.length} comercios cargados</p>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", backgroundColor: "#0b1329", color: "#f8fafc", fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif" }}>
+      {/* CABECERA CON PERFIL DE WALTER */}
+      <header style={{ padding: "14px 16px 12px", backgroundColor: "#0f172a", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 30 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ width: "38px", height: "38px", borderRadius: "50%", background: "linear-gradient(135deg, #2563eb, #3b82f6)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "16px", color: "#fff", boxShadow: "0 2px 8px rgba(37,99,235,0.4)" }}>
+              W
+            </div>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontWeight: "700", fontSize: "15px", color: "#fff" }}>Walter</span>
+                <span style={{ fontSize: "10px", backgroundColor: "#1e3a8a", color: "#60a5fa", padding: "1px 6px", borderRadius: "10px", fontWeight: "600", textTransform: "uppercase" }}>Elifiant</span>
+              </div>
+              <div style={{ fontSize: "11px", color: "#94a3b8" }}>Preventa Móvil · Campo</div>
+            </div>
           </div>
           <button
-            onClick={() => setModoManejo(true)}
-            style={{ padding: '8px 14px', borderRadius: '8px', background: '#2563eb', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+            onClick={() => supabase.auth.signOut()}
+            style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}
           >
-            🚗 Modo Manejo
+            ✕ Salir
           </button>
         </div>
-        <button
-          onClick={() => { if (!jornadaActiva) { iniciarJornada(); } else { cerrarJornada(); } }}
-          style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', background: jornadaActiva ? '#1e293b' : '#10b981', border: '1px solid #334155', color: '#fff', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-        >
-          <span>{jornadaActiva ? '⏱️ Jornada: ' + tiempoTranscurrido : '▶ Iniciar Jornada'}</span>
-          <span style={{ fontSize: '11px', opacity: 0.8 }}>{jornadaActiva ? 'Tocar para cerrar' : 'Comenzar día'}</span>
-        </button>
+
+        {/* TABLERO JORNADA Y MODO MANEJO */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
+          {/* Tarjeta Jornada */}
+          <div style={{ backgroundColor: "#1e293b", padding: "10px", borderRadius: "10px", border: "1px solid #334155" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", textTransform: "uppercase" }}>Jornada</span>
+              <span style={{ fontSize: "10px", color: jornadaActiva ? "#4ade80" : "#94a3b8", fontWeight: "bold" }}>
+                {jornadaActiva ? "● En vivo" : "○ Inactiva"}
+              </span>
+            </div>
+            <div style={{ fontSize: "16px", fontWeight: "800", color: "#fff" }}>
+              {jornadaActiva ? tiempoTranscurrido : "0m"}
+            </div>
+            <button
+              onClick={() => {
+                if (jornadaActiva) {
+                  setJornadaActiva(false);
+                  localStorage.removeItem("jornada_activa");
+                  localStorage.removeItem("timestamp_inicio_jornada");
+                  localStorage.removeItem("hora_inicio_jornada");
+                } else {
+                  setJornadaActiva(true);
+                  const ahora = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                  localStorage.setItem("jornada_activa", "true");
+                  localStorage.setItem("timestamp_inicio_jornada", Date.now().toString());
+                  localStorage.setItem("hora_inicio_jornada", ahora);
+                  setHoraInicioJornada(ahora);
+                }
+              }}
+              style={{ width: "100%", marginTop: "6px", padding: "6px 0", backgroundColor: jornadaActiva ? "#dc2626" : "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}
+            >
+              {jornadaActiva ? "Finalizar" : "Iniciar"}
+            </button>
+          </div>
+
+          {/* Tarjeta Modo Manejo */}
+          <div style={{ backgroundColor: "#1e293b", padding: "10px", borderRadius: "10px", border: "1px solid #334155", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", textTransform: "uppercase" }}>Navegación</span>
+              <span style={{ fontSize: "10px", color: "#38bdf8", fontWeight: "bold" }}>GPS Activo</span>
+            </div>
+            <button
+              onClick={() => setModoManejo(true)}
+              style={{ width: "100%", marginTop: "10px", padding: "10px 0", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: "800", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", boxShadow: "0 4px 12px rgba(37,99,235,0.4)" }}
+            >
+              🚗 Modo Manejo
+            </button>
+          </div>
+        </div>
+
+        {/* BUSCADOR */}
+        <div style={{ marginTop: "12px", position: "relative" }}>
+          <input
+            type="text"
+            placeholder="🔍 Buscar comercio por nombre o ID..."
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            style={{ width: "100%", padding: "10px 14px", backgroundColor: "#0b1329", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
+          />
+        </div>
       </header>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 16px 80px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {cargando ? (
-          <p style={{ textAlign: 'center', color: '#94a3b8', marginTop: '30px' }}>Cargando comercios...</p>
-        ) : listaFiltrada.length === 0 ? (
-          <p style={{ textAlign: 'center', color: '#64748b', marginTop: '30px' }}>No se encontraron comercios</p>
-        ) : (
-          listaFiltrada.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => setComercioSeleccionado(c)}
-              style={{ padding: '14px', background: '#131b2e', borderRadius: '12px', border: '1px solid #1e293b', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-            >
-              <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: '15px', color: '#f8fafc' }}>{c.nombre || c.direccion || ('Comercio #' + (c.id || ''))}</h3>
-                <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8' }}>{c.rubro || 'General'} {c.direccion ? '• ' + c.direccion : ''}</p>
-              </div>
-              <span style={{ fontSize: '18px', color: '#64748b' }}>›</span>
-            </div>
-          ))
-        )}
-      </div>
+      {/* LISTADO DE COMERCIOS */}
+      <main style={{ flex: 1, overflowY: "auto", padding: "12px 16px 80px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+          <span style={{ fontSize: "12px", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+            Comercios Asignados ({listaFiltrada.length})
+          </span>
+        </div>
 
+        {cargando ? (
+          <div style={{ textAlign: "center", padding: "40px 0", color: "#94a3b8" }}>Cargando comercios...</div>
+        ) : listaFiltrada.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px 0", color: "#94a3b8", fontSize: "14px" }}>No se encontraron comercios</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {listaFiltrada.map((c) => (
+              <div
+                key={c.id}
+                onClick={() => setComercioSeleccionado(c)}
+                style={{ backgroundColor: "#1e293b", padding: "12px 14px", borderRadius: "10px", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "transform 0.1s" }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  {c.foto_url ? (
+                    <img src={c.foto_url} alt="Local" style={{ width: "42px", height: "42px", borderRadius: "8px", objectFit: "cover", border: "1px solid #475569" }} />
+                  ) : (
+                    <div style={{ width: "42px", height: "42px", borderRadius: "8px", backgroundColor: "#0b1329", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}>
+                      🏪
+                    </div>
+                  )}
+                  <div>
+                    <div style={{ fontWeight: "700", fontSize: "14px", color: "#f8fafc" }}>
+                      {c.nombre || "Comercio #" + c.id}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
+                      {c.rubro || "General"} {c.direccion ? "· " + c.direccion : ""}
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: "18px", color: "#64748b", paddingLeft: "8px" }}>›</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* BOTÓN FLOTANTE REGISTRAR COMERCIO */}
       <button
         onClick={agregarComercioInmediato}
-        style={{ position: 'fixed', bottom: '24px', right: '20px', width: '56px', height: '56px', borderRadius: '28px', background: '#2563eb', color: '#fff', border: 'none', fontSize: '28px', lineHeight: '56px', textAlign: 'center', boxShadow: '0 4px 14px rgba(37,99,235,0.4)', cursor: 'pointer', zIndex: 1000 }}
+        style={{ position: "fixed", bottom: "20px", right: "20px", width: "56px", height: "56px", borderRadius: "28px", backgroundColor: "#2563eb", color: "#fff", border: "none", fontSize: "26px", fontWeight: "bold", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px rgba(37,99,235,0.5)", cursor: "pointer", zIndex: 40 }}
       >
         +
       </button>
