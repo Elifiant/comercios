@@ -328,7 +328,7 @@ export default function App() {
     if (!comercioSeleccionado) return;
     try {
       const actualizacion = {
-        nombre: (comercioSeleccionado.nombre && comercioSeleccionado.nombre.trim()) ? comercioSeleccionado.nombre.trim() : ("Comercio #" + comercioSeleccionado.id),
+        nombre: comercioSeleccionado.nombre || "Comercio sin nombre",
         direccion: comercioSeleccionado.direccion || "",
         rubro: comercioSeleccionado.rubro || "General",
         telefono: comercioSeleccionado.telefono || "",
