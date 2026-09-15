@@ -32,11 +32,7 @@ export default function AdminClientes() {
   const [monedaPago, setMonedaPago] = useState("ARS");
   const [comprobantePago, setComprobantePago] = useState("");
   const [metodoPago, setMetodoPago] = useState("Transferencia CBU");
-  const [historialPagos, setHistorialPagos] = useState([
-    { id: 1, fecha: "Hoy, recién", empresa: "Distribuidora Quilmes B2B S.A.", monto: "74.24", moneda: "USD", metodo: "Transf. Banco Galicia", ref: "SWIFT-GAL-982180", estado: "Confirmado" },
-    { id: 2, fecha: "01/10/2024", empresa: "Elifiant", monto: "229.50", moneda: "USDT", metodo: "Binance Pay TRC-20", ref: "0x8a92fb4e771c9d811", estado: "Confirmado" },
-    { id: 3, fecha: "28/09/2024", empresa: "Mayorista San Martín Golosinas", monto: "320000", moneda: "ARS", metodo: "eCheq Macro 30d", ref: "ECHQ-MAC-33029", estado: "Acreditado" }
-  ]);
+  const [historialPagos, setHistorialPagos] = useState([]);
   const [empresaDetalleModal, setEmpresaDetalleModal] = useState(null);
   const [mostrarModalEditar, setMostrarModalEditar] = useState(false);
   const [empresaAEditar, setEmpresaAEditar] = useState(null);
@@ -306,11 +302,11 @@ export default function AdminClientes() {
             <span style={{ fontSize: "11px", backgroundColor: "#065f46", color: "#34d399", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>✓ Acreditado</span>
           </div>
           <h2 style={{ margin: "10px 0 4px 0", fontSize: "24px", color: "#10b981", fontWeight: "800" }}>
-            ${Number(cobradoUSD || 74.24).toLocaleString()} <span style={{ fontSize: "13px", color: "#94a3b8" }}>USD</span>
+            ${Number(cobradoUSD || 0).toLocaleString()} <span style={{ fontSize: "13px", color: "#94a3b8" }}>USD</span>
           </h2>
           <div style={{ fontSize: "12px", color: "#cbd5e1", display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <span>ARS: <strong>${Number(cobradoARS || 320000).toLocaleString()}</strong></span>
-            <span>USDT: <strong>₮ {cobradoUSDT || 229.50}</strong></span>
+            <span>ARS: <strong>${Number(cobradoARS || 0).toLocaleString()}</strong></span>
+            <span>USDT: <strong>₮ {cobradoUSDT || 0}</strong></span>
           </div>
         </div>
 
