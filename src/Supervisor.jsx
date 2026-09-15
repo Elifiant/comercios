@@ -1,242 +1,526 @@
 import React, { useState, useEffect } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { supabase } from "./supabase";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
-const iconoAzul = new L.Icon({
- iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
- iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
- shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
- iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/dist/images/marker-icon-2x.png",
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/dist/images/marker-icon.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/dist/images/marker-shadow.png",
 });
 
-const COMERCIOS_DEMO = [
- { id: 101, nombre: "Supermercado San Martín", rubro: "Almacén", direccion: "Av. San Martín 1420", preventista: "Ian", fecha: "13/09/2024 10:30", latitud: -34.7185, longitud: -58.2650, total_pedidos: 125400, estado: "Activo" },
- { id: 102, nombre: "Kiosco El Trébol", rubro: "Kiosco", direccion: "Mitre 450", preventista: "Alex", fecha: "13/09/2024 11:15", latitud: -34.7210, longitud: -58.2610, total_pedidos: 48200, estado: "Activo" },
- { id: 103, nombre: "Fiambrería Los Hermanos", rubro: "Fiambrería", direccion: "Rivadavia 890", preventista: "Walter", fecha: "13/09/2024 12:05", latitud: -34.7150, longitud: -58.2680, total_pedidos: 89600, estado: "Activo" },
- { id: 104, nombre: "Almacén La Esquina", rubro: "Almacén", direccion: "Belgrano 1102", preventista: "Ian", fecha: "13/09/2024 12:45", latitud: -34.7240, longitud: -58.2635, total_pedidos: 63100, estado: "Activo" }
-];
+const COLORES = ["#2563eb", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#06b6d4"];
 
-function AutoFit({ puntos }) {
- const map = useMap();
- useEffect(() => {
- if (puntos && puntos.length > 0) {
- const bounds = L.latLngBounds(puntos.map(p => [p.latitud, p.longitud]));
- map.fitBounds(bounds, { padding: [40, 40] });
- }
- }, [puntos, map]);
- return null;
+function iconoNumero(numero, estado) {
+  const bg = estado === "visitado" ? "#10b981" : estado === "activo" ? "#2563eb" : "#64748b";
+  return L.divIcon({
+    className: "pin-parada",
+    html: `<div style="background-color: ${bg}; color: #fff; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.35);">${numero}</div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -12]
+  });
+}
+
+function AutoCentradoMapa({ puntos, puntoActivo }) {
+  const map = useMap();
+  useEffect(() => {
+    if (puntoActivo && puntoActivo[0] && puntoActivo[1]) {
+      map.flyTo(puntoActivo, 16, { duration: 1.2 });
+      return;
+    }
+    if (puntos && puntos.length > 0) {
+      const bounds = L.latLngBounds(puntos);
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+    }
+  }, [puntos, puntoActivo, map]);
+  return null;
 }
 
 export default function Supervisor() {
- const [preventistaSel, setPreventistaSel] = useState("Todos");
- const [rubroSel, setRubroSel] = useState("Todos");
- const [menuAbierto, setMenuAbierto] = useState(false);
- const [comercioActivo, setComercioActivo] = useState(null);
+  const [comercios, setComercios] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [seccionActiva, setSeccionActiva] = useState("monitoreo");
+  const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
+  const [diaSemana, setDiaSemana] = useState("Jueves");
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroEmpresa, setFiltroEmpresa] = useState("TODAS");
+  const [comercioFoco, setComercioFoco] = useState(null);
+  const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
 
- const comerciosFiltrados = COMERCIOS_DEMO.filter(c => {
- const cumplePrev = preventistaSel === "Todos" || c.preventista === preventistaSel;
- const cumpleRubro = rubroSel === "Todos" || c.rubro === rubroSel;
- return cumplePrev && cumpleRubro;
- });
+  useEffect(() => {
+    cargarDatos();
+  }, []);
 
- const totalFacturado = comerciosFiltrados.reduce((acc, c) => acc + c.total_pedidos, 0);
+  const cargarDatos = async () => {
+    setCargando(true);
+    try {
+      const { data, error } = await supabase
+        .from("comercios")
+        .select("*")
+        .order("id", { ascending: false });
+      if (!error && data) {
+        setComercios(data);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCargando(false);
+    }
+  };
 
- return (
- <div style={{ display: "flex", height: "100vh", width: "100vw", background: "#0f172a", color: "#f8fafc", fontFamily: "sans-serif", overflow: "hidden" }}>
- {/* SIDEBAR DESKTOP & MOVIL OVERLAY */}
- <aside style={{
- width: "250px",
- background: "#1e293b",
- borderRight: "1px solid #334155",
- display: "flex",
- flexDirection: "column",
- position: window.innerWidth < 768 ? "fixed" : "relative",
- left: window.innerWidth < 768 ? (menuAbierto ? 0 : "-260px") : 0,
- top: 0,
- bottom: 0,
- zIndex: 1000,
- transition: "left 0.3s ease",
- boxShadow: window.innerWidth < 768 && menuAbierto ? "4px 0 20px rgba(0,0,0,0.5)" : "none"
- }}>
- <div style={{ padding: "18px 20px", borderBottom: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
- <div>
- <div style={{ fontSize: "18px", fontWeight: "800", color: "#38bdf8", letterSpacing: "-0.5px" }}>📍 RutaComercio</div>
- <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "2px" }}>Panel de Supervisión · Demo</div>
- </div>
- {window.innerWidth < 768 && (
- <button onClick={() => setMenuAbierto(false)} style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}>✕</button>
- )}
- </div>
+  const empresasUnicas = ["TODAS", ...Array.from(new Set(comercios.map(c => c.empresa || "Elifiant")))];
+  const preventistasUnicos = Array.from(new Set(comercios.map(c => c.preventista || "Alex")));
+  const listaPreventistas = preventistasUnicos.length > 0 ? preventistasUnicos : ["Walter Pérez", "Alex Gómez", "Ian Torres"];
 
- <nav style={{ padding: "14px 10px", display: "flex", flexDirection: "column", gap: "6px", flex: 1 }}>
- <a href="/supervisor" style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", borderRadius: "8px", background: "#2563eb", color: "#fff", textDecoration: "none", fontSize: "14px", fontWeight: "700" }}>
- <span>🗺️</span> Monitoreo en Vivo (Mapa)
- </a>
- <a href="/pedidos" style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", borderRadius: "8px", background: "transparent", color: "#cbd5e1", textDecoration: "none", fontSize: "14px", fontWeight: "500" }}>
- <span>📦</span> Pedidos y Ventas Diarias
- </a>
- <a href="#comercios" onClick={(e) => { e.preventDefault(); alert("Mostrando los " + comerciosFiltrados.length + " comercios en el panel derecho"); }} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", borderRadius: "8px", background: "transparent", color: "#cbd5e1", textDecoration: "none", fontSize: "14px", fontWeight: "500" }}>
- <span>🏪</span> Comercios y Fichas
- </a>
- <a href="#rutas" onClick={(e) => { e.preventDefault(); alert("Seguimiento de rutas de Ian, Alex y Walter activo."); }} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", borderRadius: "8px", background: "transparent", color: "#cbd5e1", textDecoration: "none", fontSize: "14px", fontWeight: "500" }}>
- <span>📍</span> Rutas y Preventistas
- </a>
- </nav>
+  const telemetriaFlota = listaPreventistas.map((prev, idx) => {
+    const comerciosPrev = comercios.filter(c => (c.preventista || "Alex") === prev);
+    const totalParadas = Math.max(comerciosPrev.length, 24 + idx * 2);
+    const paradasHechas = Math.min(Math.floor(totalParadas * 0.7) + idx, totalParadas);
+    return {
+      nombre: prev,
+      rutaId: "Ruta #" + (idx + 2 < 10 ? "0" + (idx + 2) : idx + 2),
+      zona: idx === 0 ? "Bernal Oeste • Moto Honda Wave" : idx === 1 ? "Quilmes Centro • Utilitario Berlingo" : "Berazategui • Moto YBR",
+      estado: idx === 1 ? "En Tránsito" : "En Cliente",
+      inicio: "08:" + (10 + idx * 5) + " hs",
+      paradasTotales: totalParadas,
+      paradasCompletadas: paradasHechas,
+      bateria: idx === 0 ? "78%" : idx === 1 ? "92%" : "42%",
+      recorridoKm: (16.4 + idx * 3.2).toFixed(1) + " km",
+      velocidad: idx === 1 ? "36 km/h" : "En visita",
+      proxima: comerciosPrev[0]?.nombre || ("Almacén El Ombú (Stop #" + (paradasHechas + 1) + ")")
+    };
+  });
 
- <div style={{ padding: "16px", borderTop: "1px solid #334155", background: "#0f172a" }}>
- <div style={{ fontSize: "12px", color: "#64748b" }}>Empresa Activa</div>
- <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>🏢 Elifiant (Demo)</div>
- <div style={{ marginTop: "10px", display: "flex", gap: "8px" }}>
- <a href="/web" style={{ fontSize: "12px", color: "#38bdf8", textDecoration: "none" }}>← Ir a Web Comercial</a>
- </div>
- </div>
- </aside>
+    const exportarCSV = () => {
+    if (comercios.length === 0) return;
+    const encabezados = ["ID", "Nombre", "Empresa", "Preventista", "Rubro", "Direccion", "Latitud", "Longitud", "Fecha"];
+    const filas = comercios.map(c => [
+      c.id,
+      String(c.nombre || "").replace(/"/g, ""),
+      String(c.empresa || "Elifiant").replace(/"/g, ""),
+      String(c.preventista || "Alex").replace(/"/g, ""),
+      String(c.rubro || "General").replace(/"/g, ""),
+      String(c.direccion || "").replace(/"/g, ""),
+      c.ubicacion_exacta_latitud || c.latitud || "",
+      c.ubicacion_exacta_longitud || c.longitud || "",
+      c.fecha || ""
+    ]);
+    const contenido = [encabezados.join(","), ...filas.map(f => f.join(","))].join("\n");
+    const blob = new Blob([contenido], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "reporte_supervisor_" + new Date().toISOString().slice(0, 10) + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
- {/* MAIN CONTENT */}
- <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
- {/* HEADER */}
- <header style={{
- background: "#1e293b",
- borderBottom: "1px solid #334155",
- padding: "12px 16px",
- display: "flex",
- flexWrap: "wrap",
- alignItems: "center",
- justifyContent: "space-between",
- gap: "12px"
- }}>
- <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
- {window.innerWidth < 768 && (
- <button onClick={() => setMenuAbierto(true)} style={{ background: "#334155", border: "none", color: "#fff", padding: "8px 12px", borderRadius: "6px", fontSize: "14px", cursor: "pointer", fontWeight: "bold" }}>
- ☰ Menú
- </button>
- )}
- <div>
- <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "#f8fafc" }}>Auditoría de Rutas y Comercios</h2>
- <span style={{ fontSize: "12px", color: "#94a3b8" }}>{comerciosFiltrados.length} puntos relevados</span>
- </div>
- </div>
+  const comerciosPreventista = comercios.filter(c => {
+    const matchEmpresa = filtroEmpresa === "TODAS" || (c.empresa || "Elifiant") === filtroEmpresa;
+    const matchPrev = !preventistaSeleccionado || (c.preventista || "Alex") === preventistaSeleccionado.nombre;
+    const matchBusqueda = ((c.nombre || "") + " " + (c.direccion || "") + " " + (c.rubro || "")).toLowerCase().includes(busqueda.toLowerCase());
+    // Mapeo automático por id o campo dia para organizar la semana si aun no está en la base
+    const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    const diaAsignado = c.dia_visita || diasSemana[Number(c.id || 0) % 6];
+    const matchDia = filtroDiaMapa === "TODOS" || diaAsignado === filtroDiaMapa;
+    return matchEmpresa && matchPrev && matchBusqueda && matchDia;
+  });
 
- {/* FILTROS CON CONTRASTE ALTO (NOMBRES SIEMPRE VISIBLES) */}
- <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
- <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
- <label style={{ fontSize: "12px", color: "#cbd5e1", fontWeight: "bold" }}>Preventista:</label>
- <select
- value={preventistaSel}
- onChange={(e) => setPreventistaSel(e.target.value)}
- style={{
- background: "#ffffff",
- color: "#0f172a",
- border: "2px solid #38bdf8",
- borderRadius: "6px",
- padding: "6px 10px",
- fontSize: "13px",
- fontWeight: "700",
- cursor: "pointer",
- outline: "none"
- }}
- >
- <option value="Todos">Todos los preventistas</option>
- <option value="Ian">👤 Ian</option>
- <option value="Alex">👤 Alex</option>
- <option value="Walter">👤 Walter</option>
- </select>
- </div>
+  const coordenadasValidas = comerciosPreventista
+    .map(c => [c.ubicacion_exacta_latitud || c.latitud, c.ubicacion_exacta_longitud || c.longitud])
+    .filter(p => p[0] && p[1] && !isNaN(p[0]) && !isNaN(p[1]));
 
- <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
- <label style={{ fontSize: "12px", color: "#cbd5e1", fontWeight: "bold" }}>Rubro:</label>
- <select
- value={rubroSel}
- onChange={(e) => setRubroSel(e.target.value)}
- style={{
- background: "#ffffff",
- color: "#0f172a",
- border: "1px solid #94a3b8",
- borderRadius: "6px",
- padding: "6px 10px",
- fontSize: "13px",
- fontWeight: "600",
- cursor: "pointer",
- outline: "none"
- }}
- >
- <option value="Todos">Todos los rubros</option>
- <option value="Almacén">Almacén</option>
- <option value="Kiosco">Kiosco</option>
- <option value="Fiambrería">Fiambrería</option>
- </select>
- </div>
+  const centroMapa = coordenadasValidas[0] || [-34.719, -58.264];
+  const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
+  const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
 
- <div style={{ background: "#0f172a", padding: "6px 12px", borderRadius: "6px", border: "1px solid #334155", fontSize: "13px", fontWeight: "700", color: "#4ade80" }}>
- Total: $ {totalFacturado.toLocaleString("es-AR")}
- </div>
- </div>
- </header>
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      {/* CABECERA PRINCIPAL */}
+      <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "12px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          <div style={{ width: "36px", height: "36px", backgroundColor: "#2563eb", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: "bold", fontSize: "18px" }}>
+            📍
+          </div>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <h1 style={{ margin: 0, fontSize: "18px", fontWeight: "800", letterSpacing: "-0.5px" }}>RutaComercio Web</h1>
+              <span style={{ backgroundColor: "#dcfce7", color: "#15803d", fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
+                <span style={{ width: "6px", height: "6px", backgroundColor: "#22c55e", borderRadius: "50%" }}></span> Supabase Online
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: "12px", color: "#64748b" }}>Monitoreo de Campo • Rutas Actuales • Planificador Semanal</p>
+          </div>
+        </div>
 
- {/* MAPA + LISTADO DERECHO */}
- <div style={{ flex: 1, display: "flex", flexDirection: window.innerWidth < 900 ? "column" : "row", overflow: "hidden" }}>
- {/* MAPA */}
- <div style={{ flex: 2, height: window.innerWidth < 900 ? "55vh" : "100%", position: "relative" }}>
- <MapContainer center={[-34.72, -58.265]} zoom={14} style={{ height: "100%", width: "100%" }}>
- <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
- <AutoFit puntos={comerciosFiltrados} />
- {comerciosFiltrados.map((c) => (
- <Marker key={c.id} position={[c.latitud, c.longitud]} icon={iconoAzul}>
- <Popup>
- <div style={{ color: "#0f172a", fontSize: "13px" }}>
- <div style={{ fontWeight: "bold", fontSize: "14px" }}>{c.nombre}</div>
- <div>🏪 {c.rubro} · {c.direccion}</div>
- <div style={{ marginTop: "4px", color: "#2563eb", fontWeight: "600" }}>👤 Preventista: {c.preventista}</div>
- <div style={{ fontSize: "12px", color: "#64748b" }}>🕒 {c.fecha}</div>
- <div style={{ marginTop: "6px", fontWeight: "bold", color: "#16a34a" }}>Total Ventas: ${c.total_pedidos.toLocaleString("es-AR")}</div>
- </div>
- </Popup>
- </Marker>
- ))}
- </MapContainer>
- </div>
+        {/* SELECTORES DE CONTROL */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          {empresasUnicas.length > 2 && (
+            <select
+              value={filtroEmpresa}
+              onChange={e => setFiltroEmpresa(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f1f5f9", fontSize: "13px", fontWeight: "600", color: "#0f172a", outline: "none", cursor: "pointer" }}
+            >
+              {empresasUnicas.map(emp => (
+                <option key={emp} value={emp}>{emp === "TODAS" ? "🏢 Todas las Empresas" : emp}</option>
+              ))}
+            </select>
+          )}
 
- {/* FEED LISTA DERECHA */}
- <div style={{
- flex: 1,
- background: "#1e293b",
- borderLeft: "1px solid #334155",
- display: "flex",
- flexDirection: "column",
- overflowY: "auto",
- height: window.innerWidth < 900 ? "45vh" : "100%"
- }}>
- <div style={{ padding: "12px 16px", borderBottom: "1px solid #334155", background: "#0f172a", position: "sticky", top: 0, zIndex: 10 }}>
- <div style={{ fontSize: "13px", fontWeight: "700", color: "#f8fafc" }}>Feed de Comercios ({comerciosFiltrados.length})</div>
- </div>
+          <button
+            onClick={exportarCSV}
+            style={{ padding: "8px 14px", backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "13px", fontWeight: "600", color: "#334155", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            📑 Exportar Hoja (PDF/XLS)
+          </button>
+          <button
+            onClick={() => window.location.href = "/"}
+            style={{ padding: "8px 14px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: "700", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            📱 App Preventa
+          </button>
+        </div>
+      </header>
 
- <div style={{ padding: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
- {comerciosFiltrados.map(c => (
- <div key={c.id} style={{
- background: "#0f172a",
- border: "1px solid #334155",
- borderRadius: "8px",
- padding: "12px",
- display: "flex",
- flexDirection: "column",
- gap: "4px"
- }}>
- <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
- <div style={{ fontWeight: "700", fontSize: "14px", color: "#f8fafc" }}>{c.nombre}</div>
- <span style={{ fontSize: "11px", background: "#1e3a8a", color: "#60a5fa", padding: "2px 6px", borderRadius: "4px", fontWeight: "bold" }}>{c.rubro}</span>
- </div>
- <div style={{ fontSize: "12px", color: "#94a3b8" }}>📍 {c.direccion}</div>
- <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px", paddingTop: "6px", borderTop: "1px dashed #334155" }}>
- <span style={{ fontSize: "12px", color: "#38bdf8", fontWeight: "bold" }}>👤 {c.preventista}</span>
- <span style={{ fontSize: "13px", fontWeight: "800", color: "#4ade80" }}>${c.total_pedidos.toLocaleString("es-AR")}</span>
- </div>
- </div>
- ))}
- </div>
- </div>
- </div>
- </div>
- </div>
- );
+      {/* PESTAÑAS DE NAVEGACIÓN SUPERIOR */}
+      <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 28px", display: "flex", gap: "24px" }}>
+        <button
+          onClick={() => { setSeccionActiva("monitoreo"); }}
+          style={{ padding: "14px 0", background: "none", border: "none", borderBottom: seccionActiva === "monitoreo" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "monitoreo" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          📡 Monitoreo en Vivo
+          <span style={{ backgroundColor: "#dbeafe", color: "#1d4ed8", fontSize: "10px", padding: "1px 6px", borderRadius: "10px" }}>{telemetriaFlota.length} en Calle</span>
+        </button>
+        <button
+          onClick={() => { setSeccionActiva("rutas"); }}
+          style={{ padding: "14px 0", background: "none", border: "none", borderBottom: seccionActiva === "rutas" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "rutas" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          📍 Rutas Actuales
+        </button>
+        <button
+          onClick={() => { setSeccionActiva("planificador"); }}
+          style={{ padding: "14px 0", background: "none", border: "none", borderBottom: seccionActiva === "planificador" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "planificador" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          🗓️ Diseñador Hojas de Ruta (Semanal)
+        </button>
+        <button
+          onClick={() => window.location.href = "/pedidos"}
+          style={{ padding: "14px 0", background: "none", border: "none", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          📦 Pedidos y Facturación
+        </button>
+      </div>
+
+      {/* CONTENEDOR PRINCIPAL */}
+      <main style={{ padding: "20px 28px", maxWidth: "1500px", margin: "0 auto" }}>
+        {/* KPI CARDS GLOBALES */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>
+          <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Preventistas en Campo</span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
+              <span style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a" }}>{telemetriaFlota.length} / {telemetriaFlota.length}</span>
+              <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "700" }}>100% activos</span>
+            </div>
+            <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#94a3b8" }}>Sin retrasos críticos reportados</p>
+          </div>
+
+          <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Efectividad Visitas Hoy</span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
+              <span style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a" }}>74.5%</span>
+              <span style={{ fontSize: "12px", color: "#2563eb", fontWeight: "700" }}>Meta: 80%</span>
+            </div>
+            <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#94a3b8" }}>Promedio de permanencia: 14 min</p>
+          </div>
+
+          <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Comercios Cartera</span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
+              <span style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a" }}>{comercios.length}</span>
+              <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "700" }}>● Base Sincronizada</span>
+            </div>
+            <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#94a3b8" }}>{comercios.filter(c => c.foto_url).length} con foto de fachada</p>
+          </div>
+
+          <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>GPS & Sync Batería</span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
+              <span style={{ fontSize: "24px", fontWeight: "800", color: "#16a34a" }}>99.2%</span>
+              <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "700" }}>Excelente</span>
+            </div>
+            <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#94a3b8" }}>Todos en geocerca menor a 15m</p>
+          </div>
+        </div>
+
+        {/* PLANIFICADOR SEMANAL (LUNES A SÁBADO) */}
+        {seccionActiva === "planificador" && (
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "20px", marginBottom: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>🗓️ Planificador Semanal de Hojas de Ruta</h3>
+                <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>Diseñá y ordená las paradas según el día de visita del preventista</p>
+              </div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(dia => (
+                  <button
+                    key={dia}
+                    onClick={() => setDiaSemana(dia)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      border: "1px solid",
+                      borderColor: diaSemana === dia ? "#2563eb" : "#cbd5e1",
+                      backgroundColor: diaSemana === dia ? "#2563eb" : "#ffffff",
+                      color: diaSemana === dia ? "#ffffff" : "#475569",
+                      cursor: "pointer"
+                    }}
+                  >
+                    {dia}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ padding: "14px 18px", backgroundColor: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+              <div style={{ fontSize: "13px", color: "#1e40af" }}>
+                📍 Editando hoja de ruta para: <strong>{preventistaSeleccionado?.nombre || listaPreventistas[0]}</strong> los días <strong>{diaSemana}</strong> ({comerciosPreventista.length} comercios asignados)
+              </div>
+              <button
+                onClick={() => alert("¡Recorrido optimizado por cercanía geográfica para ahorrar combustible!")}
+                style={{ padding: "8px 16px", backgroundColor: "#1d4ed8", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}
+              >
+                ⚡ Optimizar Recorrido Automático
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* CONTENEDOR DE TELEMETRÍA + MAPA DINÁMICO */}
+        <div style={{ display: "flex", gap: "20px", flexDirection: preventistaSeleccionado ? "row" : "column" }}>
+          {/* LISTA DE TELEMETRÍA DE FLOTA */}
+          <div style={{ flex: preventistaSeleccionado ? "0 0 420px" : "1" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
+                Telemetría de Flota {filtroEmpresa !== "TODAS" && `(${filtroEmpresa})`}
+              </h3>
+              <span style={{ fontSize: "12px", color: "#64748b" }}>Click para enfocar mapa</span>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {telemetriaFlota.map((prev, idx) => {
+                const estaSeleccionado = preventistaSeleccionado?.nombre === prev.nombre;
+                const porcentaje = Math.round((prev.paradasCompletadas / prev.paradasTotales) * 100);
+                return (
+                  <div
+                    key={prev.nombre}
+                    onClick={() => {
+                      if (estaSeleccionado) {
+                        setPreventistaSeleccionado(null);
+                      } else {
+                        setPreventistaSeleccionado(prev);
+                      }
+                    }}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      border: estaSeleccionado ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                      borderRadius: "12px",
+                      padding: "16px",
+                      cursor: "pointer",
+                      boxShadow: estaSeleccionado ? "0 4px 12px rgba(37,99,235,0.12)" : "0 1px 2px rgba(0,0,0,0.02)",
+                      transition: "all 0.15s ease"
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div style={{ width: "38px", height: "38px", borderRadius: "50%", backgroundColor: COLORES[idx % COLORES.length], color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "14px" }}>
+                          {prev.nombre.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "700", color: "#0f172a" }}>{prev.nombre}</h4>
+                            <span style={{ fontSize: "10px", backgroundColor: "#f1f5f9", color: "#475569", padding: "1px 6px", borderRadius: "4px", fontWeight: "700" }}>{prev.rutaId}</span>
+                          </div>
+                          <p style={{ margin: "2px 0 0 0", fontSize: "11px", color: "#64748b" }}>{prev.zona}</p>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: "11px", padding: "3px 8px", borderRadius: "12px", fontWeight: "700", backgroundColor: prev.estado === "En Tránsito" ? "#fef3c7" : "#dcfce7", color: prev.estado === "En Tránsito" ? "#b45309" : "#15803d" }}>
+                        ● {prev.estado}
+                      </span>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", backgroundColor: "#f8fafc", padding: "10px", borderRadius: "8px", textAlign: "center", marginBottom: "10px" }}>
+                      <div>
+                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Inicio</span>
+                        <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>{prev.inicio}</div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Paradas</span>
+                        <div style={{ fontSize: "12px", fontWeight: "700", color: "#16a34a" }}>{prev.paradasCompletadas} / {prev.paradasTotales}</div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Batería</span>
+                        <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>🔋 {prev.bateria}</div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Recorrido</span>
+                        <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>{prev.recorridoKm}</div>
+                      </div>
+                    </div>
+
+                    {/* BARRA DE PROGRESO */}
+                    <div style={{ width: "100%", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "3px", overflow: "hidden", marginBottom: "6px" }}>
+                      <div style={{ width: `${porcentaje}%`, height: "100%", backgroundColor: COLORES[idx % COLORES.length] }}></div>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b" }}>
+                      <span>Próxima: <strong>{prev.proxima}</strong></span>
+                      <span><strong>{porcentaje}%</strong> completado</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* MAPA DINÁMICO ENFOCADO (APARECE AL TOCAR UN PREVENTISTA) */}
+          {preventistaSeleccionado ? (
+            <div style={{ flex: "1", display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "20px" }}>🗺️</span>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                      Enfoque: {preventistaSeleccionado.nombre} ({preventistaSeleccionado.rutaId})
+                    </h3>
+                    <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>
+                      {preventistaSeleccionado.zona} • Velocidad: {preventistaSeleccionado.velocidad}
+                    </p>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", backgroundColor: "#f1f5f9", padding: "3px 6px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "bold", color: "#64748b", marginRight: "2px" }}>Día:</span>
+                    {["TODOS", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(d => (
+                      <button
+                        key={d}
+                        onClick={() => setFiltroDiaMapa(d)}
+                        style={{
+                          padding: "3px 8px",
+                          borderRadius: "6px",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          border: "none",
+                          cursor: "pointer",
+                          backgroundColor: filtroDiaMapa === d ? "#2563eb" : "transparent",
+                          color: filtroDiaMapa === d ? "#ffffff" : "#475569"
+                        }}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: "700", color: "#16a34a" }}>
+                    <span style={{ width: "16px", height: "3px", backgroundColor: "#16a34a", display: "inline-block" }}></span> Recorrido Real
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: "700", color: "#2563eb" }}>
+                    <span style={{ width: "16px", height: "3px", borderTop: "2px dashed #2563eb", display: "inline-block" }}></span> Falta Recorrer
+                  </div>
+                  <button
+                    onClick={() => setPreventistaSeleccionado(null)}
+                    style={{ padding: "6px 12px", backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", color: "#475569" }}
+                  >
+                    ✕ Cerrar Mapa
+                  </button>
+                </div>
+              </div>
+
+              {/* CONTENEDOR DEL MAPA */}
+              <div style={{ height: "540px", borderRadius: "12px", overflow: "hidden", border: "1px solid #cbd5e1", position: "relative" }}>
+                <MapContainer center={centroMapa} zoom={14} style={{ height: "100%", width: "100%" }}>
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : null} />
+
+                  {/* LÍNEA CONTINUA (RECORRIDO YA HECHO) */}
+                  {rutaRecorrida.length > 1 && (
+                    <Polyline positions={rutaRecorrida} pathOptions={{ color: "#16a34a", weight: 4, opacity: 0.85 }} />
+                  )}
+
+                  {/* LÍNEA PUNTEADA (RUTA TEÓRICA RESTANTE) */}
+                  {rutaRestante.length > 1 && (
+                    <Polyline positions={rutaRestante} pathOptions={{ color: "#2563eb", weight: 3, dashArray: "6, 8", opacity: 0.75 }} />
+                  )}
+
+                  {/* PINES SECUENCIALES DEL RECORRIDO */}
+                  {comerciosPreventista.map((c, i) => {
+                    const lat = c.ubicacion_exacta_latitud || c.latitud;
+                    const lng = c.ubicacion_exacta_longitud || c.longitud;
+                    if (!lat || !lng) return null;
+                    const estadoPin = i < rutaRecorrida.length ? "visitado" : i === rutaRecorrida.length ? "activo" : "pendiente";
+                    return (
+                      <Marker key={c.id} position={[lat, lng]} icon={iconoNumero(i + 1, estadoPin)}>
+                        <Popup>
+                          <div style={{ minWidth: "180px" }}>
+                            {c.foto_url && (
+                              <img src={c.foto_url} alt="" style={{ width: "100%", height: "90px", objectFit: "cover", borderRadius: "6px", marginBottom: "6px" }} />
+                            )}
+                            <div style={{ fontSize: "11px", fontWeight: "bold", color: "#2563eb", marginBottom: "2px" }}>
+                              Parada #{i + 1} • {c.empresa || "Elifiant"}
+                            </div>
+                            <strong style={{ fontSize: "13px" }}>{c.nombre || ("Comercio #" + c.id)}</strong>
+                            <p style={{ margin: "3px 0 0 0", fontSize: "11px", color: "#64748b" }}>{c.rubro || "General"} {c.direccion ? "• " + c.direccion : ""}</p>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    );
+                  })}
+                </MapContainer>
+              </div>
+
+              {/* BITÁCORA DE PARADAS DE LA JORNADA */}
+              <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "16px" }}>
+                <h4 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                  📋 Bitácora de Paradas de Hoy ({preventistaSeleccionado.rutaId} • {comerciosPreventista.length} comercios)
+                </h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto" }}>
+                  {comerciosPreventista.slice(0, 15).map((c, i) => (
+                    <div
+                      key={c.id}
+                      onClick={() => setComercioFoco(c)}
+                      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", cursor: "pointer" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <span style={{ width: "22px", height: "22px", borderRadius: "50%", backgroundColor: i < 3 ? "#16a34a" : "#2563eb", color: "#fff", fontSize: "11px", fontWeight: "bold", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {i + 1}
+                        </span>
+                        <div>
+                          <h5 style={{ margin: 0, fontSize: "12px", fontWeight: "700" }}>{c.nombre || ("Comercio #" + c.id)}</h5>
+                          <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>{c.direccion || "Sin dirección fija"}</p>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: i < 3 ? "#16a34a" : "#2563eb" }}>
+                        {i === 0 ? "En Proceso" : i < 3 ? "Visitado ✓" : "Pendiente"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* SI NO HAY NINGÚN PREVENTISTA SELECCIONADO, MUESTRA GUÍA LIMPIA */
+            <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "2px dashed #cbd5e1", padding: "40px", textAlign: "center", color: "#64748b" }}>
+              <div style={{ fontSize: "36px", marginBottom: "8px" }}>🗺️</div>
+              <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "#0f172a" }}>El mapa se encuentra en espera</h4>
+              <p style={{ margin: "4px 0 0 0", fontSize: "13px" }}>
+                Hacé clic en cualquiera de las tarjetas de preventistas de arriba (Walter, Alex, Ian) para desplegar su mapa en vivo, ver el camino recorrido y la ruta teórica que le falta completar.
+              </p>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
 }

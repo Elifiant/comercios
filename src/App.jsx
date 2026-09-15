@@ -1,3 +1,9 @@
+const obtenerDiaActual = () => {
+  const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  const d = dias[new Date().getDay()];
+  return d === "Domingo" ? "Lunes" : d;
+};
+
 import Supervisor from './Supervisor';
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
@@ -331,7 +337,11 @@ export default function App() {
         nombre: (comercioSeleccionado.nombre && comercioSeleccionado.nombre.trim()) ? comercioSeleccionado.nombre.trim() : ("Comercio #" + comercioSeleccionado.id),
         direccion: comercioSeleccionado.direccion || "",
         rubro: comercioSeleccionado.rubro || "General",
+        dia_visita: comercioSeleccionado.dia_visita || "Lunes",
         telefono: comercioSeleccionado.telefono || "",
+
+          
+
         notas: comercioSeleccionado.notas || ""
       };
       const { error } = await supabase.from("comercios").update(actualizacion).eq("id", comercioSeleccionado.id);
@@ -518,7 +528,19 @@ export default function App() {
 
             <div>
               <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Notas</label>
-              <textarea
+              <div style={{ marginBottom: "14px" }}>
+            <label style={{ display: "block", fontSize: "12px", color: "#64748b", fontWeight: "bold", marginBottom: "4px" }}>🗓️ Día de Visita Asignado</label>
+            <select
+              value={comercioSeleccionado.dia_visita || "Lunes"}
+              onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, dia_visita: e.target.value })}
+              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc", fontSize: "14px", fontWeight: "600", color: "#0f172a" }}
+            >
+              {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+          <textarea
                 value={comercioSeleccionado.notas || ''}
                 onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, notas: e.target.value })}
                 style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box', minHeight: '80px' }}
