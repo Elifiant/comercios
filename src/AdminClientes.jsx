@@ -235,7 +235,7 @@ export default function AdminClientes() {
   const cobradoARS = historialPagos.filter(h => h.moneda === "ARS" && (h.estado === "Confirmado" || h.estado === "Acreditado")).reduce((acc, h) => acc + Number(h.monto || 0), 0);
   const cobradoUSDT = historialPagos.filter(h => h.moneda === "USDT" && h.estado === "Confirmado").reduce((acc, h) => acc + Number(h.monto || 0), 0);
 
-  const diaHoy = new Date().getDate();
+    const diaHoy = new Date().getDate();
   const diaManana = diaHoy + 1;
   let empresasHoy = [];
   let empresasManana = [];
@@ -246,7 +246,7 @@ export default function AdminClientes() {
     const cInfo = diasCorteMap[emp] || {};
     const diaCorte = Number(t.diaCobro || t.dia_cobro || cInfo.dia || 5);
     const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase()).length;
-    const valor = Number(t.valor || t.tarifa || 10000);
+    const valor = Number(t.valor || t.tarifa || (t.moneda === "ARS" ? 10000 : 50));
     const moneda = t.moneda || "ARS";
     const total = (t.tipo === "plana" ? valor : (prevsCount * valor || valor));
     const item = { empresa: emp, total, moneda, dia: diaCorte };
@@ -326,39 +326,74 @@ export default function AdminClientes() {
         </div>
       </div>
 
-      {/* SEMAFORO HOY, MAÑANA, 15 DIAS */}
+            {/* SEMAFORO HOY, MAÑANA, 15 DIAS */}
       <div style={{ backgroundColor: "#1e293b", borderRadius: "12px", border: "1px solid #334155", padding: "18px", marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "8px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontSize: "18px" }}>⏱️</span>
             <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "700", color: "#f8fafc" }}>Semáforo y Flujo de Cobros: Hoy, Mañana y 15 Días</h3>
           </div>
-          <span style={{ fontSize: "12px", color: "#94a3b8" }}>Monitoreo automático de cortes</span>
+          <span style={{ fontSize: "12px", color: "#94a3b8" }}>Sincronizado en tiempo real con tus clientes activos</span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
-          <div style={{ backgroundColor: "#0f172a", border: "1px solid #ef4444", borderRadius: "10px", padding: "14px" }}>
+          {/* HOY */}
+          <div style={{ backgroundColor: "#0f172a", border: empresasHoy.length > 0 ? "1px solid #ef4444" : "1px solid #334155", borderRadius: "10px", padding: "14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <span style={{ color: "#ef4444", fontWeight: "700", fontSize: "12px" }}>● HOY VENCE</span>
-              <span style={{ fontSize: "11px", backgroundColor: "rgba(239, 68, 68, 0.2)", color: "#f87171", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>{empresasHoy.length || 1} Empresa</span>
+              <span style={{ color: empresasHoy.length > 0 ? "#ef4444" : "#94a3b8", fontWeight: "700", fontSize: "12px" }}>● HOY VENCE</span>
+              <span style={{ fontSize: "11px", backgroundColor: empresasHoy.length > 0 ? "rgba(239, 68, 68, 0.2)" : "rgba(148, 163, 184, 0.1)", color: empresasHoy.length > 0 ? "#f87171" : "#94a3b8", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
+                {empresasHoy.length} {empresasHoy.length === 1 ? "Empresa" : "Empresas"}
+              </span>
             </div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{empresasHoy[0] ? empresasHoy[0].empresa : "Distribuidora Quilmes B2B"}</div>
-            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>{empresasHoy[0] ? `${empresasHoy[0].moneda} $${empresasHoy[0].total}` : "$ 74.24 USD"}</div>
+            {empresasHoy.length > 0 ? (
+              empresasHoy.map(item => (
+                <div key={item.empresa} style={{ marginBottom: "6px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{item.empresa}</div>
+                  <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800" }}>{item.moneda} ${Number(item.total).toLocaleString()}</div>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: "13px", color: "#64748b", fontStyle: "italic", marginTop: "4px" }}>🟢 Sin cobros que venzan hoy</div>
+            )}
           </div>
-          <div style={{ backgroundColor: "#0f172a", border: "1px solid #f59e0b", borderRadius: "10px", padding: "14px" }}>
+
+          {/* MAÑANA */}
+          <div style={{ backgroundColor: "#0f172a", border: empresasManana.length > 0 ? "1px solid #f59e0b" : "1px solid #334155", borderRadius: "10px", padding: "14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <span style={{ color: "#f59e0b", fontWeight: "700", fontSize: "12px" }}>● MAÑANA</span>
-              <span style={{ fontSize: "11px", backgroundColor: "rgba(245, 158, 11, 0.2)", color: "#fbbf24", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>{empresasManana.length || 1} Empresa</span>
+              <span style={{ color: empresasManana.length > 0 ? "#f59e0b" : "#94a3b8", fontWeight: "700", fontSize: "12px" }}>● MAÑANA</span>
+              <span style={{ fontSize: "11px", backgroundColor: empresasManana.length > 0 ? "rgba(245, 158, 11, 0.2)" : "rgba(148, 163, 184, 0.1)", color: empresasManana.length > 0 ? "#fbbf24" : "#94a3b8", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
+                {empresasManana.length} {empresasManana.length === 1 ? "Empresa" : "Empresas"}
+              </span>
             </div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{empresasManana[0] ? empresasManana[0].empresa : "Mayorista San Martín"}</div>
-            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>{empresasManana[0] ? `${empresasManana[0].moneda} $${empresasManana[0].total}` : "ARS $320.000"}</div>
+            {empresasManana.length > 0 ? (
+              empresasManana.map(item => (
+                <div key={item.empresa} style={{ marginBottom: "6px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{item.empresa}</div>
+                  <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800" }}>{item.moneda} ${Number(item.total).toLocaleString()}</div>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: "13px", color: "#64748b", fontStyle: "italic", marginTop: "4px" }}>🟢 Sin cobros para mañana</div>
+            )}
           </div>
-          <div style={{ backgroundColor: "#0f172a", border: "1px solid #3b82f6", borderRadius: "10px", padding: "14px" }}>
+
+          {/* PROXIMOS 15 DIAS */}
+          <div style={{ backgroundColor: "#0f172a", border: empresas15Dias.length > 0 ? "1px solid #3b82f6" : "1px solid #334155", borderRadius: "10px", padding: "14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <span style={{ color: "#60a5fa", fontWeight: "700", fontSize: "12px" }}>● PRÓXIMOS 15 DÍAS</span>
-              <span style={{ fontSize: "11px", backgroundColor: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>{empresas15Dias.length || 2} Empresas</span>
+              <span style={{ color: empresas15Dias.length > 0 ? "#60a5fa" : "#94a3b8", fontWeight: "700", fontSize: "12px" }}>● PRÓXIMOS 15 DÍAS</span>
+              <span style={{ fontSize: "11px", backgroundColor: empresas15Dias.length > 0 ? "rgba(59, 130, 246, 0.2)" : "rgba(148, 163, 184, 0.1)", color: empresas15Dias.length > 0 ? "#93c5fd" : "#94a3b8", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
+                {empresas15Dias.length} {empresas15Dias.length === 1 ? "Empresa" : "Empresas"}
+              </span>
             </div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>Elifiant, Droguería y Mayoristas</div>
-            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>₮ 229.50 USDT + $450 USD est.</div>
+            {empresas15Dias.length > 0 ? (
+              empresas15Dias.slice(0, 3).map(item => (
+                <div key={item.empresa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px", fontSize: "12px" }}>
+                  <span style={{ color: "#f8fafc", fontWeight: "600" }}>{item.empresa} (Día {item.dia})</span>
+                  <span style={{ color: "#38bdf8", fontWeight: "700" }}>{item.moneda} ${Number(item.total).toLocaleString()}</span>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: "13px", color: "#64748b", fontStyle: "italic", marginTop: "4px" }}>🟢 Sin cobros en los próximos 15 días</div>
+            )}
           </div>
         </div>
       </div>
