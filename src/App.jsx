@@ -37,22 +37,33 @@ export default function App() {
   
 
 
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-    const wId = navigator.geolocation.watchPosition(
-      (pos) => {
-        setPosicionActual([pos.coords.latitude, pos.coords.longitude]);
-      },
-      (err) => console.log("GPS status:", err.message),
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
-    );
-//     if (typeof window !== 'undefined' && window.location.pathname.includes('supervisor')) {
-//     return <Supervisor />;
-
-  return () => navigator.geolocation.clearWatch(wId);
-  }, []);
 
    const [sesion, setSesion] = useState(null);
+  const [perfil, setPerfil] = useState(null);
+
+  const cargarPerfil = async (session) => {
+    if (!session?.user) {
+      setPerfil(null);
+      return;
+    }
+    try {
+      const { data } = await supabase
+        .from("perfiles")
+        .select("*")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (data) {
+        setPerfil(data);
+      } else {
+        setPerfil({
+          nombre: session.user.email?.split("@")[0] || "Usuario",
+          empresa: "General"
+        });
+      }
+    } catch (e) {
+      console.warn("Error cargando perfil:", e);
+    }
+  };
  const [cargandoAuth, setCargandoAuth] = useState(true);
  const [emailLogin, setEmailLogin] = useState('');
  const [passwordLogin, setPasswordLogin] = useState('');
@@ -64,11 +75,11 @@ export default function App() {
   const [modoManejo, setModoManejo] = useState(false);
    useEffect(() => {
  supabase.auth.getSession().then(({ data: { session } }) => {
- setSesion(session);
+ setSesion(session); cargarPerfil(session);
  setCargandoAuth(false);
  });
  const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
- setSesion(session);
+ setSesion(session); cargarPerfil(session);
  setCargandoAuth(false);
  });
  return () => subscription.unsubscribe();
@@ -81,8 +92,11 @@ export default function App() {
  if (error) setErrorLogin('Credenciales incorrectas o usuario no registrado.');
  };
 
- const handleCerrarSesion = async () => {
- await supabase.auth.signOut();
+  const handleCerrarSesion = async () => {
+ try { await supabase.auth.signOut(); } catch(e) {}
+ localStorage.clear();
+ sessionStorage.clear();
+ setSesion(null);
  };
  const [textoBotonAgregar, setTextoBotonAgregar] = useState('➕ AGREGAR COMERCIO');
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
@@ -115,16 +129,43 @@ export default function App() {
   const [distanciaCercano, setDistanciaCercano] = useState(null);
   const [posicionActual, setPosicionActual] = useState(null);
 
-  const cargarComercios = async () => {
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    const wId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setPosicionActual([pos.coords.latitude, pos.coords.longitude]);
+      },
+      (err) => console.log("GPS status:", err.message),
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    );
+//     if (typeof window !== 'undefined' && window.location.pathname.includes('supervisor')) {
+//     return <Supervisor />;
+
+  return () => navigator.geolocation.clearWatch(wId);
+  }, []);
+
+  const cargarComercios = async (perfilActivo) => {
     setCargando(true);
-    const { data, error } = await supabase.from('comercios').select('*').order('id', { ascending: false });
+    const p = perfilActivo || perfil;
+    let query = supabase.from("comercios").select("*");
+    
+    if (p && p.empresa) {
+      query = query.eq("empresa", p.empresa);
+    }
+    if (p && p.rol === "preventista" && p.nombre) {
+      query = query.eq("preventista", p.nombre);
+    }
+    
+    const { data, error } = await query.order("id", { ascending: false });
     if (!error && data) setComercios(data);
     setCargando(false);
   };
 
   useEffect(() => {
-    cargarComercios();
-  }, []);
+    if (perfil && perfil.empresa) {
+      cargarComercios(perfil);
+    }
+  }, [perfil]);
 
   const reproducirAlerta = () => {
     try {
@@ -336,7 +377,9 @@ export default function App() {
 
   
   // Vista del Editor de Ubicación en Mapa con Pin Arrastrable
-  if (editandoUbicacion && comercioSeleccionado) {
+   if (cargandoAuth) { return ( <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: "sans-serif" }}> Iniciando RutaComercio... </div> ); } if (!sesion) { return ( <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif", boxSizing: "border-box" }}> <div style={{ width: "100%", maxWidth: "360px", backgroundColor: "#1e293b", padding: "28px 24px", borderRadius: "16px", border: "1px solid #334155", boxShadow: "0 10px 25px rgba(0,0,0,0.5)" }}> <div style={{ textAlign: "center", marginBottom: "24px" }}> <div style={{ width: "52px", height: "52px", borderRadius: "12px", backgroundColor: "#2563eb", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "26px", marginBottom: "12px" }}> 📍 </div> <h2 style={{ margin: 0, color: "#fff", fontSize: "20px", fontWeight: "700" }}>RutaComercio</h2> <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: "13px" }}>Ingreso seguro para preventistas</p> </div> <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Correo electrónico</label> <input type="email" required value={emailLogin} onChange={(e) => setEmailLogin(e.target.value)} placeholder="ej: tu_correo@empresa.com" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Contraseña</label> <input type="password" required value={passwordLogin} onChange={(e) => setPasswordLogin(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> {errorLogin && ( <div style={{ padding: "10px", borderRadius: "8px", backgroundColor: "rgba(239, 68, 68, 0.15)", border: "1px solid #ef4444", color: "#f87171", fontSize: "12px", textAlign: "center" }}> {errorLogin} </div> )} <button type="submit" style={{ marginTop: "6px", padding: "13px", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", fontWeight: "700", fontSize: "14px", cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.4)" }} > Iniciar Sesión </button> </form> </div> </div> ); } if (modoManejo) { const latM = (posicionActual && posicionActual[0]) ? posicionActual[0] : -34.719; const lngM = (posicionActual && posicionActual[1]) ? posicionActual[1] : -58.265; return ( <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}> <header style={{ padding: "12px 16px", background: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155" }}> <div style={{ display: "flex", alignItems: "center", gap: "8px" }}> <span style={{ fontSize: "20px" }}>🚗</span> <span style={{ fontWeight: "800", fontSize: "15px" }}>Modo Manejo Activo</span> </div> <button onClick={() => setModoManejo(false)} style={{ background: "#dc2626", color: "#fff", border: "none", padding: "6px 14px", borderRadius: "8px", fontWeight: "700", fontSize: "12px", cursor: "pointer" }} > ✕ Salir </button> </header> {comercioCercano && ( <div style={{ padding: "10px 16px", background: "#16a34a", color: "#fff", textAlign: "center", fontWeight: "700", fontSize: "14px" }}> 🔔 Cerca de: {comercioCercano.nombre || ("Comercio #" + comercioCercano.id)} ({comercioCercano.distancia}m) </div> )} <div style={{ flex: 1, position: "relative" }}> <MapContainer center={[latM, lngM]} zoom={16} style={{ height: "100%", width: "100%" }}> <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /> {posicionActual && <Marker position={posicionActual} />} {comercios.map((com) => { const cLat = com.ubicacion_exacta_latitud || com.latitud; const cLng = com.ubicacion_exacta_longitud || com.longitud; if (!cLat || !cLng) return null; return ( <Marker key={com.id} position={[cLat, cLng]}> <Popup>{com.nombre || "Comercio #" + com.id}</Popup> </Marker> ); })} </MapContainer> </div> <div style={{ padding: "14px 16px", background: "#1e293b", borderTop: "1px solid #334155" }}> <button onClick={agregarComercioInmediato} style={{ width: "100%", padding: "16px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "12px", fontSize: "16px", fontWeight: "800", cursor: "pointer", boxShadow: "0 4px 14px rgba(37,99,235,0.4)" }} > {textoBotonAgregar} </button> </div> </div> ); } 
+
+ if (editandoUbicacion && comercioSeleccionado) {
     const latInicial = Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719);
     const lngInicial = Number(comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.264);
 
@@ -517,25 +560,10 @@ export default function App() {
               </div>
             </div>
           </div>
-          <button
-            onClick={async () => {
-              try {
-                if (typeof supabase !== "undefined" && supabase.auth) {
-                  await supabase.auth.signOut();
-                }
-              } catch (err) {}
-              try {
-                localStorage.clear();
-                sessionStorage.clear();
-              } catch (e) {}
-              if (typeof setPerfil === "function") setPerfil(null);
-              if (typeof setSesion === "function") setSesion(null);
-              window.location.href = window.location.pathname;
-            }}
-            style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+         <button onClick={handleCerrarSesion} style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
           >
             ✕ Salir
-          </button>
+          </button> 
         </header>
 
         {/* TABLERO JORNADA Y MODO MANEJO */}
