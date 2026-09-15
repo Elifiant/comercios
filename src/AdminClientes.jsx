@@ -84,6 +84,65 @@ export default function AdminClientes() {
     }
   };
 
+  const eliminarEmpresa = async (emp) => {
+    if (emp === "Elifiant") {
+      alert("No se recomienda eliminar la empresa principal Elifiant.");
+      return;
+    }
+    const prevsAsociados = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase());
+    const mensaje = prevsAsociados.length > 0 
+      ? `¿Estás seguro de eliminar la empresa "${emp}"?\n\n⚠ ATENCIÓN: También se darán de baja automáticamente sus ${prevsAsociados.length} preventistas en Supabase.`
+      : `¿Estás seguro de eliminar la empresa "${emp}"?`;
+      
+    const confirma = window.confirm(mensaje);
+    if (!confirma) return;
+
+    try {
+      // 1. Borrado en Supabase de todos los preventistas de esta empresa
+      const { error } = await supabase.from("perfiles").delete().eq("empresa", emp);
+      if (error) console.warn("Aviso al borrar en perfiles:", error.message);
+
+      // 2. Limpieza del estado de preventistas en memoria
+      setPreventistas(prev => prev.filter(p => (p.empresa || "").toLowerCase() !== emp.toLowerCase()));
+
+      // 3. Limpieza de la empresa en memoria y localStorage
+      setEmpresas(prev => prev.filter(e => e !== emp));
+      const nuevoMapa = { ...tarifasMap };
+      delete nuevoMapa[emp];
+      setTarifasMap(nuevoMapa);
+      try { localStorage.setItem("tarifas_empresas", JSON.stringify(nuevoMapa)); } catch(e){}
+
+      setDiasCorteMap(prev => {
+        const nuevoDias = { ...prev };
+        delete nuevoDias[emp];
+        return nuevoDias;
+      });
+
+      alert(`Empresa "${emp}" y sus preventistas eliminados definitivamente.`);
+    } catch (err) {
+      alert("Error al eliminar: " + (err.message || "Error desconocido"));
+    }
+  };
+
+  const eliminarPreventistaDirecto = async (prevObj) => {
+    const nombrePrev = prevObj.nombre || prevObj.email || "este preventista";
+    const confirma = window.confirm(`¿Seguro que deseas eliminar al preventista "${nombrePrev}"?`);
+    if (!confirma) return;
+    try {
+      if (prevObj.id) {
+        const { error } = await supabase.from("perfiles").delete().eq("id", prevObj.id);
+        if (error) throw error;
+      } else if (prevObj.email) {
+        const { error } = await supabase.from("perfiles").delete().eq("email", prevObj.email);
+        if (error) throw error;
+      }
+      setPreventistas(prev => prev.filter(p => (p.id ? p.id !== prevObj.id : p.email !== prevObj.email)));
+      alert(`Preventista "${nombrePrev}" eliminado con éxito.`);
+    } catch (err) {
+      alert("Error al eliminar preventista: " + (err.message || "Error desconocido"));
+    }
+  };
+
   const abrirEditarEmpresa = (emp) => {
     let t = {};
     try {
@@ -151,7 +210,7 @@ export default function AdminClientes() {
     };
     setHistorialPagos(prev => [nuevo, ...prev]);
     setDiasCorteMap(prev => ({ ...prev, [empresaPago]: { ...(prev[empresaPago] || { dia: "05", cupo: 5 }), estado: "Al Día", color: "#10b981" } }));
-    setMostrarModalPago(false)
+    setMostrarModalPago(false);
     setComprobantePago("");
   };
 
@@ -172,16 +231,12 @@ export default function AdminClientes() {
     }
   };
 
-  // CALCULO REAL DE COBRADO EN EL MES (SUMA DEL HISTORIAL CONFIRMADO)
   const cobradoUSD = historialPagos.filter(h => h.moneda === "USD" && h.estado === "Confirmado").reduce((acc, h) => acc + Number(h.monto || 0), 0);
   const cobradoARS = historialPagos.filter(h => h.moneda === "ARS" && (h.estado === "Confirmado" || h.estado === "Acreditado")).reduce((acc, h) => acc + Number(h.monto || 0), 0);
   const cobradoUSDT = historialPagos.filter(h => h.moneda === "USDT" && h.estado === "Confirmado").reduce((acc, h) => acc + Number(h.monto || 0), 0);
 
-  // PREVISION Y VENCIMIENTOS: HOY, MAÑANA Y 15 DIAS
   const diaHoy = new Date().getDate();
   const diaManana = diaHoy + 1;
-
-  // Analizamos cada empresa
   let empresasHoy = [];
   let empresasManana = [];
   let empresas15Dias = [];
@@ -207,14 +262,13 @@ export default function AdminClientes() {
 
   return (
     <main style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif", padding: "24px" }}>
-      {/* HEADER SUPERIOR */}
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", flexWrap: "wrap", gap: "16px" }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <span style={{ fontSize: "24px" }}>👑</span>
             <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "800", letterSpacing: "-0.5px", color: "#f8fafc" }}>RutaComercio · SuperAdmin</h1>
           </div>
-          <p style={{ margin: "4px 0 0 0", color: "#94a3b8", fontSize: "13px" }}>Control financiero, cobros acreditados del mes y previsión de vencimientos a 15 días</p>
+          <p style={{ margin: "4px 0 0 0", color: "#94a3b8", fontSize: "13px" }}>Control financiero, gestión completa de empresas y bajas de preventistas</p>
         </div>
         <div style={{ display: "flex", gap: "10px" }}>
           <button type="button" onClick={() => setMostrarModalPreventista(true)} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", padding: "10px 16px", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "13px" }}>
@@ -226,34 +280,29 @@ export default function AdminClientes() {
         </div>
       </header>
 
-      {/* TABLERO DE CONTROL FINANCIERO: 4 TARJETAS CLAVE */}
+      {/* 4 TARJETAS CLAVE */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "20px" }}>
-        {/* TARJETA 1: EMPRESAS CLIENTES */}
         <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px" }}>EMPRESAS CLIENTES</span>
+            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase" }}>EMPRESAS CLIENTES</span>
             <span style={{ fontSize: "18px" }}>🏢</span>
           </div>
           <h2 style={{ margin: "10px 0 4px 0", fontSize: "28px", color: "#38bdf8", fontWeight: "800" }}>{empresas.length}</h2>
-          <div style={{ fontSize: "12px", color: "#10b981", display: "flex", alignItems: "center", gap: "4px" }}>
-            <span>● {empresas.length} activas</span>
-          </div>
+          <div style={{ fontSize: "12px", color: "#10b981" }}>● {empresas.length} activas</div>
         </div>
 
-        {/* TARJETA 2: PREVENTISTAS */}
         <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px" }}>PREVENTISTAS EN CALLE</span>
+            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase" }}>PREVENTISTAS EN CALLE</span>
             <span style={{ fontSize: "18px" }}>👔</span>
           </div>
           <h2 style={{ margin: "10px 0 4px 0", fontSize: "28px", color: "#4ade80", fontWeight: "800" }}>{preventistas.length}</h2>
-          <div style={{ fontSize: "12px", color: "#94a3b8" }}>100% geolocalizados en vivo</div>
+          <div style={{ fontSize: "12px", color: "#94a3b8" }}>100% activos en campo</div>
         </div>
 
-        {/* TARJETA 3: COBRADO EN EL MES (REAL RECIBIDO) */}
-        <div style={{ backgroundColor: "#1e293b", border: "1px solid #059669", borderRadius: "12px", padding: "18px", position: "relative", overflow: "hidden" }}>
+        <div style={{ backgroundColor: "#1e293b", border: "1px solid #059669", borderRadius: "12px", padding: "18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ color: "#34d399", fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px" }}>COBRADO EN EL MES (REAL)</span>
+            <span style={{ color: "#34d399", fontSize: "12px", fontWeight: "700", textTransform: "uppercase" }}>COBRADO EN EL MES (REAL)</span>
             <span style={{ fontSize: "11px", backgroundColor: "#065f46", color: "#34d399", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>✓ Acreditado</span>
           </div>
           <h2 style={{ margin: "10px 0 4px 0", fontSize: "24px", color: "#10b981", fontWeight: "800" }}>
@@ -265,10 +314,9 @@ export default function AdminClientes() {
           </div>
         </div>
 
-        {/* TARJETA 4: PROYECCION / COBROS POR VENCER */}
         <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px" }}>COBROS POR VENCER</span>
+            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase" }}>COBROS POR VENCER</span>
             <span style={{ fontSize: "18px" }}>🗓️</span>
           </div>
           <h2 style={{ margin: "10px 0 4px 0", fontSize: "28px", color: "#fbbf24", fontWeight: "800" }}>
@@ -278,82 +326,49 @@ export default function AdminClientes() {
         </div>
       </div>
 
-      {/* SECCIÓN SEMÁFORO Y FLUJO DE COBROS: HOY, MAÑANA Y 15 DÍAS */}
+      {/* SEMAFORO HOY, MAÑANA, 15 DIAS */}
       <div style={{ backgroundColor: "#1e293b", borderRadius: "12px", border: "1px solid #334155", padding: "18px", marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "8px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontSize: "18px" }}>⏱️</span>
             <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "700", color: "#f8fafc" }}>Semáforo y Flujo de Cobros: Hoy, Mañana y 15 Días</h3>
           </div>
-          <span style={{ fontSize: "12px", color: "#94a3b8" }}>Monitoreo automático de cortes y vencimientos</span>
+          <span style={{ fontSize: "12px", color: "#94a3b8" }}>Monitoreo automático de cortes</span>
         </div>
-
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
-          {/* BLOQUE HOY */}
           <div style={{ backgroundColor: "#0f172a", border: "1px solid #ef4444", borderRadius: "10px", padding: "14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <span style={{ color: "#ef4444", fontWeight: "700", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                ● HOY VENCE
-              </span>
-              <span style={{ fontSize: "11px", backgroundColor: "rgba(239, 68, 68, 0.2)", color: "#f87171", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
-                {empresasHoy.length || 1} Empresa
-              </span>
+              <span style={{ color: "#ef4444", fontWeight: "700", fontSize: "12px" }}>● HOY VENCE</span>
+              <span style={{ fontSize: "11px", backgroundColor: "rgba(239, 68, 68, 0.2)", color: "#f87171", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>{empresasHoy.length || 1} Empresa</span>
             </div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>
-              {empresasHoy[0] ? empresasHoy[0].empresa : "Distribuidora Quilmes B2B"}
-            </div>
-            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>
-              {empresasHoy[0] ? `${empresasHoy[0].moneda} $${empresasHoy[0].total}` : "$ 74.24 USD"}
-            </div>
-            <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px" }}>Fecha corte: Hoy 23:59 hs · CBU Banco Galicia</div>
+            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{empresasHoy[0] ? empresasHoy[0].empresa : "Distribuidora Quilmes B2B"}</div>
+            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>{empresasHoy[0] ? `${empresasHoy[0].moneda} $${empresasHoy[0].total}` : "$ 74.24 USD"}</div>
           </div>
-
-          {/* BLOQUE MAÑANA */}
           <div style={{ backgroundColor: "#0f172a", border: "1px solid #f59e0b", borderRadius: "10px", padding: "14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <span style={{ color: "#f59e0b", fontWeight: "700", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                ● MAÑANA
-              </span>
-              <span style={{ fontSize: "11px", backgroundColor: "rgba(245, 158, 11, 0.2)", color: "#fbbf24", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
-                {empresasManana.length || 1} Empresa
-              </span>
+              <span style={{ color: "#f59e0b", fontWeight: "700", fontSize: "12px" }}>● MAÑANA</span>
+              <span style={{ fontSize: "11px", backgroundColor: "rgba(245, 158, 11, 0.2)", color: "#fbbf24", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>{empresasManana.length || 1} Empresa</span>
             </div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>
-              {empresasManana[0] ? empresasManana[0].empresa : "Mayorista San Martín"}
-            </div>
-            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>
-              {empresasManana[0] ? `${empresasManana[0].moneda} $${empresasManana[0].total}` : "ARS $320.000"}
-            </div>
-            <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px" }}>Abono fijo mensual · eCheq / CBU Macro</div>
+            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{empresasManana[0] ? empresasManana[0].empresa : "Mayorista San Martín"}</div>
+            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>{empresasManana[0] ? `${empresasManana[0].moneda} $${empresasManana[0].total}` : "ARS $320.000"}</div>
           </div>
-
-          {/* BLOQUE PROXIMOS 15 DIAS */}
           <div style={{ backgroundColor: "#0f172a", border: "1px solid #3b82f6", borderRadius: "10px", padding: "14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <span style={{ color: "#60a5fa", fontWeight: "700", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                ● PRÓXIMOS 15 DÍAS
-              </span>
-              <span style={{ fontSize: "11px", backgroundColor: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
-                {empresas15Dias.length || 2} Empresas
-              </span>
+              <span style={{ color: "#60a5fa", fontWeight: "700", fontSize: "12px" }}>● PRÓXIMOS 15 DÍAS</span>
+              <span style={{ fontSize: "11px", backgroundColor: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>{empresas15Dias.length || 2} Empresas</span>
             </div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>
-              Elifiant, Droguería y Mayoristas
-            </div>
-            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>
-              ₮ 229.50 USDT + $450 USD est.
-            </div>
-            <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "4px" }}>Fechas de corte del día 10 al 20</div>
+            <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>Elifiant, Droguería y Mayoristas</div>
+            <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginTop: "4px" }}>₮ 229.50 USDT + $450 USD est.</div>
           </div>
         </div>
       </div>
 
-      {/* TABLA PRINCIPAL: EMPRESAS */}
+      {/* TABLA PRINCIPAL CON BOTÓN ELIMINAR EMPRESA */}
       <div style={{ backgroundColor: "#1e293b", borderRadius: "12px", border: "1px solid #334155", padding: "20px", marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
           <div>
             <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "#f8fafc" }}>🏢 Empresas Clientes & Ficha Integral 360°</h3>
-            <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#94a3b8" }}>Control unificado de preventistas, cupos y estado de facturación.</p>
+            <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#94a3b8" }}>Control unificado de preventistas, cupos, cobros y bajas directas.</p>
           </div>
           <span style={{ padding: "4px 12px", backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "20px", fontSize: "12px", color: "#38bdf8", fontWeight: "600" }}>
             {empresas.length} Empresas Registradas
@@ -429,8 +444,11 @@ export default function AdminClientes() {
                       <button type="button" onClick={() => abrirRegistrarPago(emp)} style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
                         💳 Cobro
                       </button>
-                      <button type="button" onClick={() => abrirEditarEmpresa(emp)} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "600" }}>
+                      <button type="button" onClick={() => abrirEditarEmpresa(emp)} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "600", marginRight: "6px" }}>
                         ✏️ Editar
+                      </button>
+                      <button type="button" onClick={() => eliminarEmpresa(emp)} title="Eliminar Empresa" style={{ backgroundColor: "#7f1d1d", color: "#fca5a5", border: "1px solid #991b1b", padding: "6px 10px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700" }}>
+                        🗑️
                       </button>
                     </td>
                   </tr>
@@ -441,45 +459,7 @@ export default function AdminClientes() {
         </div>
       </div>
 
-      {/* HISTORIAL PAGOS */}
-      <div style={{ backgroundColor: "#1e293b", borderRadius: "12px", border: "1px solid #334155", padding: "20px", marginBottom: "32px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-          <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "700", color: "#f8fafc" }}>🧾 Historial de Cobros Recientes & Auditoría</h3>
-          <span style={{ fontSize: "12px", color: "#10b981", fontWeight: "600" }}>Sincronizado</span>
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", textAlign: "left" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid #334155", color: "#94a3b8" }}>
-                <th style={{ padding: "8px" }}>FECHA</th>
-                <th style={{ padding: "8px" }}>EMPRESA</th>
-                <th style={{ padding: "8px" }}>MONTO & MONEDA</th>
-                <th style={{ padding: "8px" }}>MÉTODO</th>
-                <th style={{ padding: "8px" }}>REF / HASH</th>
-                <th style={{ padding: "8px" }}>ESTADO</th>
-              </tr>
-            </thead>
-            <tbody>
-              {historialPagos.map((h) => (
-                <tr key={h.id} style={{ borderBottom: "1px solid #334155" }}>
-                  <td style={{ padding: "10px 8px", color: "#94a3b8" }}>{h.fecha}</td>
-                  <td style={{ padding: "10px 8px", fontWeight: "600", color: "#f8fafc" }}>{h.empresa}</td>
-                  <td style={{ padding: "10px 8px", color: "#38bdf8", fontWeight: "700" }}>{h.moneda} ${Number(h.monto).toLocaleString()}</td>
-                  <td style={{ padding: "10px 8px", color: "#cbd5e1" }}>{h.metodo}</td>
-                  <td style={{ padding: "10px 8px", fontFamily: "monospace", color: "#94a3b8" }}>{h.ref}</td>
-                  <td style={{ padding: "10px 8px" }}>
-                    <span style={{ padding: "2px 8px", backgroundColor: "#065f46", color: "#34d399", borderRadius: "12px", fontSize: "11px", fontWeight: "700" }}>
-                      ✓ {h.estado}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* MODAL 1: FICHA INTEGRAL 360° */}
+      {/* MODAL FICHA 360 CON BORRADO DIRECTO DE PREVENTISTAS */}
       {empresaDetalleModal && (() => {
         const emp = empresaDetalleModal;
         const t = tarifasMap[emp] || {};
@@ -506,7 +486,7 @@ export default function AdminClientes() {
                       ● {estadoTexto}
                     </span>
                   </div>
-                  <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#94a3b8" }}>Ficha Integral 360° · Datos comerciales, cupos y personal activo</p>
+                  <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#94a3b8" }}>Ficha Integral 360° · Datos comerciales y bajas directas</p>
                 </div>
                 <button type="button" onClick={() => setEmpresaDetalleModal(null)} style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "22px", cursor: "pointer" }}>✕</button>
               </div>
@@ -537,6 +517,7 @@ export default function AdminClientes() {
                 </div>
               </div>
 
+              {/* LISTA DE PREVENTISTAS CON BOTON DE BORRADO */}
               <div style={{ marginBottom: "20px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
                   <span style={{ fontSize: "12px", fontWeight: "700", color: "#94a3b8" }}>PREVENTISTAS ACTIVOS ({prevsDeEmp.length})</span>
@@ -544,7 +525,7 @@ export default function AdminClientes() {
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {prevsDeEmp.length === 0 ? (
                     <div style={{ padding: "16px", textAlign: "center", backgroundColor: "#0f172a", borderRadius: "8px", color: "#64748b", fontSize: "12px" }}>
-                      No hay preventistas dados de alta en esta empresa aún.
+                      No hay preventistas dados de alta en esta empresa.
                     </div>
                   ) : (
                     prevsDeEmp.map(p => (
@@ -553,9 +534,14 @@ export default function AdminClientes() {
                           <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "13px" }}>👤 {p.nombre || "Sin nombre"}</div>
                           <div style={{ fontSize: "11px", color: "#94a3b8" }}>✉️ {p.email || "-"}</div>
                         </div>
-                        <span style={{ fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "12px", backgroundColor: p.activo !== false ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)", color: p.activo !== false ? "#10b981" : "#ef4444" }}>
-                          {p.activo !== false ? "Activo" : "Inactivo"}
-                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "12px", backgroundColor: p.activo !== false ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)", color: p.activo !== false ? "#10b981" : "#ef4444" }}>
+                            {p.activo !== false ? "Activo" : "Inactivo"}
+                          </span>
+                          <button type="button" onClick={() => eliminarPreventistaDirecto(p)} title="Eliminar Preventista de Supabase" style={{ backgroundColor: "#7f1d1d", color: "#fca5a5", border: "1px solid #991b1b", padding: "4px 8px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}>
+                            🗑️ Borrar
+                          </button>
+                        </div>
                       </div>
                     ))
                   )}
@@ -575,13 +561,12 @@ export default function AdminClientes() {
         );
       })()}
 
-      {/* MODAL 2: MODIFICAR VENCIMIENTO, CUPO Y TARIFA */}
+      {/* MODAL 2: EDITAR */}
       {mostrarModalEditar && empresaAEditar && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "16px" }}>
-          <div style={{ backgroundColor: "#1e293b", borderRadius: "16px", border: "1px solid #475569", width: "100%", maxWidth: "480px", padding: "24px", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}>
+          <div style={{ backgroundColor: "#1e293b", borderRadius: "16px", border: "1px solid #475569", width: "100%", maxWidth: "480px", padding: "24px" }}>
             <h3 style={{ margin: "0 0 6px 0", fontSize: "17px", fontWeight: "700", color: "#f8fafc" }}>✏️ Modificar Vencimiento, Cupo & Tarifa</h3>
             <p style={{ margin: "0 0 16px 0", fontSize: "13px", color: "#94a3b8" }}>{empresaAEditar}</p>
-
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>📅 Día de Vencimiento</label>
@@ -604,11 +589,10 @@ export default function AdminClientes() {
                 </select>
               </div>
             </div>
-
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>👥 Cupo Autorizado</label>
-                <input type="number" value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} placeholder="Ej. 5" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                <input type="number" value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
               </div>
               <div>
                 <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>💰 Moneda</label>
@@ -621,7 +605,6 @@ export default function AdminClientes() {
                 </select>
               </div>
             </div>
-
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
               <div>
                 <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>⚙️ Modelo de Cobro</label>
@@ -635,7 +618,6 @@ export default function AdminClientes() {
                 <input type="number" value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
               </div>
             </div>
-
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
               <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#334155", color: "#cbd5e1", cursor: "pointer", fontWeight: "600" }}>Cancelar</button>
               <button type="button" onClick={guardarEdicionEmpresa} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", cursor: "pointer", fontWeight: "700" }}>Guardar Cambios</button>
@@ -644,7 +626,7 @@ export default function AdminClientes() {
         </div>
       )}
 
-      {/* MODAL 3: REGISTRAR COBRO */}
+      {/* MODAL 3: PAGO */}
       {mostrarModalPago && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: "16px" }}>
           <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "440px", boxSizing: "border-box" }}>
@@ -687,7 +669,7 @@ export default function AdminClientes() {
         </div>
       )}
 
-      {/* MODAL 4: ALTA DE NUEVA EMPRESA */}
+      {/* MODAL 4: ALTA EMPRESA */}
       {mostrarModalEmpresa && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
           <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "480px", boxSizing: "border-box" }}>
@@ -756,7 +738,7 @@ export default function AdminClientes() {
         </div>
       )}
 
-      {/* MODAL 5: ALTA DE PREVENTISTA */}
+      {/* MODAL 5: ALTA PREVENTISTA */}
       {mostrarModalPreventista && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
           <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "450px", boxSizing: "border-box" }}>
