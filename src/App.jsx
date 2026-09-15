@@ -102,7 +102,7 @@ export default function App() {
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
   const [nuevaPosicion, setNuevaPosicion] = useState(null);
   const [busqueda, setBusqueda] = useState('');
-  const [jornadaActiva, setJornadaActiva] = useState(false);
+  const [jornadaActiva, setJornadaActiva] = useState(() => localStorage.getItem("rutacomercio_jornada_activa") === "true");
   const [horaInicioJornada, setHoraInicioJornada] = useState(() => localStorage.getItem('hora_inicio_jornada') || '');
   const [tiempoTranscurrido, setTiempoTranscurrido] = useState('0m');
   // Cronometro de jornada en vivo
@@ -223,8 +223,10 @@ export default function App() {
 
   
   const iniciarJornada = () => {
-    const ahora = new Date();
-    const h = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' hs';
+    const timestampInicio = Date.now().toString();
+    localStorage.setItem("rutacomercio_jornada_activa", "true");
+    localStorage.setItem("rutacomercio_inicio_jornada", timestampInicio);
+    if (typeof setInicioTimestamp === "function") setInicioTimestamp(timestampInicio);
     setJornadaActiva(true);
     setHoraInicioJornada(h);
     setTiempoTranscurrido('0m');
@@ -582,12 +584,16 @@ export default function App() {
             <button
               onClick={() => {
                 if (jornadaActiva) {
-                  setJornadaActiva(false);
-                  localStorage.removeItem("jornada_activa");
-                  localStorage.removeItem("timestamp_inicio_jornada");
-                  localStorage.removeItem("hora_inicio_jornada");
-                } else {
-                  setJornadaActiva(true);
+                    setJornadaActiva(false);
+                    localStorage.removeItem("rutacomercio_jornada_activa");
+                    localStorage.removeItem("rutacomercio_inicio_jornada");
+                    if (typeof setInicioTimestamp === "function") setInicioTimestamp(null);
+                  } else {
+                    const timestampInicio = Date.now().toString();
+                    setJornadaActiva(true);
+                    localStorage.setItem("rutacomercio_jornada_activa", "true");
+                    localStorage.setItem("rutacomercio_inicio_jornada", timestampInicio);
+                    if (typeof setInicioTimestamp === "function") setInicioTimestamp(timestampInicio);
                   const ahora = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
                   localStorage.setItem("jornada_activa", "true");
                   localStorage.setItem("timestamp_inicio_jornada", Date.now().toString());
