@@ -1,3 +1,4 @@
+import TomaPedidos from "./TomaPedidos";
 const obtenerDiaActual = () => {
   const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
   const d = dias[new Date().getDay()];
@@ -124,6 +125,7 @@ export default function App() {
 
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
+  const [tomandoPedido, setTomandoPedido] = useState(false);
   const [modoManejo, setModoManejo] = useState(false);
    useEffect(() => {
  supabase.auth.getSession().then(({ data: { session } }) => {
@@ -477,7 +479,18 @@ export default function App() {
     );
   }
 
-    if (comercioSeleccionado) {
+    
+  if (tomandoPedido && comercioSeleccionado) {
+    return (
+      <TomaPedidos
+        comercio={comercioSeleccionado}
+        usuario={typeof perfil !== "undefined" && perfil ? perfil : { nombre: "Alex Preventista", empresa: "Elifiant" }}
+        onVolver={() => setTomandoPedido(false)}
+      />
+    );
+  }
+
+  if (comercioSeleccionado) {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif', paddingBottom: '40px' }}>
         <header style={{ padding: '14px 16px', background: '#131b2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', position: 'sticky', top: 0, zIndex: 10 }}>
@@ -616,7 +629,33 @@ export default function App() {
             📍 Ajustar Ubicación en Mapa
           </button>
 
-          <form onSubmit={guardarEdicion} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          
+        {/* BOTÓN TOMAR PEDIDO / COMANDAS */}
+        <button
+          type="button"
+          onClick={() => setTomandoPedido(true)}
+          style={{
+            width: "100%",
+            backgroundColor: "#2563eb",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "12px",
+            padding: "14px",
+            fontSize: "15px",
+            fontWeight: "800",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
+            boxShadow: "0 4px 12px rgba(37,99,235,0.3)",
+            marginBottom: "14px"
+          }}
+        >
+          <span>📦</span> Tomar Pedido / Reedición
+        </button>
+
+        <form onSubmit={guardarEdicion} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Nombre</label>
               <input
