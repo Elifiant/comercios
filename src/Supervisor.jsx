@@ -204,6 +204,7 @@ export default function Supervisor() {
             Restan 3 días
           </span>
         </a>
+      <button type="button" onClick={async () => { try { await supabase.auth.signOut(); } catch(e){} try { localStorage.clear(); sessionStorage.clear(); } catch(e){} window.location.href = "/"; }} style={{ display: "inline-flex", alignItems: "center", gap: "6px", backgroundColor: "#ef4444", color: "#ffffff", padding: "7px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "700", border: "none", cursor: "pointer", boxShadow: "0 2px 8px rgba(239,68,68,0.3)", marginLeft: "8px" }}><span>✕</span> Salir</button>
         </header>
 
       {/* PESTAÑAS DE NAVEGACIÓN SUPERIOR */}
