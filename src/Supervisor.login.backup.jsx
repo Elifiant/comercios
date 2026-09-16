@@ -190,14 +190,7 @@ export default function Supervisor() {
             📱 App Preventa
           </button>
         </div>
-      <a href="/pagos" style={{ display: "inline-flex", alignItems: "center", gap: "8px", backgroundColor: "#2563eb", color: "#ffffff", padding: "7px 14px", borderRadius: "8px", fontSize: "13px", textDecoration: "none", fontWeight: "700", boxShadow: "0 2px 8px rgba(37,99,235,0.3)", marginRight: "10px" }}>
-          <span>💳 Pagar Suscripción</span>
-          <span style={{ backgroundColor: "#ef4444", color: "#ffffff", fontSize: "11px", padding: "2px 7px", borderRadius: "999px", fontWeight: "800", display: "inline-flex", alignItems: "center", gap: "4px", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#ffffff" }}></span>
-            Restan 3 días
-          </span>
-        </a>
-        </header>
+      </header>
 
       {/* PESTAÑAS DE NAVEGACIÓN SUPERIOR */}
       <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 28px", display: "flex", gap: "24px" }}>
