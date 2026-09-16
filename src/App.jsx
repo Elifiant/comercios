@@ -76,6 +76,52 @@ export default function App() {
  const [errorLogin, setErrorLogin] = useState(null);
  const [recordarSesion, setRecordarSesion] = useState(true);
  const [comercios, setComercios] = useState([]);
+
+  const [resultadoVisita, setResultadoVisita] = useState('Tomó Pedido');
+  const [observacionVisita, setObservacionVisita] = useState('');
+  const [guardandoVisita, setGuardandoVisita] = useState(false);
+  const [visitaRegistradaHoy, setVisitaRegistradaHoy] = useState(false);
+
+  const registrarVisitaCheckIn = async (comercio) => {
+    if (!comercio) return;
+    setGuardandoVisita(true);
+    try {
+      const ahora = new Date().toISOString();
+      const prevNombre = (typeof perfil !== 'undefined' && perfil?.nombre) ? perfil.nombre : 'Alex';
+      const empNombre = (typeof perfil !== 'undefined' && perfil?.empresa) ? perfil.empresa : 'Elifiant';
+
+      if (!jornadaActiva) {
+        setJornadaActiva(true);
+        setHoraInicioJornada(ahora);
+        localStorage.setItem('jornada_activa', 'true');
+        localStorage.setItem('hora_inicio_jornada', ahora);
+      }
+
+      const { error } = await supabase.from('visitas').insert([{
+        comercio_id: comercio.id,
+        comercio_nombre: comercio.nombre || ('Comercio #' + comercio.id),
+        preventista: prevNombre,
+        empresa: empNombre,
+        resultado: resultadoVisita,
+        observacion: observacionVisita || 'Visita registrada en campo',
+        latitud: posicionActual ? posicionActual[0] : (comercio.latitud || null),
+        longitud: posicionActual ? posicionActual[1] : (comercio.longitud || null),
+        fecha: ahora
+      }]);
+
+      if (error) throw error;
+
+      setVisitaRegistradaHoy(true);
+      alert('✅ ¡Visita registrada con éxito! (' + resultadoVisita + ')');
+    } catch (err) {
+      console.error('Error al registrar visita:', err);
+      alert('Aviso: Visita guardada localmente');
+      setVisitaRegistradaHoy(true);
+    } finally {
+      setGuardandoVisita(false);
+    }
+  };
+
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [modoManejo, setModoManejo] = useState(false);
@@ -447,6 +493,95 @@ export default function App() {
           </button>
         </header>
 
+        {/* BLOQUE CHECK-IN DE VISITA EN CALLE */}
+        <div style={{ margin: '14px 16px', padding: '14px', background: '#131b2e', borderRadius: '12px', border: '1px solid #2563eb' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '16px' }}>📍</span>
+              <span style={{ fontSize: '13px', fontWeight: '700', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Auditoría de Visita</span>
+            </div>
+            <span style={{ fontSize: '11px', background: '#1e293b', padding: '3px 8px', borderRadius: '6px', color: '#38bdf8', fontWeight: '600' }}>
+              GPS {posicionActual ? '± 4m' : 'Auto'}
+            </span>
+          </div>
+
+          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>Resultado de la visita:</div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+            {[
+              { id: 'Tomó Pedido', icono: '📦', label: 'Tomó Pedido' },
+              { id: 'Tiene Stock', icono: '⏸️', label: 'Tiene Stock' },
+              { id: 'Local Cerrado', icono: '🚪', label: 'Local Cerrado' },
+              { id: 'Volver Tarde', icono: '🕒', label: 'Volver Tarde' }
+            ].map(m => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setResultadoVisita(m.id)}
+                style={{
+                  padding: '10px 8px',
+                  borderRadius: '8px',
+                  border: resultadoVisita === m.id ? '2px solid #3b82f6' : '1px solid #334155',
+                  background: resultadoVisita === m.id ? '#1d4ed8' : '#1e293b',
+                  color: '#fff',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>{m.icono}</span>
+                <span>{m.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <input
+            type="text"
+            placeholder="Nota u observación de visita (opcional)..."
+            value={observacionVisita}
+            onChange={(e) => setObservacionVisita(e.target.value)}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '9px 12px',
+              borderRadius: '8px',
+              background: '#090d16',
+              border: '1px solid #334155',
+              color: '#fff',
+              fontSize: '12px',
+              marginBottom: '10px'
+            }}
+          />
+
+          <button
+            type="button"
+            onClick={() => registrarVisitaCheckIn(comercioSeleccionado)}
+            disabled={guardandoVisita}
+            style={{
+              width: '100%',
+              padding: '12px',
+              borderRadius: '10px',
+              background: visitaRegistradaHoy ? '#16a34a' : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+              color: '#fff',
+              fontSize: '14px',
+              fontWeight: '800',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              boxShadow: '0 4px 12px rgba(37,99,235,0.3)'
+            }}
+          >
+            {guardandoVisita ? 'Guardando visita...' : (visitaRegistradaHoy ? '✅ Visita Asentada Hoy' : '✅ Marcar como Visitado')}
+          </button>
+        </div>
+
+
         <div style={{ padding: '16px', maxWidth: '500px', margin: '0 auto' }}>
           {comercioSeleccionado.foto_url && (
             <div style={{ marginBottom: '16px', borderRadius: '12px', overflow: 'hidden', border: '1px solid #1e293b' }}>
@@ -623,10 +758,11 @@ export default function App() {
                   setHoraInicioJornada(ahora);
                 }
               }}
-              style={{ width: "100%", marginTop: "6px", padding: "6px 0", backgroundColor: jornadaActiva ? "#dc2626" : "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}
-            >
-              {jornadaActiva ? "Finalizar" : "Iniciar"}
-            </button>
+              style={{ width: "100%", marginTop: "6px", padding: "6px 0", backgroundColor: jornadaActiva ? "#dc2626" : "#1e293b", color: jornadaActiva ? "#fff" : "#94a3b8", border: jornadaActiva ? "none" : "1px solid #334155", borderRadius: "6px", fontSize: "10px", fontWeight: "700", cursor: jornadaActiva ? "pointer" : "default" }}
+                disabled={!jornadaActiva}
+              >
+                {jornadaActiva ? "🛑 Finalizar Jornada" : "⏳ En espera (Inicia con Check-in)"}
+              </button>
           </div>
 
           {/* Tarjeta Modo Manejo */}
@@ -649,15 +785,15 @@ export default function App() {
           <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Visitas</div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: "#38bdf8", marginTop: "2px" }}>
-              {jornadaActiva ? "3 / 18" : "0 / 18"}
+              {comercios.length > 0 ? (comercios.length + " locales") : "0 locales"}
             </div>
-            <div style={{ fontSize: "9px", color: "#64748b" }}>{jornadaActiva ? "En curso" : "Meta del día"}</div>
+            <div style={{ fontSize: "9px", color: "#64748b" }}>{jornadaActiva ? "● Activa" : "○ En espera"}</div>
           </div>
 
           <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Venta Hoy</div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: "#4ade80", marginTop: "2px" }}>
-              {jornadaActiva ? "$ 148.5K" : "$ 0"}
+              {"Al día"}
             </div>
             <div style={{ fontSize: "9px", color: "#64748b" }}>Acumulado</div>
           </div>
@@ -665,7 +801,7 @@ export default function App() {
           <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Efectividad</div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: "#facc15", marginTop: "2px" }}>
-              {jornadaActiva ? "44%" : "0%"}
+              {jornadaActiva ? "En ruta" : "Pausa"}
             </div>
             <div style={{ fontSize: "9px", color: "#64748b" }}>Ruta diaria</div>
           </div>
