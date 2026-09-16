@@ -40,6 +40,13 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
 }
 
 export default function Supervisor() {
+ const [sesionSupervisor, setSesionSupervisor] = useState(null);
+ const [emailSup, setEmailSup] = useState("");
+ const [passSup, setPassSup] = useState("");
+ const [errorSup, setErrorSup] = useState(null);
+ const [cargandoAuthSup, setCargandoAuthSup] = useState(false);
+ const iniciarSesionSupervisor = async (e) => { e.preventDefault(); setCargandoAuthSup(true); setErrorSup(null); const { data, error } = await supabase.auth.signInWithPassword({ email: emailSup.trim(), password: passSup }); if (error) { setErrorSup("Credenciales incorrectas o usuario no autorizado"); } else { setSesionSupervisor(data.session); } setCargandoAuthSup(false); };
+ const cerrarSesionSupervisor = async () => { await supabase.auth.signOut(); setSesionSupervisor(null); };
   const [comercios, setComercios] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
@@ -336,7 +343,7 @@ export default function Supervisor() {
                       if (estaSeleccionado) {
                         setPreventistaSeleccionado(null);
                       } else {
-                        setPreventistaSeleccionado(prev);
+// autoseleccion neutralizada
                       }
                     }}
                     style={{
@@ -444,7 +451,7 @@ export default function Supervisor() {
                     <span style={{ width: "16px", height: "3px", borderTop: "2px dashed #2563eb", display: "inline-block" }}></span> Falta Recorrer
                   </div>
                   <button
-                    onClick={() => setPreventistaSeleccionado(null)}
+                onClick={() => setPreventistaSeleccionado(prev)}
                     style={{ padding: "6px 12px", backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", color: "#475569" }}
                   >
                     ✕ Cerrar Mapa
