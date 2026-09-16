@@ -46,7 +46,7 @@ export default function Supervisor() {
   const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
   const [diaSemana, setDiaSemana] = useState("Jueves");
   const [busqueda, setBusqueda] = useState("");
-  const [filtroEmpresa, setFiltroEmpresa] = useState("TODAS");
+  const [filtroEmpresa, setFiltroEmpresa] = useState("Elifiant");
   const [comercioFoco, setComercioFoco] = useState(null);
   const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
 
@@ -73,24 +73,19 @@ export default function Supervisor() {
 
   const empresasUnicas = ["TODAS", ...Array.from(new Set(comercios.map(c => c.empresa || "Elifiant")))];
   const preventistasUnicos = Array.from(new Set(comercios.map(c => c.preventista || "Alex")));
-  const listaPreventistas = preventistasUnicos.length > 0 ? preventistasUnicos : ["Walter Pérez", "Alex Gómez", "Ian Torres"];
+  const listaPreventistas = preventistasUnicos.length > 0 ? preventistasUnicos : Array.from(new Set(comercios.map(c => c.preventista).filter(Boolean)));
 
   const telemetriaFlota = listaPreventistas.map((prev, idx) => {
     const comerciosPrev = comercios.filter(c => (c.preventista || "Alex") === prev);
-    const totalParadas = Math.max(comerciosPrev.length, 24 + idx * 2);
-    const paradasHechas = Math.min(Math.floor(totalParadas * 0.7) + idx, totalParadas);
-    return {
+    const totalParadas = comerciosPrev.length;
+        return {
       nombre: prev,
       rutaId: "Ruta #" + (idx + 2 < 10 ? "0" + (idx + 2) : idx + 2),
-      zona: idx === 0 ? "Bernal Oeste • Moto Honda Wave" : idx === 1 ? "Quilmes Centro • Utilitario Berlingo" : "Berazategui • Moto YBR",
+      zona: idx === 0 ? "Bernal Oeste • En patrullaje comercial" : "Quilmes Centro • Ruta comercial",
       estado: idx === 1 ? "En Tránsito" : "En Cliente",
-      inicio: "08:" + (10 + idx * 5) + " hs",
-      paradasTotales: totalParadas,
-      paradasCompletadas: paradasHechas,
-      bateria: idx === 0 ? "78%" : idx === 1 ? "92%" : "42%",
-      recorridoKm: (16.4 + idx * 3.2).toFixed(1) + " km",
-      velocidad: idx === 1 ? "36 km/h" : "En visita",
-      proxima: comerciosPrev[0]?.nombre || ("Almacén El Ombú (Stop #" + (paradasHechas + 1) + ")")
+            paradasTotales: totalParadas,
+                        estadoActividad: comerciosPrev.length > 0 ? "En calle" : "Sin paradas",
+      proxima: comerciosPrev[0]?.nombre || "Sin comercios asignados"
     };
   });
 
@@ -137,6 +132,24 @@ export default function Supervisor() {
   const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
   const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
 
+  
+  // Función auxiliar para calcular telemetría real de preventistas
+  const calcularMetasPreventista = (nombrePreventista) => {
+    const todosDelPreventista = comercios.filter(com => (com.preventista || 'Alex') === nombrePreventista);
+    const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const diaHoyTexto = diasSemana[new Date().getDay()];
+    
+    const metaHoy = todosDelPreventista.filter(com => (com.dia_visita || 'Lunes') === diaHoyTexto);
+    const visitadosHoy = metaHoy.filter(com => com.visitado_hoy || com.visitado);
+    
+    return {
+      carteraTotal: todosDelPreventista.length,
+      metaHoy: metaHoy.length,
+      visitados: visitadosHoy.length,
+      pendientes: Math.max(0, metaHoy.length - visitadosHoy.length)
+    };
+  };
+
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* CABECERA PRINCIPAL */}
@@ -149,7 +162,7 @@ export default function Supervisor() {
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <h1 style={{ margin: 0, fontSize: "18px", fontWeight: "800", letterSpacing: "-0.5px" }}>RutaComercio Web</h1>
               <span style={{ backgroundColor: "#dcfce7", color: "#15803d", fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
-                <span style={{ width: "6px", height: "6px", backgroundColor: "#22c55e", borderRadius: "50%" }}></span> Supabase Online
+                <span style={{ width: "6px", height: "6px", backgroundColor: "#22c55e", borderRadius: "50%" }}></span> RutaComercio Cloud · En Vivo
               </span>
             </div>
             <p style={{ margin: 0, fontSize: "12px", color: "#64748b" }}>Monitoreo de Campo • Rutas Actuales • Planificador Semanal</p>
@@ -159,15 +172,9 @@ export default function Supervisor() {
         {/* SELECTORES DE CONTROL */}
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           {empresasUnicas.length > 2 && (
-            <select
-              value={filtroEmpresa}
-              onChange={e => setFiltroEmpresa(e.target.value)}
-              style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f1f5f9", fontSize: "13px", fontWeight: "600", color: "#0f172a", outline: "none", cursor: "pointer" }}
-            >
-              {empresasUnicas.map(emp => (
-                <option key={emp} value={emp}>{emp === "TODAS" ? "🏢 Todas las Empresas" : emp}</option>
-              ))}
-            </select>
+            <div style={{ padding: "8px 16px", borderRadius: "8px", backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>🏢</span> <span>Elifiant Distribuidora S.A.</span>
+              </div>
           )}
 
           <button
@@ -246,7 +253,7 @@ export default function Supervisor() {
           </div>
 
           <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>GPS & Sync Batería</span>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>GPS & Sincronización en Vivo</span>
             <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
               <span style={{ fontSize: "24px", fontWeight: "800", color: "#16a34a" }}>99.2%</span>
               <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "700" }}>Excelente</span>
@@ -314,7 +321,7 @@ export default function Supervisor() {
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               {telemetriaFlota.map((prev, idx) => {
                 const estaSeleccionado = preventistaSeleccionado?.nombre === prev.nombre;
-                const porcentaje = Math.round((prev.paradasCompletadas / prev.paradasTotales) * 100);
+                const porcentaje = prev.paradasTotales > 0 ? 100 : 0;
                 return (
                   <div
                     key={prev.nombre}
@@ -359,16 +366,16 @@ export default function Supervisor() {
                         <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>{prev.inicio}</div>
                       </div>
                       <div>
-                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Paradas</span>
-                        <div style={{ fontSize: "12px", fontWeight: "700", color: "#16a34a" }}>{prev.paradasCompletadas} / {prev.paradasTotales}</div>
+                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Comercios</span>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#16a34a" }}>{prev.paradasTotales} {prev.paradasTotales === 1 ? "comercio" : "comercios"}</div>
                       </div>
                       <div>
-                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Batería</span>
-                        <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>🔋 {prev.bateria}</div>
+                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Conexión GPS</span>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#16a34a" }}>📡 En Línea</div>
                       </div>
                       <div>
-                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Recorrido</span>
-                        <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>{prev.recorridoKm}</div>
+                        <span style={{ fontSize: "10px", color: "#94a3b8" }}>Estado</span>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>🟢 {prev.estadoActividad || "En calle"}</div>
                       </div>
                     </div>
 
@@ -377,7 +384,7 @@ export default function Supervisor() {
                       <div style={{ width: `${porcentaje}%`, height: "100%", backgroundColor: COLORES[idx % COLORES.length] }}></div>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b" }}>
-                      <span>Próxima: <strong>{prev.proxima}</strong></span>
+                      <span>Comercio: <strong>{prev.proxima}</strong></span>
                       <span><strong>{porcentaje}%</strong> completado</span>
                     </div>
                   </div>

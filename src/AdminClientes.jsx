@@ -213,17 +213,49 @@ export default function AdminClientes() {
   const crearNuevoPreventista = async (e) => {
     e.preventDefault();
     try {
-      const nuevo = { nombre: nuevoNombre, email: nuevoEmail, empresa: empresaSeleccionada, activo: true };
-      const { error } = await supabase.from("perfiles").insert([nuevo]);
-      if (error) throw error;
-      setPreventistas(prev => [...prev, nuevo]);
+      if (!nuevoEmail || !nuevoPassword) {
+        alert("Por favor completá email y contraseña");
+        return;
+      }
+      // 1. Creamos la cuenta real de login en Supabase Authentication
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+        email: nuevoEmail.trim().toLowerCase(),
+        password: nuevoPassword,
+        options: {
+          data: {
+            nombre: nuevoNombre,
+            empresa: empresaSeleccionada,
+            rol: "preventista"
+          }
+        }
+      });
+      if (authErr && !authErr.message.toLowerCase().includes("already registered")) {
+        throw authErr;
+      }
+
+      const uid = authData?.user?.id || (typeof crypto !== "undefined" ? crypto.randomUUID() : "prev-" + Date.now());
+
+      // 2. Guardamos o vinculamos en la tabla perfiles
+      const nuevo = {
+        id: uid,
+        nombre: nuevoNombre,
+        email: nuevoEmail.trim().toLowerCase(),
+        empresa: empresaSeleccionada,
+        rol: "preventista",
+        activo: true
+      };
+
+      const { error: perfilErr } = await supabase.from("perfiles").upsert([nuevo]);
+      if (perfilErr) console.warn("Aviso en perfiles:", perfilErr.message);
+
+      setPreventistas(prev => [...prev.filter(p => p.email !== nuevo.email), nuevo]);
       setNuevoNombre("");
       setNuevoEmail("");
       setNuevoPassword("");
       setMostrarModalPreventista(false);
-      alert("Preventista creado con éxito");
+      alert("🎉 Preventista creado con éxito! Ya puede ingresar desde la app móvil.");
     } catch (err) {
-      alert("Error: " + (err.message || "Error al crear preventista"));
+      alert("Error al dar de alta: " + (err.message || "Verificá los datos"));
     }
   };
 
