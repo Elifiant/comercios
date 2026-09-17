@@ -532,6 +532,33 @@ export default function App() {
           </button>
         </header>
 
+        {/* BOTÓN OFICIAL TOMAR PEDIDO ARRIBA DE TODO */}
+        <div style={{ padding: "0 16px", marginTop: "14px" }}>
+          <button
+            type="button"
+            onClick={() => setTomandoPedido(true)}
+            style={{
+              width: "100%",
+              backgroundColor: "#2563eb",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "14px",
+              padding: "16px",
+              fontSize: "16px",
+              fontWeight: "800",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "10px",
+              boxShadow: "0 6px 16px rgba(37,99,235,0.35)"
+            }}
+          >
+            <span style={{ fontSize: "20px" }}>📦</span> Tomar Pedido / Reedición
+          </button>
+        </div>
+
+
         {/* BLOQUE CHECK-IN DE VISITA EN CALLE */}
         <div style={{ margin: '14px 16px', padding: '14px', background: '#131b2e', borderRadius: '12px', border: '1px solid #2563eb' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
