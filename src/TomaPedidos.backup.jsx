@@ -15,33 +15,17 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
   const [exitoGuardado, setExitoGuardado] = useState(false);
 
   // Catálogo base de artículos disponibles
-    // Catálogo base de preventa (fallback seguro para calle)
-    // Catálogo base enriquecido con múltiples artículos y códigos "104"
-  const catalogoBase = [
-    { id: 1040, codigo: "CGE-1040", marca: "COCA-COLA", nombre: "Coca Cola Sin Azúcar 2.25L", categoria: "Bebidas", precio: 3400, stock: 380 },
-    { id: 1041, codigo: "CGE-1041", marca: "COCA-COLA", nombre: "Coca Cola Original 2.25L Retornable", categoria: "Bebidas", precio: 2450, stock: 520 },
-    { id: 1042, codigo: "CGE-1042", marca: "COCA-COLA", nombre: "Fanta Naranja 2L", categoria: "Bebidas", precio: 2150, stock: 215 },
-    { id: 104,  codigo: "CGE-104",  marca: "QUILMES",   nombre: "Cerveza Clásica 1L Retornable", categoria: "Bebidas", precio: 2400, stock: 140 },
-    { id: 2104, codigo: "CGE-2104", marca: "BAGLEY",    nombre: "Galletitas Chocolinas 250g", categoria: "Almacén", precio: 1800, stock: 85 },
-    { id: 3104, codigo: "CGE-3104", marca: "PLAYADITO", nombre: "Yerba Mate Suave 500g", categoria: "Almacén", precio: 1920, stock: 460 },
-    { id: 2188, codigo: "CGE-2188", marca: "BRANCA",    nombre: "Fernet Branca 750cc Especial", categoria: "Bebidas", precio: 4850, stock: 110 },
-    { id: 4091, codigo: "CGE-4091", marca: "AYUDÍN",    nombre: "Lavandina Triple Poder 2L", categoria: "Limpieza", precio: 3100, stock: 95 }
+  const catalogoDemo = [
+    { id: 101, codigo: 'CGE-102', marca: 'COCA-COLA', nombre: 'Gaseosa 2.25L Sabor Original', categoria: 'Bebidas', precio: 3200, stock: 450 },
+    { id: 102, codigo: 'CGE-208', marca: 'ARCOR', nombre: 'Chocolates Bon o Bon Caja x30', categoria: 'Golosinas', precio: 7500, stock: 120 },
+    { id: 103, codigo: 'CGE-315', marca: 'LUCCHETTI', nombre: 'Fideos Spaghetti 500g (x12)', categoria: 'Almacén', precio: 1150, stock: 240 },
+    { id: 104, codigo: 'CGE-401', marca: 'QUILMES', nombre: 'Cerveza Clásica 1L Retornable', categoria: 'Bebidas', precio: 2400, stock: 310 },
+    { id: 105, codigo: 'CGE-502', marca: 'BAGLEY', nombre: 'Galletitas Chocolinas 250g', categoria: 'Almacén', precio: 1800, stock: 180 }
   ];
 
-  const [catalogo, setCatalogo] = useState(catalogoBase);
-
-  // Búsqueda inteligente por código, nombre o marca
-  const catalogoFiltrado = catalogo.filter(p => {
-    const q = (busqueda || "").toLowerCase().trim();
-    const codLimpio = (p.codigo || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const qLimpio = q.replace(/[^a-z0-9]/g, "");
-
-    const coincideCodigo = qLimpio && (codLimpio.includes(qLimpio) || String(p.id).includes(qLimpio));
-    const coincideNombre = (p.nombre || "").toLowerCase().includes(q);
-    const coincideMarca = (p.marca || "").toLowerCase().includes(q);
-    const coincideTexto = !q || coincideCodigo || coincideNombre || coincideMarca;
-
-    const coincideCat = categoriaSel === "TODOS" || p.categoria === categoriaSel;
+  const catalogoFiltrado = catalogoDemo.filter(p => {
+    const coincideTexto = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || p.codigo.toLowerCase().includes(busqueda.toLowerCase()) || p.marca.toLowerCase().includes(busqueda.toLowerCase());
+    const coincideCat = categoriaSel === 'TODOS' || p.categoria === categoriaSel;
     return coincideTexto && coincideCat;
   });
 
