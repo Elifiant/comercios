@@ -152,7 +152,17 @@ export default function App() {
  sessionStorage.clear();
  setSesion(null);
  };
- const [textoBotonAgregar, setTextoBotonAgregar] = useState('➕ AGREGAR COMERCIO');
+ const [posicionBotonManejo, setPosicionBotonManejo] = useState(() => {
+    try {
+      const guardada = localStorage.getItem("rutacomercio_pos_boton_manejo");
+      return guardada ? JSON.parse(guardada) : { x: 16, y: window.innerHeight - 170 };
+    } catch(e) {
+      return { x: 16, y: 500 };
+    }
+  });
+  const [arrastrandoBoton, setArrastrandoBoton] = useState(false);
+  const dragRef = React.useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0, moved: false });
+  const [textoBotonAgregar, setTextoBotonAgregar] = useState('➕ AGREGAR COMERCIO');
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
   const [nuevaPosicion, setNuevaPosicion] = useState(null);
   const [busqueda, setBusqueda] = useState('');
@@ -437,63 +447,34 @@ export default function App() {
 
   
   // Vista del Editor de Ubicación en Mapa con Pin Arrastrable
-   if (cargandoAuth) { return ( <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: "sans-serif" }}> Iniciando RutaComercio... </div> ); } if (!sesion) { return ( <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif", boxSizing: "border-box" }}> <div style={{ width: "100%", maxWidth: "360px", backgroundColor: "#1e293b", padding: "28px 24px", borderRadius: "16px", border: "1px solid #334155", boxShadow: "0 10px 25px rgba(0,0,0,0.5)" }}> <div style={{ textAlign: "center", marginBottom: "24px" }}> <div style={{ width: "52px", height: "52px", borderRadius: "12px", backgroundColor: "#2563eb", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "26px", marginBottom: "12px" }}> 📍 </div> <h2 style={{ margin: 0, color: "#fff", fontSize: "20px", fontWeight: "700" }}>RutaComercio</h2> <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: "13px" }}>Ingreso seguro para preventistas</p> </div> <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Correo electrónico</label> <input type="email" required value={emailLogin} onChange={(e) => setEmailLogin(e.target.value)} placeholder="ej: tu_correo@empresa.com" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Contraseña</label> <input type="password" required value={passwordLogin} onChange={(e) => setPasswordLogin(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> {errorLogin && ( <div style={{ padding: "10px", borderRadius: "8px", backgroundColor: "rgba(239, 68, 68, 0.15)", border: "1px solid #ef4444", color: "#f87171", fontSize: "12px", textAlign: "center" }}> {errorLogin} </div> )} <button type="submit" style={{ marginTop: "6px", padding: "13px", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", fontWeight: "700", fontSize: "14px", cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.4)" }} > Iniciar Sesión </button> </form> </div> </div> ); } if (modoManejo) { const latM = (posicionActual && posicionActual[0]) ? posicionActual[0] : -34.719; const lngM = (posicionActual && posicionActual[1]) ? posicionActual[1] : -58.265; return ( <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}> <header style={{ padding: "12px 16px", background: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155" }}> <div style={{ display: "flex", alignItems: "center", gap: "8px" }}> <span style={{ fontSize: "20px" }}>🚗</span> <span style={{ fontWeight: "800", fontSize: "15px" }}>Modo Manejo Activo</span> </div> <button onClick={() => setModoManejo(false)} style={{ background: "#dc2626", color: "#fff", border: "none", padding: "6px 14px", borderRadius: "8px", fontWeight: "700", fontSize: "12px", cursor: "pointer" }} > ✕ Salir </button> </header>
-
-        {/* BOTÓN TOMAR PEDIDO ARRIBA DE TODO */}
-        <button
-          type="button"
-          onClick={() => setTomandoPedido(true)}
-          style={{
-            width: "100%",
-            backgroundColor: "#2563eb",
-            color: "#ffffff",
-            border: "none",
-            borderRadius: "14px",
-            padding: "16px",
-            fontSize: "16px",
-            fontWeight: "800",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "10px",
-            boxShadow: "0 6px 16px rgba(37,99,235,0.35)",
-            margin: "12px 0 16px 0"
-          }}
-        >
-          <span style={{ fontSize: "20px" }}>📦</span> Tomar Pedido / Reedición
-        </button>
-{/* CONTENEDOR ERGONÓMICO SUPERIOR SIN SUPERPOSICIONES */}
-        <div style={{ position: "absolute", top: "60px", left: "12px", right: "12px", zIndex: 1000, display: "flex", flexDirection: "column", gap: "10px", pointerEvents: "none" }}>
-          {comercioCercano && (
-            <div style={{ padding: "10px 14px", background: "#16a34a", color: "#fff", textAlign: "center", fontWeight: "800", fontSize: "13px", borderRadius: "12px", boxShadow: "0 4px 15px rgba(0,0,0,0.4)", border: "2px solid #bbf7d0", pointerEvents: "auto" }}>
-              🔔 Cerca de: {comercioCercano.nombre || ("Comercio #" + comercioCercano.id)} ({comercioCercano.distancia}m)
-            </div>
-          )}
+   if (cargandoAuth) { return ( <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: "sans-serif" }}> Iniciando RutaComercio... </div> ); } if (!sesion) { return ( <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif", boxSizing: "border-box" }}> <div style={{ width: "100%", maxWidth: "360px", backgroundColor: "#1e293b", padding: "28px 24px", borderRadius: "16px", border: "1px solid #334155", boxShadow: "0 10px 25px rgba(0,0,0,0.5)" }}> <div style={{ textAlign: "center", marginBottom: "24px" }}> <div style={{ width: "52px", height: "52px", borderRadius: "12px", backgroundColor: "#2563eb", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "26px", marginBottom: "12px" }}> 📍 </div> <h2 style={{ margin: 0, color: "#fff", fontSize: "20px", fontWeight: "700" }}>RutaComercio</h2> <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: "13px" }}>Ingreso seguro para preventistas</p> </div> <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Correo electrónico</label> <input type="email" required value={emailLogin} onChange={(e) => setEmailLogin(e.target.value)} placeholder="ej: tu_correo@empresa.com" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Contraseña</label> <input type="password" required value={passwordLogin} onChange={(e) => setPasswordLogin(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> {errorLogin && ( <div style={{ padding: "10px", borderRadius: "8px", backgroundColor: "rgba(239, 68, 68, 0.15)", border: "1px solid #ef4444", color: "#f87171", fontSize: "12px", textAlign: "center" }}> {errorLogin} </div> )} <button type="submit" style={{ marginTop: "6px", padding: "13px", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", fontWeight: "700", fontSize: "14px", cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.4)" }} > Iniciar Sesión </button> </form> </div> </div> ); } if (modoManejo) {
+    const latM = (posicionActual && posicionActual[0]) ? posicionActual[0] : -34.719;
+    const lngM = (posicionActual && posicionActual[1]) ? posicionActual[1] : -58.265;
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif", position: "relative", overflow: "hidden" }}>
+        {/* HEADER MODO MANEJO */}
+        <header style={{ padding: "12px 16px", background: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155", zIndex: 1001 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "20px" }}>🚗</span>
+            <span style={{ fontWeight: "800", fontSize: "15px" }}>Modo Manejo Activo</span>
+          </div>
           <button 
-            onClick={agregarComercioInmediato} 
-            style={{ 
-              width: "100%", 
-              minHeight: "72px", 
-              padding: "14px", 
-              backgroundColor: "#1d4ed8", 
-              color: "#ffffff", 
-              border: "3px solid #93c5fd", 
-              borderRadius: "16px", 
-              fontSize: "19px", 
-              fontWeight: "900", 
-              cursor: "pointer", 
-              letterSpacing: "1px", 
-              boxShadow: "0 8px 22px rgba(0,0,0,0.55)", 
-              textTransform: "uppercase",
-              pointerEvents: "auto"
-            }}
+            onClick={() => setModoManejo(false)} 
+            style={{ background: "#dc2626", color: "#fff", border: "none", padding: "6px 14px", borderRadius: "8px", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}
           >
-            {textoBotonAgregar}
+            ✕ Salir
           </button>
-        </div>
+        </header>
 
-        <div style={{ flex: 1, position: "relative" }}>
+        {/* 1. AVISO DE CERCANÍA: ARRIBA DE TODO */}
+        {comercioCercano && (
+          <div style={{ padding: "10px 14px", background: "#16a34a", color: "#fff", textAlign: "center", fontWeight: "800", fontSize: "13px", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", zIndex: 1000, borderBottom: "2px solid #bbf7d0" }}>
+            🔔 Cerca de: {comercioCercano.nombre || ("Comercio #" + comercioCercano.id)} ({comercioCercano.distancia}m)
+          </div>
+        )}
+
+        {/* 2. MAPA EN VIVO: CENTRO COMPLETO */}
+        <div style={{ flex: 1, position: "relative", width: "100%", height: "100%" }}>
           <MapContainer center={[latM, lngM]} zoom={16} style={{ height: "100%", width: "100%" }}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {posicionActual && <Marker position={posicionActual} />}
@@ -508,7 +489,83 @@ export default function App() {
               );
             })}
           </MapContainer>
-        </div> </div> ); } 
+        </div>
+
+        {/* 3. BOTÓN GIGANTE: ABAJO DE TODO AL ALCANCE DEL PULGAR */}
+        {/* 3. BOTÓN GIGANTE ARRASTRABLE LIBRE */}
+        <div 
+          style={{ 
+            position: "fixed", 
+            left: posicionBotonManejo.x + "px", 
+            top: posicionBotonManejo.y + "px", 
+            width: "calc(100% - 32px)",
+            maxWidth: "380px",
+            zIndex: 2000,
+            touchAction: "none"
+          }}
+          onTouchStart={(e) => {
+            const touch = e.touches[0];
+            dragRef.current = {
+              startX: touch.clientX,
+              startY: touch.clientY,
+              initialX: posicionBotonManejo.x,
+              initialY: posicionBotonManejo.y,
+              moved: false
+            };
+            setArrastrandoBoton(true);
+          }}
+          onTouchMove={(e) => {
+            const touch = e.touches[0];
+            const dx = touch.clientX - dragRef.current.startX;
+            const dy = touch.clientY - dragRef.current.startY;
+            if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+              dragRef.current.moved = true;
+            }
+            const nuevoX = Math.max(8, Math.min(window.innerWidth - 300, dragRef.current.initialX + dx));
+            const nuevoY = Math.max(70, Math.min(window.innerHeight - 90, dragRef.current.initialY + dy));
+            setPosicionBotonManejo({ x: nuevoX, y: nuevoY });
+          }}
+          onTouchEnd={() => {
+            setArrastrandoBoton(false);
+            if (!dragRef.current.moved) {
+              agregarComercioInmediato();
+            } else {
+              try {
+                localStorage.setItem("rutacomercio_pos_boton_manejo", JSON.stringify(posicionBotonManejo));
+              } catch(e) {}
+            }
+          }}
+        >
+          <button 
+            type="button"
+            style={{ 
+              width: "100%", 
+              minHeight: "70px", 
+              padding: "16px", 
+              backgroundColor: arrastrandoBoton ? "#2563eb" : "#1d4ed8", 
+              color: "#ffffff", 
+              border: "3px solid #93c5fd", 
+              borderRadius: "18px", 
+              fontSize: "18px", 
+              fontWeight: "900", 
+              cursor: "grab", 
+              letterSpacing: "1px", 
+              boxShadow: arrastrandoBoton ? "0 12px 30px rgba(37,99,235,0.7)" : "0 8px 25px rgba(0,0,0,0.65)", 
+              textTransform: "uppercase",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              userSelect: "none"
+            }}
+          >
+            <span>{textoBotonAgregar}</span>
+            <span style={{ fontSize: "14px", opacity: 0.7 }}>✥</span>
+          </button>
+        </div>
+      </div>
+    );
+  } 
 
  if (editandoUbicacion && comercioSeleccionado) {
     const latInicial = Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719);
