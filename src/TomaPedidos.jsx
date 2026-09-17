@@ -17,18 +17,69 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
   // Catálogo base de artículos disponibles
     // Catálogo base de preventa (fallback seguro para calle)
     // Catálogo base enriquecido con múltiples artículos y códigos "104"
-  const catalogoBase = [
-    { id: 1040, codigo: "CGE-1040", marca: "COCA-COLA", nombre: "Coca Cola Sin Azúcar 2.25L", categoria: "Bebidas", precio: 3400, stock: 380 },
-    { id: 1041, codigo: "CGE-1041", marca: "COCA-COLA", nombre: "Coca Cola Original 2.25L Retornable", categoria: "Bebidas", precio: 2450, stock: 520 },
-    { id: 1042, codigo: "CGE-1042", marca: "COCA-COLA", nombre: "Fanta Naranja 2L", categoria: "Bebidas", precio: 2150, stock: 215 },
-    { id: 104,  codigo: "CGE-104",  marca: "QUILMES",   nombre: "Cerveza Clásica 1L Retornable", categoria: "Bebidas", precio: 2400, stock: 140 },
-    { id: 2104, codigo: "CGE-2104", marca: "BAGLEY",    nombre: "Galletitas Chocolinas 250g", categoria: "Almacén", precio: 1800, stock: 85 },
-    { id: 3104, codigo: "CGE-3104", marca: "PLAYADITO", nombre: "Yerba Mate Suave 500g", categoria: "Almacén", precio: 1920, stock: 460 },
-    { id: 2188, codigo: "CGE-2188", marca: "BRANCA",    nombre: "Fernet Branca 750cc Especial", categoria: "Bebidas", precio: 4850, stock: 110 },
-    { id: 4091, codigo: "CGE-4091", marca: "AYUDÍN",    nombre: "Lavandina Triple Poder 2L", categoria: "Limpieza", precio: 3100, stock: 95 }
-  ];
+  
+  const [catalogo, setCatalogo] = useState([]);
+  const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
 
-  const [catalogo, setCatalogo] = useState(catalogoBase);
+  useEffect(() => {
+    async function cargarArticulosReales() {
+      try {
+        // Intento 1: Traer desde lista_productos cruzado con productos
+        const { data: dataLista, error: errLista } = await supabase
+          .from("lista_productos")
+          .select(`
+            id,
+            codigo_lista,
+            detalle_en_lista,
+            precio,
+            productos (
+              id,
+              codigo_cge,
+              nombre,
+              marca,
+              presentacion,
+              empresa
+            )
+          `)
+          .eq("activo", true);
+
+        if (!errLista && dataLista && dataLista.length > 0) {
+          const prods = dataLista.map(item => ({
+            id: item.id,
+            codigo: item.productos?.codigo_cge || item.codigo_lista || "S/C",
+            nombre: item.productos?.nombre || item.detalle_en_lista || "Producto sin nombre",
+            marca: item.productos?.marca || "",
+            presentacion: item.productos?.presentacion || "",
+            precio: parseFloat(item.precio) || 0
+          }));
+          setCatalogo(prods);
+        } else {
+          // Intento 2 (Fallback directo): Traer directo de la tabla productos
+          const { data: dataProds } = await supabase
+            .from("productos")
+            .select("*")
+            .eq("activo", true);
+
+          if (dataProds && dataProds.length > 0) {
+            setCatalogo(dataProds.map(p => ({
+              id: p.id,
+              codigo: p.codigo_cge || "S/C",
+              nombre: p.nombre || "Sin nombre",
+              marca: p.marca || "",
+              presentacion: p.presentacion || "",
+              precio: 0
+            })));
+          }
+        }
+      } catch (err) {
+        console.error("Error cargando productos de Supabase:", err);
+      } finally {
+        setCargandoCatalogo(false);
+      }
+    }
+    cargarArticulosReales();
+  }, []);
+
 
   // Búsqueda inteligente por código, nombre o marca
   const catalogoFiltrado = catalogo.filter(p => {
@@ -250,20 +301,70 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
           <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '8px', marginBottom: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
             <div style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', padding: '4px 8px', textTransform: 'uppercase' }}>Artículos Encontrados</div>
             {catalogoFiltrado.map(prod => (
-              <div key={prod.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '800' }}>{prod.codigo} · {prod.marca}</div>
-                  <div style={{ fontSize: '13px', fontWeight: '700' }}>{prod.nombre}</div>
-                  <div style={{ fontSize: '12px', color: '#16a34a', fontWeight: '800' }}>${prod.precio.toLocaleString()}</div>
+            <div
+              key={prod.id || prod.codigo}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "4px 8px",
+                background: "#ffffff",
+                borderRadius: "6px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+                gap: "8px"
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", lineHeight: "1" }}>
+                  <span style={{ fontSize: "9px", fontWeight: "700", color: "#2563eb", background: "#eff6ff", padding: "1px 4px", borderRadius: "3px" }}>
+                    {prod.codigo || "S/C"}
+                  </span>
+                  {prod.marca && (
+                    <span style={{ fontSize: "10px", fontWeight: "600", color: "#64748b", textTransform: "uppercase" }}>
+                      {prod.marca}
+                    </span>
+                  )}
                 </div>
-                <button
-                  onClick={() => { agregarAlPedido(prod); setBusqueda(''); }}
-                  style={{ backgroundColor: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '6px 12px', fontWeight: '800', fontSize: '12px', cursor: 'pointer' }}
-                >
-                  ➕ Agregar
-                </button>
+                <div style={{ fontSize: "12px", fontWeight: "600", color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: "1px" }}>
+                  {prod.nombre || prod.detalle_en_lista}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", marginTop: "1px" }}>
+                  <span style={{ fontWeight: "700", color: "#2563eb" }}>
+                    $ {Number(prod.precio || 0).toLocaleString("es-AR")}
+                  </span>
+                  {prod.stock !== undefined && (
+                    <span style={{ color: "#64748b", fontSize: "10px" }}>
+                      · Stock: {prod.stock}u
+                    </span>
+                  )}
+                </div>
               </div>
-            ))}
+
+              <button
+                type="button"
+                onClick={() => agregarAlPedido(prod)}
+                style={{
+                  background: "#2563eb",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "5px",
+                  padding: "3px 8px",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "2px",
+                  flexShrink: 0,
+                  height: "26px",
+                  boxShadow: "0 1px 4px rgba(37,99,235,0.2)"
+                }}
+              >
+                +1 Bulto
+              </button>
+            </div>
+          ))}
           </div>
         )}
 
