@@ -426,7 +426,7 @@ setPreventistaSeleccionado(prev);
                       <div>
                         <span style={{ fontSize: "10px", color: "#94a3b8" }}>Conexión GPS</span>
               <div style={{ fontSize: "12px", fontWeight: "700", color: prev.activo ? "#16a34a" : "#64748b" }}>
-    {prev.activo ? "📡 En Línea" : "💤 Desconectado"}
+    {prev.activoHoy ? ("🟢 📡 En Línea" + (prev.ultimaConexion && prev.ultimaConexion !== "Sin registro hoy" ? " (" + prev.ultimaConexion + ")" : "")) : "💤 Standby / Fuera de línea"}
   </div>
                       </div>
                       <div>
