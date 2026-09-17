@@ -50,7 +50,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
     if (yaExiste) {
       setItemsPedido(itemsPedido.map(it => it.codigo === producto.codigo ? { ...it, cant: it.cant + 1 } : it));
     } else {
-      setItemsPedido([...itemsPedido, {
+      setItemsPedido([{
         id: Date.now(),
         codigo: producto.codigo,
         marca: producto.marca,
@@ -60,7 +60,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         cant: 1,
         esNuevo: !!pedidoExistente,
         nota: ''
-      }]);
+      }, ...itemsPedido]);
     }
   };
 
