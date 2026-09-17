@@ -3,16 +3,10 @@ import { supabase } from "./supabase";
 
 export default function AdminClientes() {
   const [empresas, setEmpresas] = useState([]);
-  const [mensajeExitoAsignacion, setMensajeExitoAsignacion] = useState("");
-  const [tituloAsignacion, setTituloAsignacion] = useState("➕ Asignar Nuevo Preventista");
   const [preventistas, setPreventistas] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [mostrarModalEmpresa, setMostrarModalEmpresa] = useState(false);
-  
-  const [modalResetClave, setModalResetClave] = useState(null); // { usuario, nuevoPass: "" }
-  const [modalCambiarEmail, setModalCambiarEmail] = useState(null); // { usuario, nuevoEmail: "" }
-  const [nuevoRolEmpleado, setNuevoRolEmpleado] = useState("preventista");
-    const [empresaEditando, setEmpresaEditando] = useState(null);
+  const [empresaEditando, setEmpresaEditando] = useState(null);
   const [paisEmpresa, setPaisEmpresa] = useState("Argentina");
   const [monedaEmpresa, setMonedaEmpresa] = useState("ARS");
   const [tipoTarifa, setTipoTarifa] = useState("preventista");
@@ -198,33 +192,6 @@ export default function AdminClientes() {
     setMostrarModalPago(true);
   };
 
-  
-  const handleResetClaveDirecto = async (e) => {
-    e.preventDefault();
-    if (!modalResetClave || !modalResetClave.usuario || !modalResetClave.nuevoPass) return;
-    try {
-      // Intenta actualizar via Supabase RPC o directo
-      alert("Contraseña de " + modalResetClave.usuario.nombre + " actualizada a: " + modalResetClave.nuevoPass);
-      setModalResetClave(null);
-    } catch(err) {
-      alert("Error al actualizar contraseña: " + err.message);
-    }
-  };
-
-  const handleCambiarEmailDirecto = async (e) => {
-    e.preventDefault();
-    if (!modalCambiarEmail || !modalCambiarEmail.usuario || !modalCambiarEmail.nuevoEmail) return;
-    try {
-      const { error } = await supabase.from("perfiles").update({ email: modalCambiarEmail.nuevoEmail }).eq("id", modalCambiarEmail.usuario.id);
-      if (error) throw error;
-      alert("Email actualizado con éxito a: " + modalCambiarEmail.nuevoEmail);
-      setModalCambiarEmail(null);
-      if (typeof cargarPreventistas === "function") cargarPreventistas();
-    } catch(err) {
-      alert("Error al actualizar email: " + err.message);
-    }
-  };
-  
   const guardarPago = (e) => {
     e.preventDefault();
     const nuevo = {
@@ -252,13 +219,13 @@ export default function AdminClientes() {
       }
       // 1. Creamos la cuenta real de login en Supabase Authentication
       const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: (typeof nuevoPrevEmail !== 'undefined' && nuevoPrevEmail ? nuevoPrevEmail : nuevoEmail || '').trim().toLowerCase(),
-        password: (typeof nuevoPrevPassword !== 'undefined' && nuevoPrevPassword ? nuevoPrevPassword : nuevoPassword),
+        email: nuevoEmail.trim().toLowerCase(),
+        password: nuevoPassword,
         options: {
           data: {
-            nombre: (typeof nuevoPrevNombre !== 'undefined' && nuevoPrevNombre ? nuevoPrevNombre : nuevoNombre),
+            nombre: nuevoNombre,
             empresa: empresaSeleccionada,
-            rol: (typeof nuevoPrevRol !== 'undefined' && nuevoPrevRol) ? nuevoPrevRol : 'preventista' || "preventista"
+            rol: "preventista"
           }
         }
       });
@@ -271,8 +238,8 @@ export default function AdminClientes() {
       // 2. Guardamos o vinculamos en la tabla perfiles
       const nuevo = {
         id: uid,
-        nombre: (typeof nuevoPrevNombre !== 'undefined' && nuevoPrevNombre ? nuevoPrevNombre : nuevoNombre),
-        email: (typeof nuevoPrevEmail !== 'undefined' && nuevoPrevEmail ? nuevoPrevEmail : nuevoEmail || '').trim().toLowerCase(),
+        nombre: nuevoNombre,
+        email: nuevoEmail.trim().toLowerCase(),
         empresa: empresaSeleccionada,
         rol: "preventista",
         activo: true
@@ -351,11 +318,6 @@ export default function AdminClientes() {
           <h2 style={{ margin: "10px 0 4px 0", fontSize: "28px", color: "#38bdf8", fontWeight: "800" }}>{empresas.length}</h2>
           <div style={{ fontSize: "12px", color: "#10b981" }}>● {empresas.length} activas</div>
         </div>
-            {mensajeExitoAsignacion && (
-              <div style={{ backgroundColor: "rgba(16, 185, 129, 0.2)", border: "1px solid #10b981", color: "#10b981", padding: "10px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>✓</span> {mensajeExitoAsignacion}
-              </div>
-            )}
 
         <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -560,91 +522,88 @@ export default function AdminClientes() {
         </div>
       </div>
 
-      {/* MODAL FICHA 360 CON GESTIÓN DE SUPERVISORES Y PREVENTISTAS */}
-      {empresaDetalleModal && (
-        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15,23,42,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "16px" }}>
-          <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", maxWidth: "880px", width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)" }}>
-            
-            {/* Header Ficha 360 */}
-            <div style={{ padding: "20px 24px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ width: "44px", height: "44px", borderRadius: "12px", backgroundColor: "#2563eb", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "900", fontSize: "18px" }}>
-                  {empresaDetalleModal.slice(0,2).toUpperCase()}
-                </div>
+      {/* MODAL FICHA 360 CON BORRADO DIRECTO DE PREVENTISTAS */}
+      {empresaDetalleModal && (() => {
+        const emp = empresaDetalleModal;
+        const t = tarifasMap[emp] || {};
+        const cInfoRaw = diasCorteMap[emp] || {};
+        const estadoTexto = t.estado_pago || cInfoRaw.estado || "Al Día";
+        const esAlDia = (estadoTexto === "Al Día");
+        const colorBadge = esAlDia ? "#10b981" : estadoTexto === "Por Vencer" ? "#f59e0b" : "#ef4444";
+        const prevsDeEmp = (preventistas || []).filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase());
+        const cupoMax = Number(t.cupo || cInfoRaw.cupo || 5);
+        const moneda = t.moneda || "ARS";
+        const valor = t.valor || t.tarifa || (moneda === "ARS" ? "10000" : "50");
+        const tipo = t.tipo || t.tipo_tarifa || "preventista";
+        const totalEst = tipo === "preventista" ? (prevsDeEmp.length * Number(valor)) : Number(valor);
+        const diaCorte = t.diaCobro || t.dia_cobro || cInfoRaw.dia || "05";
+
+        return (
+          <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "16px" }}>
+            <div style={{ backgroundColor: "#1e293b", borderRadius: "16px", border: "1px solid #475569", width: "100%", maxWidth: "600px", padding: "24px", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "14px" }}>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>{empresaDetalleModal}</h3>
-                  <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "700" }}>● Cuenta Activa · Multi-Tenant Aislado</span>
-                </div>
-              </div>
-              <button onClick={() => setEmpresaDetalleModal(null)} style={{ background: "#f1f5f9", border: "none", width: "36px", height: "36px", borderRadius: "50%", cursor: "pointer", fontSize: "18px", color: "#64748b", fontWeight: "bold" }}>✕</button>
-            </div>
-
-            <div style={{ padding: "24px" }}>
-              
-              {/* 1. SECCIÓN SUPERVISORES */}
-              <div style={{ backgroundColor: "#f8fafc", borderRadius: "12px", padding: "16px", marginBottom: "20px", border: "1px solid #e2e8f0" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                  <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
-                    👔 SUPERVISOR RESPONSABLE
-                  </h4>
-                  <button onClick={() => { setMostrarModalPreventista(true); setNuevoRolEmpleado("supervisor"); }} style={{ backgroundColor: "#0284c7", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
-                    + Asignar Supervisor
-                  </button>
-                </div>
-
-                {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "supervisor").length === 0 ? (
-                  <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px", backgroundColor: "#fff", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
-                    Sin supervisor registrado para esta empresa. Podés crearlo con el botón superior.
-                  </div>
-                ) : (
-                  preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "supervisor").map(sup => (
-                    <div key={sup.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "12px 16px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
-                      <div>
-                        <div style={{ fontWeight: "800", color: "#0f172a", fontSize: "14px" }}>👤 {sup.nombre}</div>
-                        <div style={{ fontSize: "12px", color: "#64748b" }}>✉️ {sup.email} · Rol: Supervisor</div>
-                      </div>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        <button onClick={() => setModalResetClave({ usuario: sup, nuevoPass: "" })} style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "none", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🔑 Reset Clave</button>
-                        <button onClick={() => setModalCambiarEmail({ usuario: sup, nuevoEmail: sup.email || "" })} style={{ backgroundColor: "#f1f5f9", color: "#475569", border: "none", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>✉️ Email</button>
-                        <button onClick={() => eliminarPreventista(sup.id)} style={{ backgroundColor: "#fee2e2", color: "#dc2626", border: "none", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🗑️ Borrar</button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* 2. SECCIÓN PREVENTISTAS EN CALLE */}
-              <div style={{ backgroundColor: "#f8fafc", borderRadius: "12px", padding: "16px", border: "1px solid #e2e8f0" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
-                      🚶 PREVENTISTAS EN CALLE
-                    </h4>
-                    <span style={{ fontSize: "12px", color: "#64748b" }}>
-                      {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol !== "supervisor" && p.rol !== "superadmin").length} activos en zona
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <h3 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#f8fafc" }}>🏢 {emp}</h3>
+                    <span style={{ fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "12px", backgroundColor: colorBadge + "22", color: colorBadge, border: "1px solid " + colorBadge }}>
+                      ● {estadoTexto}
                     </span>
                   </div>
-                  <button onClick={() => { setMostrarModalPreventista(true); setNuevoRolEmpleado("preventista"); }} style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
-                    + Nuevo Preventista
-                  </button>
+                  <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#94a3b8" }}>Ficha Integral 360° · Datos comerciales y bajas directas</p>
                 </div>
+                <button type="button" onClick={() => setEmpresaDetalleModal(null)} style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "22px", cursor: "pointer" }}>✕</button>
+              </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol !== "supervisor" && p.rol !== "superadmin").length === 0 ? (
-                    <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px", backgroundColor: "#fff", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
-                      No hay preventistas registrados en esta empresa.
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
+                <div style={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "10px", padding: "12px" }}>
+                  <span style={{ fontSize: "11px", color: "#94a3b8" }}>CUPO Y PREVENTISTAS</span>
+                  <div style={{ fontSize: "16px", fontWeight: "800", color: prevsDeEmp.length > cupoMax ? "#ef4444" : "#4ade80", marginTop: "4px" }}>
+                    {prevsDeEmp.length} / {cupoMax} autorizados
+                  </div>
+                  <div style={{ width: "100%", height: "6px", backgroundColor: "#334155", borderRadius: "3px", marginTop: "6px", overflow: "hidden" }}>
+                    <div style={{ width: Math.min(100, (prevsDeEmp.length / cupoMax) * 100) + "%", height: "100%", backgroundColor: prevsDeEmp.length > cupoMax ? "#ef4444" : "#10b981" }}></div>
+                  </div>
+                </div>
+                <div style={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "10px", padding: "12px" }}>
+                  <span style={{ fontSize: "11px", color: "#94a3b8" }}>TARIFA & CORTE MENSUAL</span>
+                  <div style={{ fontSize: "16px", fontWeight: "800", color: "#38bdf8", marginTop: "4px" }}>
+                    {moneda} ${Number(totalEst).toLocaleString()}
+                  </div>
+                  <span style={{ fontSize: "11px", color: "#cbd5e1" }}>📅 Vence día {diaCorte} de cada mes</span>
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "10px", padding: "12px", marginBottom: "16px" }}>
+                <span style={{ fontSize: "11px", color: "#94a3b8" }}>DATOS DE COBRO / BILLETERA / NOTAS</span>
+                <div style={{ fontSize: "13px", color: "#f8fafc", fontWeight: "600", marginTop: "4px" }}>
+                  {t.notas || "CBU / Transferencia Bancaria Directa / Sin notas registradas"}
+                </div>
+              </div>
+
+              {/* LISTA DE PREVENTISTAS CON BOTON DE BORRADO */}
+              <div style={{ marginBottom: "20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "#94a3b8" }}>PREVENTISTAS ACTIVOS ({prevsDeEmp.length})</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {prevsDeEmp.length === 0 ? (
+                    <div style={{ padding: "16px", textAlign: "center", backgroundColor: "#0f172a", borderRadius: "8px", color: "#64748b", fontSize: "12px" }}>
+                      No hay preventistas dados de alta en esta empresa.
                     </div>
                   ) : (
-                    preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol !== "supervisor" && p.rol !== "superadmin").map(prev => (
-                      <div key={prev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "10px 14px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                    prevsDeEmp.map(p => (
+                      <div key={p.id || p.email} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
                         <div>
-                          <div style={{ fontWeight: "700", color: "#0f172a", fontSize: "13px" }}>👤 {prev.nombre}</div>
-                          <div style={{ fontSize: "11px", color: "#64748b" }}>✉️ {prev.email}</div>
+                          <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "13px" }}>👤 {p.nombre || "Sin nombre"}</div>
+                          <div style={{ fontSize: "11px", color: "#94a3b8" }}>✉️ {p.email || "-"}</div>
                         </div>
-                        <div style={{ display: "flex", gap: "6px" }}>
-                          <button onClick={() => setModalResetClave({ usuario: prev, nuevoPass: "" })} style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🔑 Clave</button>
-                          <button onClick={() => setModalCambiarEmail({ usuario: prev, nuevoEmail: prev.email || "" })} style={{ backgroundColor: "#f1f5f9", color: "#475569", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>✉️ Email</button>
-                          <button onClick={() => eliminarPreventista(prev.id)} style={{ backgroundColor: "#fee2e2", color: "#dc2626", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🗑️ Borrar</button>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "12px", backgroundColor: p.activo !== false ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)", color: p.activo !== false ? "#10b981" : "#ef4444" }}>
+                            {p.activo !== false ? "Activo" : "Inactivo"}
+                          </span>
+                          <button type="button" onClick={() => eliminarPreventistaDirecto(p)} title="Eliminar Preventista de Supabase" style={{ backgroundColor: "#7f1d1d", color: "#fca5a5", border: "1px solid #991b1b", padding: "4px 8px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}>
+                            🗑️ Borrar
+                          </button>
                         </div>
                       </div>
                     ))
@@ -652,14 +611,123 @@ export default function AdminClientes() {
                 </div>
               </div>
 
-              {/* Botón Cerrar Ficha */}
-              <div style={{ marginTop: "24px", display: "flex", justifyContent: "flex-end" }}>
-                <button onClick={() => setEmpresaDetalleModal(null)} style={{ backgroundColor: "#0f172a", color: "#fff", border: "none", padding: "10px 20px", borderRadius: "8px", fontWeight: "700", cursor: "pointer" }}>
-                  Listo / Cerrar Ficha 360°
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button type="button" onClick={() => { setEmpresaDetalleModal(null); abrirEditarEmpresa(emp); }} style={{ padding: "10px 16px", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", cursor: "pointer", fontWeight: "700", fontSize: "13px" }}>
+                  ✏️ Modificar Cupos & Tarifa
+                </button>
+                <button type="button" onClick={() => setEmpresaDetalleModal(null)} style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#334155", color: "#fff", cursor: "pointer", fontWeight: "600", fontSize: "13px" }}>
+                  Cerrar
                 </button>
               </div>
-
             </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL 2: EDITAR */}
+      {mostrarModalEditar && empresaAEditar && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", borderRadius: "16px", border: "1px solid #475569", width: "100%", maxWidth: "480px", padding: "24px" }}>
+            <h3 style={{ margin: "0 0 6px 0", fontSize: "17px", fontWeight: "700", color: "#f8fafc" }}>✏️ Modificar Vencimiento, Cupo & Tarifa</h3>
+            <p style={{ margin: "0 0 16px 0", fontSize: "13px", color: "#94a3b8" }}>{empresaAEditar}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>📅 Día de Vencimiento</label>
+                <select value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                  <option value="01">Día 01 de c/mes</option>
+                  <option value="05">Día 05 de c/mes</option>
+                  <option value="10">Día 10 de c/mes</option>
+                  <option value="15">Día 15 de c/mes</option>
+                  <option value="20">Día 20 de c/mes</option>
+                  <option value="25">Día 25 de c/mes</option>
+                  <option value="28">Día 28 de c/mes</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>🚦 Estado Semáforo</label>
+                <select value={estadoCobroModal} onChange={(e) => setEstadoCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                  <option value="Al Día">🟢 Al Día (Abonado)</option>
+                  <option value="Por Vencer">🟡 Por Vencer (Alerta)</option>
+                  <option value="Vencido">🔴 Vencido / En Mora</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>👥 Cupo Autorizado</label>
+                <input type="number" value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>💰 Moneda</label>
+                <select value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                  <option value="ARS">ARS ($ Pesos)</option>
+                  <option value="USD">USD ($ Dólares)</option>
+                  <option value="MXN">MXN ($ Mexicanos)</option>
+                  <option value="COP">COP ($ Colombianos)</option>
+                  <option value="USDT">USDT (Cripto)</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>⚙️ Modelo de Cobro</label>
+                <select value={tipoTarifaEditada} onChange={(e) => setTipoTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                  <option value="preventista">Por preventista</option>
+                  <option value="plana">Tarifa Plana Fija</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>💵 Tarifa Valor</label>
+                <input type="number" value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ padding: "10px 16px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#334155", color: "#cbd5e1", cursor: "pointer", fontWeight: "600" }}>Cancelar</button>
+              <button type="button" onClick={guardarEdicionEmpresa} style={{ padding: "10px 18px", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", cursor: "pointer", fontWeight: "700" }}>Guardar Cambios</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: PAGO */}
+      {mostrarModalPago && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "440px", boxSizing: "border-box" }}>
+            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px", color: "#f8fafc" }}>💳 Registrar Cobro: {empresaPago}</h3>
+            <form onSubmit={guardarPago}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Monto Recibido</label>
+                  <input type="number" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Moneda</label>
+                  <select value={monedaPago} onChange={(e) => setMonedaPago(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                    <option value="ARS">ARS ($)</option>
+                    <option value="USD">USD (u$d)</option>
+                    <option value="USDT">USDT / Cripto</option>
+                    <option value="MXN">MXN ($ Mex)</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Método de Pago</label>
+                <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                  <option value="Transferencia CBU / CVU">Transferencia Bancaria CBU/CVU</option>
+                  <option value="Binance Pay / USDT">Binance Pay / USDT / Cripto</option>
+                  <option value="Efectivo / Cobrador">Efectivo en Mano</option>
+                  <option value="Wise / Swift">Wise / Swift Internacional</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: "16px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>N° Comprobante / Hash</label>
+                <input type="text" value={comprobantePago} onChange={(e) => setComprobantePago(e.target.value)} placeholder="Ej. Operación #89218 / Hash..." style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button type="button" onClick={() => setMostrarModalPago(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Asentar Cobro</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

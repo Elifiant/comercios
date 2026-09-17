@@ -463,7 +463,52 @@ export default function App() {
         >
           <span style={{ fontSize: "20px" }}>📦</span> Tomar Pedido / Reedición
         </button>
-{comercioCercano && ( <div style={{ padding: "10px 16px", background: "#16a34a", color: "#fff", textAlign: "center", fontWeight: "700", fontSize: "14px" }}> 🔔 Cerca de: {comercioCercano.nombre || ("Comercio #" + comercioCercano.id)} ({comercioCercano.distancia}m) </div> )} <div style={{ flex: 1, position: "relative" }}> <MapContainer center={[latM, lngM]} zoom={16} style={{ height: "100%", width: "100%" }}> <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /> {posicionActual && <Marker position={posicionActual} />} {comercios.map((com) => { const cLat = com.ubicacion_exacta_latitud || com.latitud; const cLng = com.ubicacion_exacta_longitud || com.longitud; if (!cLat || !cLng) return null; return ( <Marker key={com.id} position={[cLat, cLng]}> <Popup>{com.nombre || "Comercio #" + com.id}</Popup> </Marker> ); })} </MapContainer> </div> <div style={{ position: "fixed", top: "155px", left: "16px", right: "16px", zIndex: 1000, pointerEvents: "auto" }}> <button onClick={agregarComercioInmediato} style={{ width: "100%", minHeight: "75px", padding: "16px", backgroundColor: "#1d4ed8", color: "#ffffff", border: "4px solid #93c5fd", borderRadius: "18px", fontSize: "20px", fontWeight: "900", cursor: "pointer", letterSpacing: "1px", boxShadow: "0 10px 25px rgba(0,0,0,0.65)", textTransform: "uppercase" }} > {textoBotonAgregar} </button> </div> </div> ); } 
+{/* CONTENEDOR ERGONÓMICO SUPERIOR SIN SUPERPOSICIONES */}
+        <div style={{ position: "absolute", top: "60px", left: "12px", right: "12px", zIndex: 1000, display: "flex", flexDirection: "column", gap: "10px", pointerEvents: "none" }}>
+          {comercioCercano && (
+            <div style={{ padding: "10px 14px", background: "#16a34a", color: "#fff", textAlign: "center", fontWeight: "800", fontSize: "13px", borderRadius: "12px", boxShadow: "0 4px 15px rgba(0,0,0,0.4)", border: "2px solid #bbf7d0", pointerEvents: "auto" }}>
+              🔔 Cerca de: {comercioCercano.nombre || ("Comercio #" + comercioCercano.id)} ({comercioCercano.distancia}m)
+            </div>
+          )}
+          <button 
+            onClick={agregarComercioInmediato} 
+            style={{ 
+              width: "100%", 
+              minHeight: "72px", 
+              padding: "14px", 
+              backgroundColor: "#1d4ed8", 
+              color: "#ffffff", 
+              border: "3px solid #93c5fd", 
+              borderRadius: "16px", 
+              fontSize: "19px", 
+              fontWeight: "900", 
+              cursor: "pointer", 
+              letterSpacing: "1px", 
+              boxShadow: "0 8px 22px rgba(0,0,0,0.55)", 
+              textTransform: "uppercase",
+              pointerEvents: "auto"
+            }}
+          >
+            {textoBotonAgregar}
+          </button>
+        </div>
+
+        <div style={{ flex: 1, position: "relative" }}>
+          <MapContainer center={[latM, lngM]} zoom={16} style={{ height: "100%", width: "100%" }}>
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {posicionActual && <Marker position={posicionActual} />}
+            {comercios.map((com) => {
+              const cLat = com.ubicacion_exacta_latitud || com.latitud;
+              const cLng = com.ubicacion_exacta_longitud || com.longitud;
+              if (!cLat || !cLng) return null;
+              return (
+                <Marker key={com.id} position={[cLat, cLng]}>
+                  <Popup>{com.nombre || "Comercio #" + com.id}</Popup>
+                </Marker>
+              );
+            })}
+          </MapContainer>
+        </div> </div> ); } 
 
  if (editandoUbicacion && comercioSeleccionado) {
     const latInicial = Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719);
