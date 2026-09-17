@@ -5,13 +5,18 @@ import { supabase } from "./supabase";
 import App from "./App.jsx";
 import Supervisor from "./Supervisor.jsx";
 import AdminClientes from "./AdminClientes.jsx";
+import AdminPromotores from "./AdminPromotores";
 import WebComercial from "./WebComercial.jsx";
 import MonitorPedidos from "./MonitorPedidos";
 import PortalPagos from "./PortalPagos";
 
 function EnrutadorSeguro() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const vistaForzada = urlParams.get("vista");
  const ruta = window.location.pathname;
+  if (ruta.startsWith("/promotores")) return <AdminPromotores />;
  if (ruta.startsWith("/web")) return <WebComercial />;
+  
 
  const [sesion, setSesion] = useState(null);
  const [perfil, setPerfil] = useState(null);
@@ -108,8 +113,14 @@ function EnrutadorSeguro() {
  }
 
   const emailUser = (sesion?.user?.email || "").toLowerCase(); let rol = (perfil && perfil.rol) ? perfil.rol.toLowerCase() : ""; if (!rol) { if (emailUser.includes("superadmin")) rol = "superadmin"; else if (emailUser.includes("supervisor")) rol = "supervisor"; else rol = "preventista"; }
- if (ruta.startsWith("/admin")) {
- if (rol === "superadmin") return <AdminClientes />;
+ 
+    if (ruta.startsWith("/admin")) {
+ if (rol === "superadmin") {
+    if (vistaForzada === "preventista") return <App />;
+    if (vistaForzada === "supervisor") return <Supervisor />;
+    if (vistaForzada === "web") return <WebComercial />;
+    return <AdminClientes />;
+  }
  if (rol === "supervisor") return <Supervisor />;
  return <App />;
  }

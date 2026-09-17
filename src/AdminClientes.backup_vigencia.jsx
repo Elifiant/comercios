@@ -339,8 +339,7 @@ export default function AdminClientes() {
             + Nueva Empresa
           </button>
         </div>
-      <a href="/promotores" style={{ padding: "8px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "700", backgroundColor: "#3b82f6", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px", boxShadow: "0 2px 6px rgba(59,130,246,0.4)" }}>💼 Partners & Comisiones</a>
-        </header>
+      </header>
 
       {/* 4 TARJETAS CLAVE */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "20px" }}>
