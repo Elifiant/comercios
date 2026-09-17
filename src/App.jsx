@@ -571,21 +571,45 @@ export default function App() {
     const latInicial = Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719);
     const lngInicial = Number(comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.264);
 
+    const guardarNuevaUbicacion = async () => {
+      try {
+        const latActual = Number(comercioSeleccionado.ubicacion_exacta_latitud || latInicial);
+        const lngActual = Number(comercioSeleccionado.ubicacion_exacta_longitud || lngInicial);
+        const { error } = await supabase
+          .from("comercios")
+          .update({
+            ubicacion_exacta_latitud: latActual,
+            ubicacion_exacta_longitud: lngActual,
+            latitud: latActual,
+            longitud: lngActual
+          })
+          .eq("id", comercioSeleccionado.id);
+        if (error) throw error;
+        alert("✅ Ubicación exacta guardada con éxito");
+        setEditandoUbicacion(false);
+      } catch (err) {
+        alert("Error al guardar ubicación: " + (err.message || "Desconocido"));
+      }
+    };
+
     return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
-        <header style={{ padding: "14px 16px", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #334155" }}>
+      <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
+        {/* BARRA SUPERIOR FIJA FLOTANTE */}
+        <header style={{ padding: "12px 16px", background: "rgba(15,23,42,0.95)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #334155", zIndex: 10000 }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700" }}>Ajustar Ubicación Exacta</h3>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#94a3b8" }}>Arrastrá el pin o tocá el mapa en la puerta del local</p>
+            <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "700" }}>📍 Ajustar Ubicación Exacta</h3>
+            <p style={{ margin: "2px 0 0", fontSize: "11px", color: "#94a3b8" }}>Arrastrá el pin hasta la puerta del local</p>
           </div>
           <button
+            type="button"
             onClick={() => setEditandoUbicacion(false)}
-            style={{ background: "#334155", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "13px", cursor: "pointer", fontWeight: "600" }}
+            style={{ background: "#334155", color: "#fff", border: "none", padding: "8px 14px", borderRadius: "8px", fontSize: "13px", cursor: "pointer", fontWeight: "700" }}
           >
-            ✕ Volver
+            ✕ Salir
           </button>
         </header>
 
+        {/* CONTENEDOR DE MAPA */}
         <div style={{ flex: 1, position: "relative" }}>
           <MapContainer center={[latInicial, lngInicial]} zoom={18} style={{ height: "100%", width: "100%" }}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -602,6 +626,24 @@ export default function App() {
               }}
             />
           </MapContainer>
+        </div>
+
+        {/* BOTONERA INFERIOR FIJA FLOTANTE */}
+        <div style={{ padding: "14px 16px", background: "rgba(15,23,42,0.95)", backdropFilter: "blur(8px)", borderTop: "1px solid #334155", display: "flex", gap: "10px", zIndex: 10000 }}>
+          <button
+            type="button"
+            onClick={() => setEditandoUbicacion(false)}
+            style={{ flex: 1, background: "#334155", color: "#cbd5e1", border: "none", padding: "14px", borderRadius: "10px", fontSize: "14px", fontWeight: "700", cursor: "pointer" }}
+          >
+            Descartar
+          </button>
+          <button
+            type="button"
+            onClick={guardarNuevaUbicacion}
+            style={{ flex: 2, background: "#16a34a", color: "#fff", border: "none", padding: "14px", borderRadius: "10px", fontSize: "14px", fontWeight: "800", cursor: "pointer", boxShadow: "0 4px 12px rgba(22,163,74,0.4)" }}
+          >
+            ✓ Guardar Ubicación
+          </button>
         </div>
       </div>
     );
