@@ -4,12 +4,9 @@ import { supabase } from './supabase';
 export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExistente = null }) {
   const [busqueda, setBusqueda] = useState('');
   const [categoriaSel, setCategoriaSel] = useState('TODOS');
-  const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || [
-    { id: 1, codigo: 'CGE-102', marca: 'COCA-COLA', nombre: 'Gaseosa 2.25L Sabor Original', precioLista: 3200, bonif: 10, cant: 12, esNuevo: false, nota: 'Entregar bien fría' },
-    { id: 2, codigo: 'CGE-208', marca: 'ARCOR', nombre: 'Chocolates Bon o Bon Caja x30', precioLista: 7500, bonif: 0, cant: 2, esNuevo: true, nota: '' }
-  ]);
+  const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || []);
   const [medioPago, setMedioPago] = useState('Efectivo');
-  const [observaciones, setObservaciones] = useState(pedidoExistente ? '[REANEXO]: Sumó 2 cajas de Bon o Bon de último momento.' : 'Dejar en depósito lateral.');
+  const [observaciones, setObservaciones] = useState(pedidoExistente?.observaciones || "");
   const [enviarWsp, setEnviarWsp] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [exitoGuardado, setExitoGuardado] = useState(false);
