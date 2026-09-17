@@ -322,7 +322,22 @@ export default function App() {
     } catch(e) {}
   };
 
-   const agregarComercioInmediato = async () => {
+   
+  const activarJornadaSiEstaInactiva = () => {
+    try {
+      const activa = localStorage.getItem("jornada_activa") === "true";
+      if (!activa) {
+        const ahora = Date.now().toString();
+        setJornadaActiva(true);
+        setInicioJornada(ahora);
+        localStorage.setItem("jornada_activa", "true");
+        localStorage.setItem("inicio_jornada", ahora);
+      }
+    } catch(e) {}
+  };
+
+  const agregarComercioInmediato = async () => {
+    activarJornadaSiEstaInactiva();
     const lat = (posicionActual && posicionActual[0]) ? posicionActual[0] : -34.719;
     const lng = (posicionActual && posicionActual[1]) ? posicionActual[1] : -58.265;
     const cod = Math.floor(1000 + Math.random() * 9000);
@@ -366,6 +381,7 @@ export default function App() {
     
   // 1. Subir Foto de Fachada a Storage
   const subirFotoFachada = async (e) => {
+    activarJornadaSiEstaInactiva();
     const file = e.target.files?.[0];
     if (!file || !comercioSeleccionado) return;
     try {
@@ -388,6 +404,7 @@ export default function App() {
 
   // 2. Guardar Edición en Supabase
   const guardarEdicion = async (e) => {
+    activarJornadaSiEstaInactiva();
     if (e && e.preventDefault) e.preventDefault();
     if (!comercioSeleccionado) return;
     try {
