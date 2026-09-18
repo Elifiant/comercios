@@ -61,6 +61,7 @@ export default function App() {
   const [grabandoAudio, setGrabandoAudio] = useState(false);
   const [tiempoGrabacion, setTiempoGrabacion] = useState(0);
   const [mediaRecorderObj, setMediaRecorderObj] = useState(null);
+  const timerGrabacionRef = useRef(null);
   const audioChunksRef = React.useRef([]);
   const timerAudioRef = React.useRef(null);
 
