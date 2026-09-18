@@ -40,6 +40,21 @@ function MarcadorArrastrable({ posicion, setPosicion }) {
   ) : null;
 }
 
+
+// Función de cálculo de distancia en metros (Haversine)
+function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+  const R = 6371000; // Radio de la Tierra en metros
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const cDist = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * cDist);
+}
+
 export default function App() {
   
 
@@ -371,11 +386,31 @@ export default function App() {
     }
   };
 
-  const listaFiltrada = (comercios || []).filter((c) => {
-    if (!busqueda) return true;
-    const txt = (c.nombre || "" + c.id + "" + (c.rubro || "")).toLowerCase();
-    return txt.includes(busqueda.toLowerCase());
-  });
+  const listaFiltrada = (comercios || [])
+    .map((c) => {
+      const cLat = c.ubicacion_exacta_latitud || c.latitud;
+      const cLng = c.ubicacion_exacta_longitud || c.longitud;
+      let dist = null;
+      if (posicionActual && posicionActual[0] && posicionActual[1] && cLat && cLng) {
+        dist = calcularMetrosGPS(posicionActual[0], posicionActual[1], cLat, cLng);
+      }
+      return { ...c, _distanciaMetros: dist };
+    })
+    .filter((c) => {
+      const q = (busqueda || '').toLowerCase().trim();
+      const txt = `${c.nombre || ''} ${c.direccion || ''} ${c.rubro || ''} ${c.id || ''}`.toLowerCase();
+      const cumpleBusqueda = !q || txt.includes(q);
+      const cumplePreventista = !perfil || !perfil.nombre || perfil.rol === 'superadmin' || c.preventista === perfil.nombre;
+      return cumpleBusqueda && cumplePreventista;
+    })
+    .sort((a, b) => {
+      if (a._distanciaMetros !== null && b._distanciaMetros !== null) {
+        return a._distanciaMetros - b._distanciaMetros;
+      }
+      if (a._distanciaMetros !== null) return -1;
+      if (b._distanciaMetros !== null) return 1;
+      return (b.id || 0) - (a.id || 0);
+    });
 
 
     
