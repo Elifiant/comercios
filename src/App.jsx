@@ -56,6 +56,74 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 }
 
 export default function App() {
+
+  // Estados para notas de voz en Ficha de Comercio
+  const [grabandoAudio, setGrabandoAudio] = useState(false);
+  const [tiempoGrabacion, setTiempoGrabacion] = useState(0);
+  const [mediaRecorderObj, setMediaRecorderObj] = useState(null);
+  const audioChunksRef = React.useRef([]);
+  const timerAudioRef = React.useRef(null);
+
+  const iniciarGrabacionVoz = async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Tu navegador no soporta grabación de voz directa.");
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mr = new MediaRecorder(stream);
+      mr.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mr.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          const base64Audio = reader.result;
+          const nuevaNota = {
+            id: Date.now(),
+            fecha: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            audio: base64Audio
+          };
+          setComercioSeleccionado(prev => {
+            if (!prev) return prev;
+            const notasPrevias = Array.isArray(prev.notas_audio) ? prev.notas_audio : [];
+            return { ...prev, notas_audio: [nuevaNota, ...notasPrevias] };
+          });
+        };
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mr.start();
+      setMediaRecorderObj(mr);
+      setGrabandoAudio(true);
+      setTiempoGrabacion(0);
+      timerAudioRef.current = setInterval(() => {
+        setTiempoGrabacion(t => t + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Error al acceder al micrófono:", err);
+      alert("Permiso de micrófono denegado o no disponible.");
+    }
+  };
+
+  const detenerGrabacionVoz = () => {
+    if (mediaRecorderObj && mediaRecorderObj.state !== "inactive") {
+      mediaRecorderObj.stop();
+    }
+    setGrabandoAudio(false);
+    if (timerAudioRef.current) clearInterval(timerAudioRef.current);
+  };
+
+  const borrarNotaAudio = (notaId) => {
+    setComercioSeleccionado(prev => {
+      if (!prev) return prev;
+      const notasPrevias = Array.isArray(prev.notas_audio) ? prev.notas_audio : [];
+      return { ...prev, notas_audio: notasPrevias.filter(n => n.id !== notaId) };
+    });
+  };
+
   
 
 
