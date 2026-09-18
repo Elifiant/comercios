@@ -104,18 +104,48 @@ export default function App() {
           
           // Convertimos a base64 DataURL: 100% compatible con iPhone Safari y sin errores de reproducción
           const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64Audio = reader.result;
-            const nuevaNota = {
-              id: Date.now(),
-              fecha: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              audio: base64Audio
-            };
-            setComercioSeleccionado((prev) => {
-              if (!prev) return prev;
-              const actual = Array.isArray(prev.notas_audio) ? prev.notas_audio : [];
-              return { ...prev, notas_audio: [nuevaNota, ...actual] };
-            });
+          reader.onloadend = async () => {
+            try {
+              const base64Audio = reader.result;
+              const nuevaNota = {
+                id: Date.now(),
+                fecha: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                audio: base64Audio
+              };
+              
+              let notasActualizadas = [nuevaNota];
+              setComercioSeleccionado((prev) => {
+                if (!prev) return prev;
+                const actual = Array.isArray(prev.notas_audio) ? prev.notas_audio : [];
+                notasActualizadas = [nuevaNota, ...actual];
+                return { ...prev, notas_audio: notasActualizadas, audio_url: base64Audio };
+              });
+
+              // Guardado inmediato y persistente en Supabase
+              if (comercioSeleccionado && comercioSeleccionado.id) {
+                const { error: errAudio } = await supabase
+                  .from('comercios')
+                  .update({ 
+                    notas_audio: notasActualizadas,
+                    audio_url: base64Audio 
+                  })
+                  .eq('id', comercioSeleccionado.id);
+
+                if (errAudio) {
+                  console.error("Error al persistir audio en Supabase:", errAudio);
+                } else {
+                  console.log("🎉 Nota de voz guardada a fuego en Supabase para el comercio:", comercioSeleccionado.id);
+                  // Sincronizamos la lista general en memoria
+                  setComercios(prevLista => prevLista.map(item => 
+                    item.id === comercioSeleccionado.id 
+                      ? { ...item, notas_audio: notasActualizadas, audio_url: base64Audio } 
+                      : item
+                  ));
+                }
+              }
+            } catch (errPersist) {
+              console.error("Error en reader.onloadend:", errPersist);
+            }
           };
           reader.readAsDataURL(blob);
 
@@ -148,6 +178,7 @@ export default function App() {
         mediaRecorderObj.stop();
       }
       setGrabandoAudio(false);
+    
       if (timerGrabacionRef.current) {
         clearInterval(timerGrabacionRef.current);
         timerGrabacionRef.current = null;
