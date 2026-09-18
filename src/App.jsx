@@ -6,7 +6,7 @@ const obtenerDiaActual = () => {
 };
 
 import Supervisor from './Supervisor';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
