@@ -67,53 +67,94 @@ export default function App() {
   const iniciarGrabacionVoz = async () => {
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert("Tu navegador no soporta grabación de voz directa.");
+        alert("Tu navegador no soporta grabación de voz o faltan permisos de micrófono.");
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const mr = new MediaRecorder(stream);
+      
+      // Detección del tipo MIME óptimo compatible con iOS y Android
+      let mimeType = "";
+      if (typeof MediaRecorder.isTypeSupported === "function") {
+        if (MediaRecorder.isTypeSupported("audio/mp4")) {
+          mimeType = "audio/mp4";
+        } else if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+          mimeType = "audio/webm;codecs=opus";
+        } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+          mimeType = "audio/webm";
+        } else if (MediaRecorder.isTypeSupported("audio/ogg")) {
+          mimeType = "audio/ogg";
+        }
+      }
+
+      const opciones = mimeType ? { mimeType } : {};
+      const mr = new MediaRecorder(stream, opciones);
+      const pedazos = [];
+
       mr.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+        if (e.data && e.data.size > 0) {
+          pedazos.push(e.data);
+        }
       };
+
       mr.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = () => {
-          const base64Audio = reader.result;
-          const nuevaNota = {
-            id: Date.now(),
-            fecha: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            audio: base64Audio
+        try {
+          const tipoFinal = mimeType || "audio/mp4";
+          const blob = new Blob(pedazos, { type: tipoFinal });
+          
+          // Convertimos a base64 DataURL: 100% compatible con iPhone Safari y sin errores de reproducción
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64Audio = reader.result;
+            const nuevaNota = {
+              id: Date.now(),
+              fecha: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              audio: base64Audio
+            };
+            setComercioSeleccionado((prev) => {
+              if (!prev) return prev;
+              const actual = Array.isArray(prev.notas_audio) ? prev.notas_audio : [];
+              return { ...prev, notas_audio: [nuevaNota, ...actual] };
+            });
           };
-          setComercioSeleccionado(prev => {
-            if (!prev) return prev;
-            const notasPrevias = Array.isArray(prev.notas_audio) ? prev.notas_audio : [];
-            return { ...prev, notas_audio: [nuevaNota, ...notasPrevias] };
-          });
-        };
-        stream.getTracks().forEach(t => t.stop());
+          reader.readAsDataURL(blob);
+
+          // Apagamos los tracks del micrófono
+          stream.getTracks().forEach((track) => track.stop());
+        } catch (errBlob) {
+          console.error("Error al procesar audio:", errBlob);
+        }
       };
-      mr.start();
+
+      mr.start(250); // Recolecta pedacitos cada 250ms
       setMediaRecorderObj(mr);
       setGrabandoAudio(true);
       setTiempoGrabacion(0);
-      timerAudioRef.current = setInterval(() => {
-        setTiempoGrabacion(t => t + 1);
+
+      // Cronómetro en vivo
+      if (timerGrabacionRef.current) clearInterval(timerGrabacionRef.current);
+      timerGrabacionRef.current = setInterval(() => {
+        setTiempoGrabacion((prev) => prev + 1);
       }, 1000);
     } catch (err) {
-      console.error("Error al acceder al micrófono:", err);
-      alert("Permiso de micrófono denegado o no disponible.");
+      console.error("Error al iniciar micrófono:", err);
+      alert("No se pudo acceder al micrófono: " + (err.message || "Permiso denegado"));
     }
   };
 
   const detenerGrabacionVoz = () => {
-    if (mediaRecorderObj && mediaRecorderObj.state !== "inactive") {
-      mediaRecorderObj.stop();
+    try {
+      if (mediaRecorderObj && mediaRecorderObj.state !== "inactive") {
+        mediaRecorderObj.stop();
+      }
+      setGrabandoAudio(false);
+      if (timerGrabacionRef.current) {
+        clearInterval(timerGrabacionRef.current);
+        timerGrabacionRef.current = null;
+      }
+    } catch (err) {
+      console.error("Error al detener grabación:", err);
+      setGrabandoAudio(false);
     }
-    setGrabandoAudio(false);
-    if (timerAudioRef.current) clearInterval(timerAudioRef.current);
   };
 
   const borrarNotaAudio = (notaId) => {
