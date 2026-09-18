@@ -1064,7 +1064,107 @@ export default function App() {
               />
             </div>
 
+            
+        {/* GRABADORA DE NOTAS DE VOZ INTERACTIVA */}
+        <div style={{
+          background: "#0f172a",
+          border: "1px solid #334155",
+          borderRadius: "10px",
+          padding: "12px",
+          marginTop: "6px",
+          marginBottom: "12px"
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+            <span style={{ fontSize: "12px", fontWeight: "bold", color: "#38bdf8", display: "flex", alignItems: "center", gap: "6px" }}>
+              🎙️ NOTAS DE VOZ DEL COMERCIO
+            </span>
+            {grabandoAudio && (
+              <span style={{ fontSize: "11px", color: "#ef4444", fontWeight: "bold" }}>
+                ● Grabando {tiempoGrabacion}s
+              </span>
+            )}
+          </div>
+
+          {!grabandoAudio ? (
             <button
+              type="button"
+              onClick={iniciarGrabacionVoz}
+              style={{
+                width: "100%",
+                background: "#dc2626",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                padding: "12px",
+                fontSize: "14px",
+                fontWeight: "bold",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                cursor: "pointer",
+                boxShadow: "0 2px 10px rgba(220,38,38,0.3)"
+              }}
+            >
+              🎤 Grabar Nota de Voz
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={detenerGrabacionVoz}
+              style={{
+                width: "100%",
+                background: "#16a34a",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                padding: "12px",
+                fontSize: "14px",
+                fontWeight: "bold",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                cursor: "pointer",
+                boxShadow: "0 2px 10px rgba(22,163,74,0.3)"
+              }}
+            >
+              ⏹️ Detener y Guardar Nota ({tiempoGrabacion}s)
+            </button>
+          )}
+
+          {/* Listado de audios grabados en este comercio */}
+          {Array.isArray(comercioSeleccionado.notas_audio) && comercioSeleccionado.notas_audio.length > 0 && (
+            <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              {comercioSeleccionado.notas_audio.map((nota) => (
+                <div
+                  key={nota.id}
+                  style={{
+                    background: "#1e293b",
+                    padding: "8px",
+                    borderRadius: "8px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px"
+                  }}
+                >
+                  <span style={{ fontSize: "11px", color: "#94a3b8", minWidth: "45px" }}>🕒 {nota.fecha}</span>
+                  <audio controls src={nota.audio} style={{ height: "32px", flex: 1, outline: "none" }} />
+                  <button
+                    type="button"
+                    onClick={() => borrarNotaAudio(nota.id)}
+                    style={{ background: "none", border: "none", color: "#ef4444", fontSize: "16px", cursor: "pointer", padding: "4px" }}
+                    title="Eliminar audio"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button
               type="submit"
               style={{ width: '100%', padding: '14px', marginTop: '12px', background: '#2563eb', color: '#fff', borderRadius: '10px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' }}
             >
