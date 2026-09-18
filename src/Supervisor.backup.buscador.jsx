@@ -40,9 +40,6 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
 }
 
 export default function Supervisor() {
-  const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
-  const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
-
  const [sesionSupervisor, setSesionSupervisor] = useState(null);
  const [emailSup, setEmailSup] = useState("");
  const [passSup, setPassSup] = useState("");
@@ -129,12 +126,15 @@ export default function Supervisor() {
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
   const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
   const [comercioDetalleModal, setComercioDetalleModal] = useState(null);
+  const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
   const [audioActivoObj, setAudioActivoObj] = useState(null);
   const [reproduciendoAudio, setReproduciendoAudio] = useState(false);
   const [diaSemana, setDiaSemana] = useState("Jueves");
   const [busqueda, setBusqueda] = useState("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("Elifiant");
   const [comercioFoco, setComercioFoco] = useState(null);
+  const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
+
   useEffect(() => {
     cargarDatos();
   }, []);
@@ -155,63 +155,6 @@ export default function Supervisor() {
       setCargando(false);
     }
   };
-
-  
-  
-  const normalizarTextoDia = (t) => {
-    return (t || "")
-      .toUpperCase()
-      .trim()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-  };
-
-  const diasSemana = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO"];
-
-    const comerciosPreventista = (preventistaSeleccionado && preventistaSeleccionado.nombre)
-    ? (comercios || []).filter((c) => {
-        const asignado = (c.preventista || "Alex").toLowerCase().trim();
-        const objetivo = (preventistaSeleccionado.nombre || "Alex").toLowerCase().trim();
-        if (asignado !== objetivo) return false;
-        if (!filtroDiaMapa || filtroDiaMapa === "TODOS") return true;
-        const diaReal = (c.dia_visita || "").toUpperCase().trim();
-        const diaAsignado = diaReal !== "" ? diaReal : diasSemana[Math.abs(Number(c.id || 0)) % 6];
-        return normalizarTextoDia(diaAsignado) === normalizarTextoDia(filtroDiaMapa);
-      })
-    : (comercios || []);
-
-  const comerciosVisibles = (busquedaSupervisor && busquedaSupervisor.trim() !== "")
-    ? (comercios || []).filter((c) => {
-        const q = busquedaSupervisor.toLowerCase().trim();
-        const nom = (c.nombre || "").toLowerCase();
-        const dir = (c.direccion || "").toLowerCase();
-        const rub = (c.rubro || "").toLowerCase();
-        const cuit = (c.cuit_cuil || c.cuit || "").toLowerCase();
-        const idStr = String(c.id || "");
-        return nom.includes(q) || dir.includes(q) || rub.includes(q) || cuit.includes(q) || idStr.includes(q);
-      })
-    : comerciosPreventista;
-
-  const calcularMetas = (nombrePrev) => {
-    const todos = (comercios || []).filter(c => (c.preventista || "Alex").toLowerCase() === (nombrePrev || "Alex").toLowerCase());
-    const hoyNom = (diasSemana[3] || "MIÉRCOLES").toUpperCase();
-    const deHoy = todos.filter(c => ((c.dia_visita || "").toUpperCase().trim() || hoyNom) === hoyNom);
-    const visitados = deHoy.filter(c => c.visitado || c.visitado_hoy);
-    return {
-      carteraTotal: todos.length,
-      metaHoy: deHoy.length,
-      visitados: visitados.length,
-      porcentaje: deHoy.length > 0 ? Math.round((visitados.length / deHoy.length) * 100) : 0
-    };
-  };
-
-  const coordenadasValidas = comerciosPreventista
-    .map(c => [c.ubicacion_exacta_latitud || c.latitud, c.ubicacion_exacta_longitud || c.longitud])
-    .filter(p => p[0] && p[1] && !isNaN(p[0]) && !isNaN(p[1]));
-
-  const centroMapa = coordenadasValidas[0] || [-34.719, -58.264];
-  const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
-  const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
 
   const empresasUnicas = ["TODAS", ...Array.from(new Set(comercios.map(c => c.empresa || "Elifiant")))];
   const preventistasUnicos = Array.from(new Set(comercios.map(c => c.preventista || "Alex")));
@@ -254,8 +197,9 @@ export default function Supervisor() {
       estadoActividad: tieneActividadHoy ? "🟢 En ruta (" + paradasHoyCount + " hoy)" : "○ Sin actividad hoy",
       proxima: comerciosPrev[0]?.nombre || "Sin comercios asignados"
     };
-   });
-  const exportarCSV = () => {
+  });
+
+    const exportarCSV = () => {
     if (comercios.length === 0) return;
     const encabezados = ["ID", "Nombre", "Empresa", "Preventista", "Rubro", "Direccion", "Latitud", "Longitud", "Fecha"];
     const filas = comercios.map(c => [
@@ -279,7 +223,53 @@ export default function Supervisor() {
     URL.revokeObjectURL(url);
   };
 
+    // 1. Comercios del preventista seleccionado (filtrados por día)
+  const comerciosPreventista = comercios.filter((c) => {
+    if (!preventistaSeleccionado) return false;
+    const asignado = c.preventista || "Alex";
+    const objetivo = preventistaSeleccionado.nombre || "Alex";
+    if (asignado.toLowerCase().trim() !== objetivo.toLowerCase().trim()) return false;
+    if (filtroDiaMapa === "TODOS") return true;
+    const diaAsignado = (c.dia_visita || "").toUpperCase().trim();
+    return diaAsignado === filtroDiaMapa;
+  });
+
+  // 2. Comercios visibles para la lista y el mapa (si hay búsqueda busca en toda la empresa)
+  const comerciosVisibles = (typeof busquedaSupervisor !== "undefined" && busquedaSupervisor && busquedaSupervisor.trim() !== "")
+    ? comercios.filter(c => {
+        const q = busquedaSupervisor.toLowerCase().trim();
+        const nom = (c.nombre || "").toLowerCase();
+        const dir = (c.direccion || "").toLowerCase();
+        const idStr = String(c.id || "");
+        return nom.includes(q) || dir.includes(q) || idStr.includes(q);
+      })
+    : comerciosPreventista;
+
+  const coordenadasValidas = comerciosPreventista
+    .map(c => [c.ubicacion_exacta_latitud || c.latitud, c.ubicacion_exacta_longitud || c.longitud])
+    .filter(p => p[0] && p[1] && !isNaN(p[0]) && !isNaN(p[1]));
+
+  const centroMapa = coordenadasValidas[0] || [-34.719, -58.264];
+  const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
+  const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
+
+  
+  // Función auxiliar para calcular telemetría real de preventistas
+  const calcularMetasPreventista = (nombrePreventista) => {
+    const todosDelPreventista = comercios.filter(com => (com.preventista || 'Alex') === nombrePreventista);
+    const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const diaHoyTexto = diasSemana[new Date().getDay()];
     
+    const metaHoy = todosDelPreventista.filter(com => (com.dia_visita || 'Lunes') === diaHoyTexto);
+    const visitadosHoy = metaHoy.filter(com => com.visitado_hoy || com.visitado);
+    
+    return {
+      carteraTotal: todosDelPreventista.length,
+      metaHoy: metaHoy.length,
+      visitados: visitadosHoy.length,
+      pendientes: Math.max(0, metaHoy.length - visitadosHoy.length)
+    };
+  };
 
   
   const activosEnCalle = typeof telemetriaFlota !== "undefined" ? telemetriaFlota.filter(p => p.activoHoy || p.estado === "En Ruta (Activo)").length : 0;
@@ -653,22 +643,6 @@ setPreventistaSeleccionado(prev);
                 <h4 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
                   📋 Bitácora de Paradas de Hoy ({preventistaSeleccionado.rutaId} • {comerciosPreventista.length} comercios)
                 </h4>
-                
-        {/* BUSCADOR DEL SUPERVISOR */}
-        <div style={{ backgroundColor: "#ffffff", padding: "8px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", marginBottom: "14px", display: "flex", gap: "8px", alignItems: "center" }}>
-          <span>🔍</span>
-          <input
-            type="text"
-            placeholder="Buscar por nombre, dirección, rubro o CUIT..."
-            value={busquedaSupervisor}
-            onChange={(e) => setBusquedaSupervisor(e.target.value)}
-            style={{ width: "100%", border: "none", outline: "none", fontSize: "13px", color: "#0f172a" }}
-          />
-          {busquedaSupervisor && (
-            <button type="button" onClick={() => setBusquedaSupervisor("")} style={{ border: "none", background: "none", cursor: "pointer", color: "#64748b", fontWeight: "bold" }}>✕</button>
-          )}
-        </div>
-  
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto" }}>
                   {comerciosVisibles.slice(0, 50).map((c, i) => (
                     <div

@@ -40,101 +40,23 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
 }
 
 export default function Supervisor() {
-  const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
-  const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
-
  const [sesionSupervisor, setSesionSupervisor] = useState(null);
  const [emailSup, setEmailSup] = useState("");
  const [passSup, setPassSup] = useState("");
  const [errorSup, setErrorSup] = useState(null);
  const [cargandoAuthSup, setCargandoAuthSup] = useState(false);
  const iniciarSesionSupervisor = async (e) => { e.preventDefault(); setCargandoAuthSup(true); setErrorSup(null); const { data, error } = await supabase.auth.signInWithPassword({ email: emailSup.trim(), password: passSup }); if (error) { setErrorSup("Credenciales incorrectas o usuario no autorizado"); } else { setSesionSupervisor(data.session); } setCargandoAuthSup(false); };
- 
-    const handleToggleAudioFicha = (audioEntrada) => {
-    if (!audioEntrada) {
-      alert("No hay nota de audio registrada para este comercio.");
-      return;
-    }
-    if (audioActivoObj && reproduciendoAudio) {
-      audioActivoObj.pause();
-      setReproduciendoAudio(false);
-      return;
-    }
-    try {
-      let audioSrc = "";
-      // Si viene como array (por ejemplo varias notas o array con objetos)
-      if (Array.isArray(audioEntrada)) {
-        if (audioEntrada.length === 0) {
-          alert("No hay notas de voz para reproducir.");
-          return;
-        }
-        const ultimo = audioEntrada[audioEntrada.length - 1];
-        audioSrc = (typeof ultimo === "object" && ultimo !== null) ? (ultimo.base64 || ultimo.audio || ultimo.url || "") : String(ultimo);
-      } else if (typeof audioEntrada === "object" && audioEntrada !== null) {
-        audioSrc = audioEntrada.base64 || audioEntrada.audio || audioEntrada.url || "";
-      } else {
-        audioSrc = String(audioEntrada);
-      }
-
-      audioSrc = audioSrc.trim();
-      if (!audioSrc) {
-        alert("La nota de voz está vacía.");
-        return;
-      }
-
-      // Si es un base64 puro sin prefijo MIME data:, le sumamos el encabezado universal
-      if (!audioSrc.startsWith("data:") && !audioSrc.startsWith("http") && !audioSrc.startsWith("blob:")) {
-        audioSrc = "data:audio/mp4;base64," + audioSrc;
-      }
-
-      const snd = new Audio(audioSrc);
-      snd.onended = () => {
-        setReproduciendoAudio(false);
-      };
-      snd.onerror = (err) => {
-        console.warn("Intento con fallback audio/webm...", err);
-        // Fallback para navegadores que prefieren webm
-        if (audioSrc.includes("data:audio/mp4")) {
-          const fallbackSrc = audioSrc.replace("data:audio/mp4", "data:audio/webm");
-          const sndFallback = new Audio(fallbackSrc);
-          sndFallback.onended = () => setReproduciendoAudio(false);
-          sndFallback.onerror = () => {
-            setReproduciendoAudio(false);
-            alert("No se pudo reproducir el formato de audio en este navegador.");
-          };
-          setAudioActivoObj(sndFallback);
-          sndFallback.play().catch(() => setReproduciendoAudio(false));
-          setReproduciendoAudio(true);
-        } else {
-          setReproduciendoAudio(false);
-          alert("Formato de audio no compatible o archivo dañado.");
-        }
-      };
-
-      setAudioActivoObj(snd);
-      snd.play().catch(e => {
-        console.error("Error al reproducir audio:", e);
-        setReproduciendoAudio(false);
-      });
-      setReproduciendoAudio(true);
-    } catch (e) {
-      console.error(e);
-      setReproduciendoAudio(false);
-    }
-  };
-  
-  const cerrarSesionSupervisor = async () => { await supabase.auth.signOut(); setSesionSupervisor(null); };
+ const cerrarSesionSupervisor = async () => { await supabase.auth.signOut(); setSesionSupervisor(null); };
   const [comercios, setComercios] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
   const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
-  const [comercioDetalleModal, setComercioDetalleModal] = useState(null);
-  const [audioActivoObj, setAudioActivoObj] = useState(null);
-  const [reproduciendoAudio, setReproduciendoAudio] = useState(false);
   const [diaSemana, setDiaSemana] = useState("Jueves");
   const [busqueda, setBusqueda] = useState("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("Elifiant");
   const [comercioFoco, setComercioFoco] = useState(null);
+  const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
+
   useEffect(() => {
     cargarDatos();
   }, []);
@@ -155,63 +77,6 @@ export default function Supervisor() {
       setCargando(false);
     }
   };
-
-  
-  
-  const normalizarTextoDia = (t) => {
-    return (t || "")
-      .toUpperCase()
-      .trim()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-  };
-
-  const diasSemana = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO"];
-
-    const comerciosPreventista = (preventistaSeleccionado && preventistaSeleccionado.nombre)
-    ? (comercios || []).filter((c) => {
-        const asignado = (c.preventista || "Alex").toLowerCase().trim();
-        const objetivo = (preventistaSeleccionado.nombre || "Alex").toLowerCase().trim();
-        if (asignado !== objetivo) return false;
-        if (!filtroDiaMapa || filtroDiaMapa === "TODOS") return true;
-        const diaReal = (c.dia_visita || "").toUpperCase().trim();
-        const diaAsignado = diaReal !== "" ? diaReal : diasSemana[Math.abs(Number(c.id || 0)) % 6];
-        return normalizarTextoDia(diaAsignado) === normalizarTextoDia(filtroDiaMapa);
-      })
-    : (comercios || []);
-
-  const comerciosVisibles = (busquedaSupervisor && busquedaSupervisor.trim() !== "")
-    ? (comercios || []).filter((c) => {
-        const q = busquedaSupervisor.toLowerCase().trim();
-        const nom = (c.nombre || "").toLowerCase();
-        const dir = (c.direccion || "").toLowerCase();
-        const rub = (c.rubro || "").toLowerCase();
-        const cuit = (c.cuit_cuil || c.cuit || "").toLowerCase();
-        const idStr = String(c.id || "");
-        return nom.includes(q) || dir.includes(q) || rub.includes(q) || cuit.includes(q) || idStr.includes(q);
-      })
-    : comerciosPreventista;
-
-  const calcularMetas = (nombrePrev) => {
-    const todos = (comercios || []).filter(c => (c.preventista || "Alex").toLowerCase() === (nombrePrev || "Alex").toLowerCase());
-    const hoyNom = (diasSemana[3] || "MIÉRCOLES").toUpperCase();
-    const deHoy = todos.filter(c => ((c.dia_visita || "").toUpperCase().trim() || hoyNom) === hoyNom);
-    const visitados = deHoy.filter(c => c.visitado || c.visitado_hoy);
-    return {
-      carteraTotal: todos.length,
-      metaHoy: deHoy.length,
-      visitados: visitados.length,
-      porcentaje: deHoy.length > 0 ? Math.round((visitados.length / deHoy.length) * 100) : 0
-    };
-  };
-
-  const coordenadasValidas = comerciosPreventista
-    .map(c => [c.ubicacion_exacta_latitud || c.latitud, c.ubicacion_exacta_longitud || c.longitud])
-    .filter(p => p[0] && p[1] && !isNaN(p[0]) && !isNaN(p[1]));
-
-  const centroMapa = coordenadasValidas[0] || [-34.719, -58.264];
-  const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
-  const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
 
   const empresasUnicas = ["TODAS", ...Array.from(new Set(comercios.map(c => c.empresa || "Elifiant")))];
   const preventistasUnicos = Array.from(new Set(comercios.map(c => c.preventista || "Alex")));
@@ -254,8 +119,9 @@ export default function Supervisor() {
       estadoActividad: tieneActividadHoy ? "🟢 En ruta (" + paradasHoyCount + " hoy)" : "○ Sin actividad hoy",
       proxima: comerciosPrev[0]?.nombre || "Sin comercios asignados"
     };
-   });
-  const exportarCSV = () => {
+  });
+
+    const exportarCSV = () => {
     if (comercios.length === 0) return;
     const encabezados = ["ID", "Nombre", "Empresa", "Preventista", "Rubro", "Direccion", "Latitud", "Longitud", "Fecha"];
     const filas = comercios.map(c => [
@@ -279,7 +145,42 @@ export default function Supervisor() {
     URL.revokeObjectURL(url);
   };
 
+  const comerciosPreventista = comercios.filter(c => {
+    const matchEmpresa = filtroEmpresa === "TODAS" || (c.empresa || "Elifiant") === filtroEmpresa;
+    const matchPrev = !preventistaSeleccionado || (c.preventista || "Alex") === preventistaSeleccionado.nombre;
+    const matchBusqueda = ((c.nombre || "") + " " + (c.direccion || "") + " " + (c.rubro || "")).toLowerCase().includes(busqueda.toLowerCase());
+    // Mapeo automático por id o campo dia para organizar la semana si aun no está en la base
+    const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    const diaAsignado = c.dia_visita || diasSemana[Number(c.id || 0) % 6];
+    const matchDia = filtroDiaMapa === "TODOS" || diaAsignado === filtroDiaMapa;
+    return matchEmpresa && matchPrev && matchBusqueda && matchDia;
+  });
+
+  const coordenadasValidas = comerciosPreventista
+    .map(c => [c.ubicacion_exacta_latitud || c.latitud, c.ubicacion_exacta_longitud || c.longitud])
+    .filter(p => p[0] && p[1] && !isNaN(p[0]) && !isNaN(p[1]));
+
+  const centroMapa = coordenadasValidas[0] || [-34.719, -58.264];
+  const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
+  const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
+
+  
+  // Función auxiliar para calcular telemetría real de preventistas
+  const calcularMetasPreventista = (nombrePreventista) => {
+    const todosDelPreventista = comercios.filter(com => (com.preventista || 'Alex') === nombrePreventista);
+    const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const diaHoyTexto = diasSemana[new Date().getDay()];
     
+    const metaHoy = todosDelPreventista.filter(com => (com.dia_visita || 'Lunes') === diaHoyTexto);
+    const visitadosHoy = metaHoy.filter(com => com.visitado_hoy || com.visitado);
+    
+    return {
+      carteraTotal: todosDelPreventista.length,
+      metaHoy: metaHoy.length,
+      visitados: visitadosHoy.length,
+      pendientes: Math.max(0, metaHoy.length - visitadosHoy.length)
+    };
+  };
 
   
   const activosEnCalle = typeof telemetriaFlota !== "undefined" ? telemetriaFlota.filter(p => p.activoHoy || p.estado === "En Ruta (Activo)").length : 0;
@@ -314,13 +215,13 @@ export default function Supervisor() {
 
           <button
             onClick={exportarCSV}
-            style={{ padding: "4px 8px", backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "13px", fontWeight: "600", color: "#334155", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+            style={{ padding: "8px 14px", backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "13px", fontWeight: "600", color: "#334155", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
           >
             📑 Exportar Hoja (PDF/XLS)
           </button>
           <button
             onClick={() => window.location.href = "/"}
-            style={{ padding: "4px 8px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: "700", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
+            style={{ padding: "8px 14px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: "700", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
           >
             📱 App Preventa
           </button>
@@ -550,11 +451,11 @@ setPreventistaSeleccionado(prev);
           {/* MAPA DINÁMICO ENFOCADO (APARECE AL TOCAR UN PREVENTISTA) */}
           {preventistaSeleccionado ? (
             <div style={{ flex: "1", display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "5px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   <span style={{ fontSize: "20px" }}>🗺️</span>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: "13px", fontWeight: "800", color: "#0f172a" }}>
+                    <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
                       Enfoque: {preventistaSeleccionado.nombre} ({preventistaSeleccionado.rutaId})
                     </h3>
                     <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>
@@ -563,7 +464,7 @@ setPreventistaSeleccionado(prev);
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "4px", backgroundColor: "#f1f5f9", padding: "1px 2px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
-                    <span style={{ fontSize: "13px", fontWeight: "bold", color: "#64748b", marginRight: "2px" }}>Día:</span>
+                    <span style={{ fontSize: "15px", fontWeight: "bold", color: "#64748b", marginRight: "2px" }}>Día:</span>
                     {["TODOS", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(d => (
                       <button
                         key={d}
@@ -599,7 +500,7 @@ setPreventistaSeleccionado(prev);
               </div>
 
               {/* CONTENEDOR DEL MAPA */}
-<div style={{ height: "340px", width: "100%", maxWidth: "520px", margin: "0", borderRadius: "10px", overflow: "hidden", border: "1px solid #cbd5e1", position: "relative" }}>
+<div style={{ height: "380px", width: "100%", maxWidth: "520px", margin: "0", borderRadius: "10px", overflow: "hidden", border: "1px solid #cbd5e1", position: "relative" }}>
                 <MapContainer center={centroMapa} zoom={14} style={{ height: "100%", width: "100%" }}>
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                   <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : null} />
@@ -623,7 +524,6 @@ setPreventistaSeleccionado(prev);
                     return (
                       <Marker key={c.id} position={[lat, lng]} icon={iconoNumero(i + 1, estadoPin)}>
                         <Popup>
-      
                           <div style={{ minWidth: "180px" }}>
                             {c.foto_url && (
                               <img src={c.foto_url} alt="" style={{ width: "100%", height: "90px", objectFit: "cover", borderRadius: "6px", marginBottom: "6px" }} />
@@ -634,14 +534,7 @@ setPreventistaSeleccionado(prev);
                             <strong style={{ fontSize: "13px" }}>{c.nombre || ("Comercio #" + c.id)}</strong>
                             <p style={{ margin: "3px 0 0 0", fontSize: "11px", color: "#64748b" }}>{c.rubro || "General"} {c.direccion ? "• " + c.direccion : ""}</p>
                           </div>
-                        
-      <button 
-        type="button" 
-        onClick={(e) => { e.stopPropagation(); setComercioDetalleModal(c); }} 
-        style={{ marginTop: "6px", width: "100%", background: "#2563eb", color: "#fff", border: "none", borderRadius: "4px", padding: "4px 8px", fontSize: "11px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
-        <span>🏢</span> Ver Detalle & Audio
-      </button>
-    </Popup>
+                        </Popup>
                       </Marker>
                     );
                   })}
@@ -653,27 +546,11 @@ setPreventistaSeleccionado(prev);
                 <h4 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
                   📋 Bitácora de Paradas de Hoy ({preventistaSeleccionado.rutaId} • {comerciosPreventista.length} comercios)
                 </h4>
-                
-        {/* BUSCADOR DEL SUPERVISOR */}
-        <div style={{ backgroundColor: "#ffffff", padding: "8px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", marginBottom: "14px", display: "flex", gap: "8px", alignItems: "center" }}>
-          <span>🔍</span>
-          <input
-            type="text"
-            placeholder="Buscar por nombre, dirección, rubro o CUIT..."
-            value={busquedaSupervisor}
-            onChange={(e) => setBusquedaSupervisor(e.target.value)}
-            style={{ width: "100%", border: "none", outline: "none", fontSize: "13px", color: "#0f172a" }}
-          />
-          {busquedaSupervisor && (
-            <button type="button" onClick={() => setBusquedaSupervisor("")} style={{ border: "none", background: "none", cursor: "pointer", color: "#64748b", fontWeight: "bold" }}>✕</button>
-          )}
-        </div>
-  
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto" }}>
-                  {comerciosVisibles.slice(0, 50).map((c, i) => (
+                  {comerciosPreventista.slice(0, 15).map((c, i) => (
                     <div
                       key={c.id}
-                      onClick={() => { setComercioFoco(c); setComercioDetalleModal(c); }}
+                      onClick={() => setComercioFoco(c)}
                       style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", cursor: "pointer" }}
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -704,98 +581,7 @@ setPreventistaSeleccionado(prev);
             </div>
           )}
         </div>
-      
-      {/* MODAL FICHA 360 DEL COMERCIO: DATOS FISCALES Y AUDIO */}
-      {comercioDetalleModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", backdropFilter: "blur(3px)" }}>
-          <div style={{ background: "#ffffff", borderRadius: "14px", width: "100%", maxWidth: "560px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.35)", border: "1px solid #cbd5e1" }}>
-            
-            {/* CABECERA MODAL */}
-            <div style={{ background: "#0f172a", color: "#fff", padding: "14px 18px", borderRadius: "14px 14px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "bold", background: "#2563eb", padding: "2px 6px", borderRadius: "4px", textTransform: "uppercase" }}>Detalle Operativo del Comercio</span>
-                <h3 style={{ margin: "4px 0 0 0", fontSize: "17px", fontWeight: "800" }}>{comercioDetalleModal.nombre || ("Comercio #" + comercioDetalleModal.id)}</h3>
-              </div>
-              <button onClick={() => { if (audioActivoObj) audioActivoObj.pause(); setReproduciendoAudio(false); setComercioDetalleModal(null); }} style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", width: "30px", height: "30px", borderRadius: "50%", cursor: "pointer", fontSize: "16px", fontWeight: "bold" }}>✕</button>
-            </div>
-
-            <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "14px" }}>
-              
-              {/* SECCIÓN 1: DATOS FISCALES Y AFIP */}
-              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "12px", fontWeight: "bold", color: "#1e293b", display: "flex", alignItems: "center", gap: "6px" }}>🏢 DATOS FISCALES Y FACTURACIÓN</span>
-                  <span style={{ fontSize: "11px", fontWeight: "bold", color: "#15803d", background: "#dcfce7", padding: "2px 8px", borderRadius: "12px" }}>✓ Validado AFIP</span>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "12px" }}>
-                  <div style={{ background: "#fff", padding: "8px", borderRadius: "6px", border: "1px solid #cbd5e1" }}>
-                    <div style={{ color: "#64748b", fontSize: "10px", textTransform: "uppercase", fontWeight: "bold" }}>CUIT / CUIL</div>
-                    <div style={{ fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{comercioDetalleModal.cuit || "30-71448209-4"}</div>
-                  </div>
-                  <div style={{ background: "#fff", padding: "8px", borderRadius: "6px", border: "1px solid #cbd5e1" }}>
-                    <div style={{ color: "#64748b", fontSize: "10px", textTransform: "uppercase", fontWeight: "bold" }}>Condición IVA</div>
-                    <div style={{ fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{comercioDetalleModal.condicion_iva || "Resp. Inscripto"}</div>
-                  </div>
-                </div>
-                <div style={{ background: "#fff", padding: "8px", borderRadius: "6px", border: "1px solid #cbd5e1", marginTop: "8px", fontSize: "12px" }}>
-                  <div style={{ color: "#64748b", fontSize: "10px", textTransform: "uppercase", fontWeight: "bold" }}>Domicilio Fiscal</div>
-                  <div style={{ fontWeight: "600", color: "#0f172a", marginTop: "2px" }}>📍 {comercioDetalleModal.domicilio_fiscal || comercioDetalleModal.direccion || "Av. Rivadavia 2105, San Isidro"}</div>
-                </div>
-              </div>
-
-              {/* SECCIÓN 2: REPRODUCTOR DE NOTA DE VOZ DEL PREVENTISTA */}
-              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "10px", padding: "12px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "12px", fontWeight: "bold", color: "#1e3a8a", display: "flex", alignItems: "center", gap: "6px" }}>🎙️ ÚLTIMA NOTA DE VOZ DEL PREVENTISTA</span>
-                  <span style={{ fontSize: "10px", fontWeight: "bold", color: "#2563eb", background: "#dbeafe", padding: "2px 6px", borderRadius: "4px" }}>Nota fresca (sobrescribe)</span>
-                </div>
-                {comercioDetalleModal.notas_audio ? (
-                  <div style={{ background: "#ffffff", padding: "10px", borderRadius: "8px", border: "1px solid #93c5fd", display: "flex", alignItems: "center", gap: "12px" }}>
-                    <button 
-                      type="button"
-                      onClick={() => handleToggleAudioFicha(comercioDetalleModal.notas_audio)}
-                      style={{ background: reproduciendoAudio ? "#dc2626" : "#2563eb", color: "#fff", border: "none", borderRadius: "50%", width: "40px", height: "40px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", cursor: "pointer", flexShrink: 0, boxShadow: "0 4px 8px rgba(37,99,235,0.3)" }}>
-                      {reproduciendoAudio ? "❚❚" : "▶"}
-                    </button>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: "12px", fontWeight: "bold", color: "#1e293b" }}>{reproduciendoAudio ? "Reproduciendo nota de voz..." : "Escuchar audio de novedad"}</div>
-                      <div style={{ fontSize: "11px", color: "#64748b" }}>Grabado por el vendedor en la última visita</div>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ background: "#ffffff", padding: "10px", borderRadius: "8px", border: "1px dashed #cbd5e1", textAlign: "center", fontSize: "12px", color: "#64748b" }}>
-                    💬 Sin notas de voz grabadas en este comercio aún.
-                  </div>
-                )}
-                {comercioDetalleModal.notas && (
-                  <div style={{ marginTop: "8px", fontSize: "12px", background: "#fff", padding: "8px", borderRadius: "6px", border: "1px solid #e2e8f0", color: "#334155" }}>
-                    <strong>Notas de texto:</strong> {comercioDetalleModal.notas}
-                  </div>
-                )}
-              </div>
-
-              {/* SECCIÓN 3: FOTO DE FACHADA Y WHATSAPP */}
-              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                {comercioDetalleModal.foto_url && (
-                  <img src={comercioDetalleModal.foto_url} alt="Fachada" style={{ width: "90px", height: "90px", objectFit: "cover", borderRadius: "8px", border: "1px solid #cbd5e1" }} />
-                )}
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <div style={{ fontSize: "12px", color: "#475569" }}>👤 Preventista: <strong>{comercioDetalleModal.preventista || "Walter"}</strong></div>
-                  <div style={{ fontSize: "12px", color: "#475569" }}>🗓️ Día de visita: <strong>{comercioDetalleModal.dia_visita || "No asignado"}</strong></div>
-                  {comercioDetalleModal.telefono && (
-                    <a href={"https://wa.me/" + comercioDetalleModal.telefono.replace(/[^0-9]/g, "")} target="_blank" rel="noreferrer" style={{ background: "#22c55e", color: "#fff", padding: "6px 12px", borderRadius: "6px", textDecoration: "none", fontSize: "12px", fontWeight: "bold", textAlign: "center", display: "inline-block", marginTop: "4px" }}>
-                      💬 WhatsApp Directo
-                    </a>
-                  )}
-                </div>
-              </div>
-
-            </div>
-          </div>
-        </div>
-      )}
-
-    </main>
+      </main>
     </div>
   );
 }
