@@ -418,6 +418,10 @@ export default function App() {
           
 
         notas: comercioSeleccionado.notas || ""
+      ,
+        cuit: comercioSeleccionado.cuit || '',
+        condicion_fiscal: comercioSeleccionado.condicion_fiscal || 'Consumidor Final',
+        domicilio_fiscal: comercioSeleccionado.domicilio_fiscal || ''
       };
       const { error } = await supabase.from("comercios").update(actualizacion).eq("id", comercioSeleccionado.id);
       if (error) throw error;
@@ -890,6 +894,50 @@ export default function App() {
                 placeholder="Ej: 1123456789"
               />
             </div>
+
+            {/* DATOS FISCALES Y FACTURACIÓN */}
+            <div style={{ marginTop: '8px', padding: '12px', background: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
+              <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#38bdf8', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>📑</span> Datos Fiscales & Facturación
+              </div>
+              
+              <div style={{ marginBottom: '8px' }}>
+                <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '3px', textTransform: 'uppercase' }}>CUIT / CUIL</label>
+                <input
+                  type="text"
+                  placeholder="Ej: 20-34882910-3"
+                  value={comercioSeleccionado.cuit || ''}
+                  onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, cuit: e.target.value })}
+                  style={{ width: '100%', padding: '8px', background: '#1e293b', border: '1px solid #475569', borderRadius: '6px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '8px' }}>
+                <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '3px', textTransform: 'uppercase' }}>Condición Fiscal</label>
+                <select
+                  value={comercioSeleccionado.condicion_fiscal || 'Consumidor Final'}
+                  onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, condicion_fiscal: e.target.value })}
+                  style={{ width: '100%', padding: '8px', background: '#1e293b', border: '1px solid #475569', borderRadius: '6px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }}
+                >
+                  <option value="Consumidor Final">Consumidor Final</option>
+                  <option value="Responsable Inscripto">Responsable Inscripto</option>
+                  <option value="Monotributo">Monotributo</option>
+                  <option value="Exento">Exento</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '3px', textTransform: 'uppercase' }}>Domicilio Fiscal / Facturación</label>
+                <input
+                  type="text"
+                  placeholder="Calle, número, localidad..."
+                  value={comercioSeleccionado.domicilio_fiscal || ''}
+                  onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, domicilio_fiscal: e.target.value })}
+                  style={{ width: '100%', padding: '8px', background: '#1e293b', border: '1px solid #475569', borderRadius: '6px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
 
             <div>
               <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Notas</label>

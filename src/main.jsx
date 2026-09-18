@@ -4,6 +4,7 @@ import "./index.css";
 import { supabase } from "./supabase";
 import App from "./App.jsx";
 import Supervisor from "./Supervisor.jsx";
+import PlanificadorRutas from "./PlanificadorRutas";
 import AdminClientes from "./AdminClientes.jsx";
 import AdminPromotores from "./AdminPromotores";
 import WebComercial from "./WebComercial.jsx";
@@ -124,7 +125,7 @@ function EnrutadorSeguro() {
  if (rol === "supervisor") return <Supervisor />;
  return <App />;
  }
- if (ruta.startsWith("/supervisor")) {
+ if (ruta.startsWith("/rutas")) { Componente = PlanificadorRutas; } else if (ruta.startsWith("/supervisor")) {
  if (rol === "supervisor" || rol === "superadmin") return <Supervisor />;
  return <App />;
  }

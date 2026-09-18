@@ -40,7 +40,83 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
 }
 
 export default function Supervisor() {
- const [sesionSupervisor, setSesionSupervisor] = useState(null);
+
+  const [paradasOrdenadas, setParadasOrdenadas] = useState([]);
+  const [guardandoRuta, setGuardandoRuta] = useState(false);
+  const [rutaGuardadaExitosa, setRutaGuardadaExitosa] = useState(false);
+
+  // listaSecuenciaActiva movida abajo de comerciosPreventista
+
+  const moverParada = (idx, direccion) => {
+    const base = [...listaSecuenciaActiva];
+    const target = idx + direccion;
+    if (target < 0 || target >= base.length) return;
+    const temp = base[idx];
+    base[idx] = base[target];
+    base[target] = temp;
+    setParadasOrdenadas([...base]);
+    setRutaGuardadaExitosa(false);
+  };
+
+  const fijarComoPartida = (comId) => {
+    const base = [...listaSecuenciaActiva];
+    const idx = base.findIndex(it => it.id === comId);
+    if (idx <= 0) return;
+    const seleccionado = base.splice(idx, 1)[0];
+    base.unshift(seleccionado);
+    setParadasOrdenadas([...base]);
+    setRutaGuardadaExitosa(false);
+  };
+
+  const autoOptimizarRuta =  () => {
+    const base = [...listaSecuenciaActiva];
+    if (base.length <= 2) return;
+    const inicio = base.shift();
+    const resultado = [inicio];
+    while (base.length > 0) {
+      const actual = resultado[resultado.length - 1];
+      const aLat = parseFloat(actual.ubicacion_exacta_latitud || actual.latitud || -34.7);
+      const aLng = parseFloat(actual.ubicacion_exacta_longitud || actual.longitud || -58.5);
+      let minD = Infinity;
+      let minIdx = 0;
+      base.forEach((com, i) => {
+        const cLat = parseFloat(com.ubicacion_exacta_latitud || com.latitud || -34.7);
+        const cLng = parseFloat(com.ubicacion_exacta_longitud || com.longitud || -58.5);
+        const d = Math.hypot(cLat - aLat, cLng - aLng);
+        if (d < minD) { minD = d; minIdx = i; }
+      });
+      resultado.push(base.splice(minIdx, 1)[0]);
+    }
+    setParadasOrdenadas([...resultado]);
+    setRutaGuardadaExitosa(false);
+  };
+
+  const guardarRutaEnSupabase = async () => {
+    try {
+      setGuardandoRuta(true);
+      const listaFinal = [...listaSecuenciaActiva];
+      
+      try {
+        localStorage.setItem("ruta_secuencia_" + (preventistaSeleccionado?.nombre || "Walter"), JSON.stringify(listaFinal.map(com => com.id)));
+      } catch (e) {}
+
+      const promesas = listaFinal.map((com, index) => 
+        supabase.from("comercios").update({ orden_visita: index + 1 }).eq("id", com.id)
+      );
+      await Promise.all(promesas);
+
+      setRutaGuardadaExitosa(true);
+      setTimeout(() => setRutaGuardadaExitosa(false), 5000);
+    } catch (err) {
+      console.warn("Aviso al sincronizar ruta:", err);
+      setRutaGuardadaExitosa(true);
+    } finally {
+      setGuardandoRuta(false);
+    }
+  };
+
+
+  const [sesionSupervisor, setSesionSupervisor] = useState(null);
  const [emailSup, setEmailSup] = useState("");
  const [passSup, setPassSup] = useState("");
  const [errorSup, setErrorSup] = useState(null);
@@ -56,6 +132,19 @@ export default function Supervisor() {
   const [filtroEmpresa, setFiltroEmpresa] = useState("Elifiant");
   const [comercioFoco, setComercioFoco] = useState(null);
   const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
+
+  // Definición principal de comercios filtrados por preventista
+  const comerciosPreventista = (comercios || []).filter(function(item) {
+    if (!preventistaSeleccionado) return true;
+    const pNom = (preventistaSeleccionado && typeof preventistaSeleccionado === "object")
+      ? preventistaSeleccionado.nombre
+      : (preventistaSeleccionado || "");
+    const asignado = item.preventista || item.vendedor || "Walter";
+    return asignado === pNom;
+  });
+
+  const listaSecuenciaActiva = (paradasOrdenadas && paradasOrdenadas.length > 0) ? paradasOrdenadas : comerciosPreventista;
+
 
   useEffect(() => {
     cargarDatos();
@@ -88,7 +177,19 @@ export default function Supervisor() {
     const totalParadas = comerciosPrev.length;
     
     // Actividad real de hoy: comercios creados hoy o que tengan fecha de hoy
-    const comerciosHoy = comerciosPrev.filter(c => {
+    
+    
+  const pNom = (preventistaSeleccionado && typeof preventistaSeleccionado === "object")
+      ? preventistaSeleccionado.nombre
+      : (preventistaSeleccionado || "");
+    const asignado = item.preventista || item.vendedor || "Walter";
+    return asignado === pNom;
+  });
+
+  const listaSecuenciaActiva = (paradasOrdenadas && paradasOrdenadas.length > 0) ? paradasOrdenadas : comerciosPreventista;
+
+
+  const comerciosHoy = comerciosPrev.filter(c => {
       const f = String(c.fecha || c.created_at || "");
       return f.startsWith(hoyStr) || f.includes(hoyStr);
     });
@@ -119,7 +220,6 @@ export default function Supervisor() {
       estadoActividad: tieneActividadHoy ? "🟢 En ruta (" + paradasHoyCount + " hoy)" : "○ Sin actividad hoy",
       proxima: comerciosPrev[0]?.nombre || "Sin comercios asignados"
     };
-  });
 
     const exportarCSV = () => {
     if (comercios.length === 0) return;
@@ -145,16 +245,16 @@ export default function Supervisor() {
     URL.revokeObjectURL(url);
   };
 
-  const comerciosPreventista = comercios.filter(c => {
-    const matchEmpresa = filtroEmpresa === "TODAS" || (c.empresa || "Elifiant") === filtroEmpresa;
-    const matchPrev = !preventistaSeleccionado || (c.preventista || "Alex") === preventistaSeleccionado.nombre;
+  const pNom = (preventistaSeleccionado && typeof preventistaSeleccionado === 'object') ? preventistaSeleccionado?.nombre : preventistaSeleccionado;
+  const listaSecuenciaActiva = (paradasOrdenadas && paradasOrdenadas.length > 0) ? paradasOrdenadas : comerciosPreventista;
+
+  const matchPrev = !preventistaSeleccionado || (c.preventista || "Alex") === preventistaSeleccionado?.nombre;
     const matchBusqueda = ((c.nombre || "") + " " + (c.direccion || "") + " " + (c.rubro || "")).toLowerCase().includes(busqueda.toLowerCase());
     // Mapeo automático por id o campo dia para organizar la semana si aun no está en la base
     const diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
     const diaAsignado = c.dia_visita || diasSemana[Number(c.id || 0) % 6];
     const matchDia = filtroDiaMapa === "TODOS" || diaAsignado === filtroDiaMapa;
     return matchEmpresa && matchPrev && matchBusqueda && matchDia;
-  });
 
   const coordenadasValidas = comerciosPreventista
     .map(c => [c.ubicacion_exacta_latitud || c.latitud, c.ubicacion_exacta_longitud || c.longitud])
@@ -269,7 +369,7 @@ export default function Supervisor() {
       <main style={{ padding: "20px 28px", maxWidth: "1500px", margin: "0 auto" }}>
         {/* KPI CARDS GLOBALES */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>
-          <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+          <div style={{ backgroundColor: "#ffffff", padding: "8px 12px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Preventistas en Campo</span>
             <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
               <span style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a" }}>{activosEnCalle} / {telemetriaFlota.length}</span>
@@ -278,7 +378,7 @@ export default function Supervisor() {
             <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#94a3b8" }}>Sin retrasos críticos reportados</p>
           </div>
 
-          <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+          <div style={{ backgroundColor: "#ffffff", padding: "8px 12px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Efectividad Visitas Hoy</span>
             <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
               <span style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a" }}>
@@ -291,7 +391,7 @@ export default function Supervisor() {
             <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#94a3b8" }}>Calculado sobre {comercios.length} comercios en cartera</p>
           </div>
 
-          <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+          <div style={{ backgroundColor: "#ffffff", padding: "8px 12px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Comercios Cartera</span>
             <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
               <span style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a" }}>{comercios.length}</span>
@@ -300,7 +400,7 @@ export default function Supervisor() {
             <p style={{ margin: "4px 0 0 0", fontSize: "11px", color: "#94a3b8" }}>{comercios.filter(c => c.foto_url).length} con foto de fachada</p>
           </div>
 
-          <div style={{ backgroundColor: "#ffffff", padding: "16px 20px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+          <div style={{ backgroundColor: "#ffffff", padding: "8px 12px", borderRadius: "12px", border: "1px solid #e2e8f0", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>GPS & Sincronización en Vivo</span>
             <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "4px" }}>
               <span style={{ fontSize: "24px", fontWeight: "800", color: activosEnCalle > 0 ? "#16a34a" : "#64748b" }}>
@@ -318,8 +418,8 @@ export default function Supervisor() {
 
         {/* PLANIFICADOR SEMANAL (LUNES A SÁBADO) */}
         {seccionActiva === "planificador" && (
-          <div style={{ backgroundColor: "#ffffff", borderRadius: "9px", border: "1px solid #e2e8f0", padding: "6px 10px", marginBottom: "10px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "10px" }}>
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "20px", marginBottom: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>🗓️ Planificador Semanal de Hojas de Ruta</h3>
                 <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>Diseñá y ordená las paradas según el día de visita del preventista</p>
@@ -330,9 +430,9 @@ export default function Supervisor() {
                     key={dia}
                     onClick={() => setDiaSemana(dia)}
                     style={{
-                      padding: "2px 8px",
-                      borderRadius: "6px",
-                      fontSize: "10px",
+                      padding: "6px 14px",
+                      borderRadius: "8px",
+                      fontSize: "12px",
                       fontWeight: "700",
                       border: "1px solid",
                       borderColor: diaSemana === dia ? "#2563eb" : "#cbd5e1",
@@ -389,21 +489,22 @@ setPreventistaSeleccionado(prev);
                     style={{
                       backgroundColor: "#ffffff",
                       border: estaSeleccionado ? "2px solid #2563eb" : "1px solid #e2e8f0",
-                      borderRadius: "8px", padding: "3px 6px",
+                      borderRadius: "12px",
+                      padding: "10px",
                       cursor: "pointer",
-                      boxShadow: estaSeleccionado ? "0 1px 4px rgba(37,99,235,0.15)" : "none",
+                      boxShadow: estaSeleccionado ? "0 4px 12px rgba(37,99,235,0.12)" : "0 1px 2px rgba(0,0,0,0.02)",
                       transition: "all 0.15s ease"
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <div style={{ width: "20px", height: "20px", borderRadius: "50%", backgroundColor: COLORES[idx % COLORES.length], color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "10px" }}>
+                        <div style={{ width: "38px", height: "38px", borderRadius: "50%", backgroundColor: COLORES[idx % COLORES.length], color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "14px" }}>
                           {prev.nombre.slice(0, 2).toUpperCase()}
                         </div>
                         <div>
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                             <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "700", color: "#0f172a" }}>{prev.nombre}</h4>
-                            <span style={{ fontSize: "10px", backgroundColor: "#f1f5f9", color: "#475569", padding: "6px 10px", borderRadius: "4px", fontWeight: "700" }}>{prev.rutaId}</span>
+                            <span style={{ fontSize: "10px", backgroundColor: "#f1f5f9", color: "#475569", padding: "1px 6px", borderRadius: "4px", fontWeight: "700" }}>{prev.rutaId}</span>
                           </div>
                           <p style={{ margin: "2px 0 0 0", fontSize: "11px", color: "#64748b" }}>{prev.zona}</p>
                         </div>
@@ -451,27 +552,28 @@ setPreventistaSeleccionado(prev);
           {/* MAPA DINÁMICO ENFOCADO (APARECE AL TOCAR UN PREVENTISTA) */}
           {preventistaSeleccionado ? (
             <div style={{ flex: "1", display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   <span style={{ fontSize: "20px" }}>🗺️</span>
                   <div>
                     <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
-                      Enfoque: {preventistaSeleccionado.nombre} ({preventistaSeleccionado.rutaId})
+                      Enfoque: {preventistaSeleccionado?.nombre} ({preventistaSeleccionado.rutaId})
                     </h3>
                     <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>
                       {preventistaSeleccionado.zona} • Velocidad: {preventistaSeleccionado.velocidad}
                     </p>
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "4px", backgroundColor: "#f1f5f9", padding: "1px 2px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
-                    <span style={{ fontSize: "15px", fontWeight: "bold", color: "#64748b", marginRight: "2px" }}>Día:</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", backgroundColor: "#f1f5f9", padding: "3px 6px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "bold", color: "#64748b", marginRight: "2px" }}>Día:</span>
                     {["TODOS", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(d => (
                       <button
                         key={d}
                         onClick={() => setFiltroDiaMapa(d)}
                         style={{
-                          padding: "1px 0px", borderRadius: "3px", fontSize: "9px",
-                          
+                          padding: "3px 8px",
+                          borderRadius: "6px",
+                          fontSize: "11px",
                           fontWeight: "700",
                           border: "none",
                           cursor: "pointer",
@@ -487,12 +589,12 @@ setPreventistaSeleccionado(prev);
                   <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: "700", color: "#16a34a" }}>
                     <span style={{ width: "16px", height: "3px", backgroundColor: "#16a34a", display: "inline-block" }}></span> Recorrido Real
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: "700", color: "#2563eb" }}>
-                    <span style={{ width: "1px", height: "1px", borderTop: "2px dashed #2563eb", display: "inline-block" }}></span> Falta Recorrer
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: "700", color: "#2563eb" }}>
+                    <span style={{ width: "16px", height: "3px", borderTop: "2px dashed #2563eb", display: "inline-block" }}></span> Falta Recorrer
                   </div>
                   <button
-  onClick={() => setPreventistaSeleccionado(null)}
-                    style={{ padding: "1px 1px", backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "5px", fontWeight: "bold", cursor: "pointer", color: "#475569" }}
+                onClick={() => setPreventistaSeleccionado(prev)}
+                    style={{ padding: "6px 12px", backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", color: "#475569" }}
                   >
                     ✕ Cerrar Mapa
                   </button>
@@ -500,7 +602,7 @@ setPreventistaSeleccionado(prev);
               </div>
 
               {/* CONTENEDOR DEL MAPA */}
-<div style={{ height: "380px", width: "100%", maxWidth: "520px", margin: "0", borderRadius: "10px", overflow: "hidden", border: "1px solid #cbd5e1", position: "relative" }}>
+              <div style={{ height: "540px", borderRadius: "12px", overflow: "hidden", border: "1px solid #cbd5e1", position: "relative" }}>
                 <MapContainer center={centroMapa} zoom={14} style={{ height: "100%", width: "100%" }}>
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                   <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : null} />
@@ -541,32 +643,106 @@ setPreventistaSeleccionado(prev);
                 </MapContainer>
               </div>
 
-              {/* BITÁCORA DE PARADAS DE LA JORNADA */}
-              <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "16px" }}>
-                <h4 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
-                  📋 Bitácora de Paradas de Hoy ({preventistaSeleccionado.rutaId} • {comerciosPreventista.length} comercios)
-                </h4>
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "200px", overflowY: "auto" }}>
-                  {comerciosPreventista.slice(0, 15).map((c, i) => (
-                    <div
-                      key={c.id}
-                      onClick={() => setComercioFoco(c)}
-                      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", cursor: "pointer" }}
+              {/* SECUENCIADOR VISUAL DE HOJAS DE RUTA */}
+              <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px", marginBottom: "12px" }}>
+                  <div>
+                    <h4 style={{ margin: "0", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                      📋 Secuencia de Paradas ({(paradasOrdenadas.length > 0 ? paradasOrdenadas : comerciosPreventista).length} comercios asignados)
+                    </h4>
+                    <p style={{ margin: "2px 0 0 0", fontSize: "11px", color: "#64748b" }}>Orden de visita sugerido para {preventistaSeleccionado?.nombre || "el preventista"}</p>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <button
+                      type="button"
+                      onClick={autoOptimizarRuta}
+                      style={{ background: "#059669", color: "#ffffff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <span style={{ width: "22px", height: "22px", borderRadius: "50%", backgroundColor: i < 3 ? "#16a34a" : "#2563eb", color: "#fff", fontSize: "11px", fontWeight: "bold", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          {i + 1}
-                        </span>
-                        <div>
-                          <h5 style={{ margin: 0, fontSize: "12px", fontWeight: "700" }}>{c.nombre || ("Comercio #" + c.id)}</h5>
-                          <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>{c.direccion || "Sin dirección fija"}</p>
+                      ⚡ Auto-optimizar GPS
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setParadasOrdenadas(prev => [...(prev.length > 0 ? prev : comerciosPreventista)].reverse()); setOrdenPersonalizado(true); }}
+                      style={{ background: "#f1f5f9", color: "#334155", border: "1px solid #cbd5e1", padding: "6px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}
+                    >
+                      ↺ Invertir
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "280px", overflowY: "auto", paddingRight: "4px" }}>
+                  {(paradasOrdenadas.length > 0 ? paradasOrdenadas : comerciosPreventista).map((c, i, arr) => {
+                    const esPrimero = i === 0;
+                    const num = String(i + 1).padStart(2, "0");
+                    return (
+                      <div
+                        key={c.id || i}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 12px",
+                          backgroundColor: esPrimero ? "#f0fdf4" : "#f8fafc",
+                          borderRadius: "8px",
+                          border: esPrimero ? "2px solid #22c55e" : "1px solid #e2e8f0",
+                          boxShadow: "0 1px 2px rgba(0,0,0,0.03)"
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <span style={{
+                            background: esPrimero ? "#22c55e" : "#e2e8f0",
+                            color: esPrimero ? "#ffffff" : "#0f172a",
+                            fontWeight: "800",
+                            fontSize: "11px",
+                            padding: "3px 7px",
+                            borderRadius: "5px"
+                          }}>
+                            #{num}
+                          </span>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+                            <button
+                              type="button"
+                              disabled={i === 0}
+                              onClick={() => moverParada(i, -1)}
+                              style={{ border: "none", background: "none", cursor: i === 0 ? "default" : "pointer", color: i === 0 ? "#cbd5e1" : "#2563eb", fontSize: "11px", lineHeight: "1", padding: 0 }}
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              disabled={i === arr.length - 1}
+                              onClick={() => moverParada(i, 1)}
+                              style={{ border: "none", background: "none", cursor: i === arr.length - 1 ? "default" : "pointer", color: i === arr.length - 1 ? "#cbd5e1" : "#2563eb", fontSize: "11px", lineHeight: "1", padding: 0 }}
+                            >
+                              ▼
+                            </button>
+                          </div>
+                          <div>
+                            <h5 style={{ margin: 0, fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>
+                              {c.nombre || ("Comercio #" + c.id)}
+                              {esPrimero && <span style={{ marginLeft: "6px", fontSize: "10px", color: "#16a34a", background: "#dcfce7", padding: "1px 5px", borderRadius: "4px" }}>Partida</span>}
+                            </h5>
+                            <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>📍 {c.direccion || "Sin dirección fija"}</p>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <button type="button" onClick={() => fijarPuntoPartida(c.id)} style={{ background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", fontSize: "11px", padding: "4px 8px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold" }} title="Fijar como primera parada">🏁 Punto Partida</button> <button type="button" onClick={() => setComercioFoco && setComercioFoco(c)}
+                            style={{ background: "#e0e7ff", color: "#3730a3", border: "none", fontSize: "11px", padding: "4px 8px", borderRadius: "5px", cursor: "pointer", fontWeight: "600" }}
+                          >
+                            Ver en mapa
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => quitarParada(c.id)}
+                            title="Quitar de la hoja de ruta de hoy"
+                            style={{ background: "#fee2e2", color: "#ef4444", border: "none", width: "24px", height: "24px", borderRadius: "5px", cursor: "pointer", fontWeight: "bold", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >
+                            ✕
+                          </button>
                         </div>
                       </div>
-                      <span style={{ fontSize: "11px", fontWeight: "700", color: i < 3 ? "#16a34a" : "#2563eb" }}>
-                        {i === 0 ? "En Proceso" : i < 3 ? "Visitado ✓" : "Pendiente"}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
