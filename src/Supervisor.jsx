@@ -96,6 +96,17 @@ export default function Supervisor() {
   }, [listaPreventistas, preventistaSeleccionado]);
 
   // Comercios asignados al preventista actual
+  
+  const ordenarPorSecuenciaGuardada = (lista) => {
+    if (!Array.isArray(lista)) return [];
+    return [...lista].sort((a, b) => {
+      const ordA = a.orden_visita !== null && a.orden_visita !== undefined ? Number(a.orden_visita) : 999999;
+      const ordB = b.orden_visita !== null && b.orden_visita !== undefined ? Number(b.orden_visita) : 999999;
+      if (ordA !== ordB) return ordA - ordB;
+      return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+    });
+  };
+
   const comerciosPreventista = (comercios || []).filter(c => {
     if (!preventistaSeleccionado) return true;
     const nombrePrev = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado.nombre : preventistaSeleccionado;
@@ -116,9 +127,18 @@ export default function Supervisor() {
 
   // Comercios visibles con buscador
   // Comercios visibles filtrados por día y por buscador
-  const comerciosVisibles = (comerciosFiltradosPorDia || []).filter(com => {
-    if (!busquedaSupervisor || busquedaSupervisor.trim() === "") return true;
-  });
+  const comerciosVisibles = ordenarPorSecuenciaGuardada(
+    (comerciosFiltradosPorDia || []).filter(com => {
+      if (!busquedaSupervisor || busquedaSupervisor.trim() === "") return true;
+      const q = busquedaSupervisor.toLowerCase().trim();
+      const nom = String(com.nombre || "").toLowerCase();
+      const dir = String(com.direccion || "").toLowerCase();
+      const rub = String(com.rubro || "").toLowerCase();
+      const cuitStr = String(com.cuit || "").toLowerCase();
+      const idStr = String(com.id || "");
+      return nom.includes(q) || dir.includes(q) || rub.includes(q) || cuitStr.includes(q) || idStr.includes(q);
+    })
+  );
   useEffect(() => {
     if (comerciosVisibles && comerciosVisibles.length > 0) {
       const ordenados = [...comerciosVisibles].sort((a, b) => {
