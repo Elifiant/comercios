@@ -1,32 +1,83 @@
 import React, { useState, useEffect } from "react";
+import { supabase } from "./supabase";
 
-const PEDIDOS_DEMO = [
-  { id: "PED-1082", hora: "11:42 hs", preventista: "Ian Torres", ruta: "Ruta 01 - Quilmes", cliente: "Almacén Los Nietos", direccion: "Av. Calchaquí 1420", condicion: "Resp. Inscripto", lista: "Mayorista A", bultos: 18, total: 148500, estado: "Ingresado", items: [
-    { nombre: "Aceite Girasol 1.5L", cant: "4 cjs", p_unit: 16200, subtotal: 64800 },
-    { nombre: "Harina 000 1kg", cant: "5 fdos", p_unit: 7500, subtotal: 37500 },
-    { nombre: "Azúcar Común 1kg", cant: "3 fdos", p_unit: 8400, subtotal: 25200 },
-    { nombre: "Fideos Guiseros 500g", cant: "6 cjs", p_unit: 3500, subtotal: 21000 }
-  ], nota: "Entregar antes de las 13:00 hs. Paga contra entrega en efectivo." },
-  { id: "PED-1081", hora: "11:15 hs", preventista: "Alex Gómez", ruta: "Ruta 03 - Bernal", cliente: "Supermercado El Trébol", direccion: "Zapiola 890", condicion: "Monotributo", lista: "Mayorista Especial", bultos: 32, total: 294800, estado: "En Preparación", items: [
-    { nombre: "Arroz Largo Fino 1kg", cant: "10 fdos", p_unit: 12500, subtotal: 125000 },
-    { nombre: "Puré de Tomate 520g", cant: "12 cjs", p_unit: 8900, subtotal: 106800 },
-    { nombre: "Galletitas Variadas", cant: "10 cjs", p_unit: 6300, subtotal: 63000 }
-  ], nota: "Descargar por portón lateral." },
-  { id: "PED-1080", hora: "10:54 hs", preventista: "Walter Pérez", ruta: "Ruta 02 - Ezpeleta", cliente: "Autoservicio Don Mario", direccion: "Calle 137 N° 230", condicion: "Resp. Inscripto", lista: "Mayorista A", bultos: 15, total: 112300, estado: "Ingresado", items: [
-    { nombre: "Yerba Mate 1kg", cant: "6 fdos", p_unit: 11200, subtotal: 67200 },
-    { nombre: "Café Molido 500g", cant: "4 cjs", p_unit: 11275, subtotal: 45100 }
-  ], nota: "Revisar vencimientos de la yerba." },
-  { id: "PED-1079", hora: "10:20 hs", preventista: "Ian Torres", ruta: "Ruta 01 - Quilmes", cliente: "Kiosco & Granja Central", direccion: "Rivadavia 415", condicion: "Consumidor Final", lista: "Minorista B", bultos: 9, total: 68400, estado: "En Depósito", items: [
-    { nombre: "Golosinas Surtidas", cant: "5 cjs", p_unit: 8200, subtotal: 41000 },
-    { nombre: "Chicles Menta x24", cant: "4 cjs", p_unit: 6850, subtotal: 27400 }
-  ], nota: "Cobro por transferencia al recibir." }
-];
+const PEDIDOS_DEMO = [];
 
-const LISTA_PREVENTISTAS = ["Ian Torres", "Alex Gómez", "Walter Pérez"];
+const LISTA_PREVENTISTAS = ["Walter", "Todos"];
 const LISTA_ESTADOS = ["Ingresado", "En Preparación", "En Depósito"];
 
 export default function MonitorPedidos() {
-  const [pedidos] = useState(PEDIDOS_DEMO);
+    const [pedidos, setPedidos] = useState([]);
+  const [cargandoPedidos, setCargandoPedidos] = useState(true);
+  const [preventistasReales, setPreventistasReales] = useState(["Todos", "Walter"]);
+
+  const cargarPedidosReales = async () => {
+    try {
+      setCargandoPedidos(true);
+      // 1. Pedidos en Supabase
+      const { data, error } = await supabase
+        .from("pedidos")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      let listaConsolidada = [];
+      if (!error && data && data.length > 0) {
+        listaConsolidada = data.map(p => ({
+          id: p.id || ("PED-" + String(p.created_at || Date.now()).slice(-4)),
+          hora: p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "En curso",
+          preventista: p.preventista || p.vendedor || "Walter",
+          ruta: p.ruta || "Ruta de Visita",
+          cliente: p.cliente || p.comercio_nombre || ("Comercio #" + (p.comercio_id || "")),
+          direccion: p.direccion || "En recorrido",
+          condicion: p.condicion || "Consumidor Final",
+          bultos: p.bultos || (Array.isArray(p.items) ? p.items.length : 1),
+          total: Number(p.total || p.total_pedido || 0),
+          estado: p.estado || "Ingresado",
+          items: Array.isArray(p.items) ? p.items : (Array.isArray(p.detalle) ? p.detalle : []),
+          nota: p.notas || p.nota || "Pedido registrado desde app móvil"
+        }));
+      }
+
+      // 2. Fallback de localStorage
+      const locales = JSON.parse(localStorage.getItem("pedidos_local") || "[]");
+      locales.forEach(loc => {
+        if (!listaConsolidada.some(p => String(p.id) === String(loc.id))) {
+          listaConsolidada.push({
+            id: loc.id || ("LOC-" + Date.now()),
+            hora: loc.fecha ? new Date(loc.fecha).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "En curso",
+            preventista: loc.preventista || "Walter",
+            ruta: "Ruta 01",
+            cliente: loc.cliente || loc.comercio_nombre || ("Comercio #" + (loc.comercio_id || "")),
+            direccion: loc.direccion || "Local",
+            condicion: "Consumidor Final",
+            bultos: Array.isArray(loc.items) ? loc.items.length : 1,
+            total: Number(loc.total || 0),
+            estado: "Ingresado",
+            items: Array.isArray(loc.items) ? loc.items : [],
+            nota: loc.notas || "Guardado en app"
+          });
+        }
+      });
+
+      setPedidos(listaConsolidada);
+      if (listaConsolidada.length > 0) {
+        setPedidoActivo(listaConsolidada[0]);
+      }
+
+      // 3. Extraer preventistas únicos reales sin inventos
+      const prevs = ["Todos", ...new Set(listaConsolidada.map(p => p.preventista).filter(Boolean))];
+      setPreventistasReales(prevs);
+
+    } catch (err) {
+      console.warn("Error leyendo pedidos:", err);
+    } finally {
+      setCargandoPedidos(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarPedidosReales();
+  }, []);
   const [filtroPreventista, setFiltroPreventista] = useState("Todos");
   const [filtroEstado, setFiltroEstado] = useState("Todos");
   const [pedidoActivo, setPedidoActivo] = useState(PEDIDOS_DEMO[0]);
@@ -56,44 +107,39 @@ export default function MonitorPedidos() {
     }
   };
 
-  const menuItems = [
-    { icon: "🗺️", label: "Monitoreo en Vivo (Mapa)", link: "/supervisor", active: false },
-    { icon: "🏪", label: "Comercios y Fichas", link: "/supervisor", active: false },
-    { icon: "🚚", label: "Rutas y Preventistas", link: "/supervisor", active: false },
-    { icon: "📦", label: "Pedidos y Ventas Diarias", link: "/pedidos", active: true },
-    { icon: "📊", label: "Reportes y Liquidaciones", link: "/supervisor", active: false }
-  ];
+  
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: esMovil ? "column" : "row", background: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif", color: "#0f172a" }}>
       {/* SIDEBAR PARA ESCRITORIO (Mac) O MENÚ MÓVIL DESPLEGABLE */}
-      {(!esMovil || menuAbierto) && (
-        <aside style={{ width: esMovil ? "100%" : "240px", background: "#0f172a", color: "#f8fafc", flexShrink: 0, display: "flex", flexDirection: "column", minHeight: esMovil ? "auto" : "100vh", position: esMovil ? "fixed" : "relative", top: 0, left: 0, right: 0, bottom: esMovil ? 0 : "auto", zIndex: 999 }}>
-          <div style={{ padding: "16px", borderBottom: "1px solid #1e293b", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontWeight: "800", fontSize: "16px", color: "#38bdf8", letterSpacing: "0.5px" }}>RutaComercio</div>
-              <div style={{ fontSize: "11px", color: "#94a3b8" }}>Suite de Supervisión</div>
-            </div>
-            {esMovil && (
-              <button onClick={() => setMenuAbierto(false)} style={{ background: "#334155", color: "#fff", border: "none", borderRadius: "6px", padding: "6px 10px", fontSize: "14px", cursor: "pointer" }}>✕ Cerrar</button>
-            )}
+      
+        <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      {/* BARRA SUPERIOR UNIFICADA CON LOS 3 PILARES EXACTOS */}
+      <header style={{ backgroundColor: "#0f172a", borderBottom: "1px solid #334155", padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "22px" }}>📦</span>
+          <div>
+            <h1 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#fff", letterSpacing: "-0.5px" }}>RutaComercio · Pedidos en Vivo</h1>
+            <p style={{ margin: 0, fontSize: "11px", color: "#94a3b8" }}>Despacho y Gestión de Comandas de Campo</p>
           </div>
+        </div>
 
-          <nav style={{ padding: "12px 8px", display: "flex", flexDirection: "column", gap: "6px", flex: 1, overflowY: "auto" }}>
-            {menuItems.map((it, idx) => (
-              <a key={idx} href={it.link} onClick={() => esMovil && setMenuAbierto(false)} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px", borderRadius: "8px", textDecoration: "none", fontSize: "13px", fontWeight: it.active ? "700" : "500", background: it.active ? "#2563eb" : "transparent", color: it.active ? "#ffffff" : "#94a3b8" }}>
-                <span>{it.icon}</span>
-                <span>{it.label}</span>
-              </a>
-            ))}
-          </nav>
-
-          <div style={{ padding: "14px 16px", borderTop: "1px solid #1e293b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <a href="/web" style={{ color: "#94a3b8", textDecoration: "none", fontSize: "12px" }}>← Salir a Web</a>
-            <span style={{ fontSize: "11px", color: "#4ade80", fontWeight: "700" }}>● En vivo</span>
-          </div>
-        </aside>
-      )}
+        {/* NAVEGACIÓN SUPERIOR: SÓLO LOS 3 PILARES QUE IMPORTAN */}
+        <nav style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <a href="/supervisor" style={{ padding: "7px 14px", borderRadius: "6px", backgroundColor: "#1e293b", color: "#cbd5e1", textDecoration: "none", fontSize: "12px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px", transition: "all 0.2s" }}>
+            <span>📡</span> Monitoreo en Vivo
+          </a>
+          <a href="/supervisor" style={{ padding: "7px 14px", borderRadius: "6px", backgroundColor: "#1e293b", color: "#cbd5e1", textDecoration: "none", fontSize: "12px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px", transition: "all 0.2s" }}>
+            <span>🗓️</span> Diseñador Hojas de Ruta
+          </a>
+          <span style={{ padding: "7px 14px", borderRadius: "6px", backgroundColor: "#2563eb", color: "#fff", fontSize: "12px", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px", boxShadow: "0 2px 8px rgba(37,99,235,0.4)" }}>
+            <span>📦</span> Pedidos en Vivo
+          </span>
+          <a href="/supervisor" style={{ marginLeft: "12px", padding: "7px 14px", borderRadius: "6px", backgroundColor: "#ef4444", color: "#fff", textDecoration: "none", fontSize: "12px", fontWeight: "700" }}>
+            ✕ Salir
+          </a>
+        </nav>
+      </header>
 
       {/* CONTENIDO PRINCIPAL */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -139,7 +185,7 @@ export default function MonitorPedidos() {
               <span style={{ fontSize: "11px", fontWeight: "700", color: "#475569" }}>👤 Vendedor:</span>
               <select value={filtroPreventista} onChange={e => setFiltroPreventista(e.target.value)} style={{ flex: 1, padding: "6px 8px", borderRadius: "6px", border: "1.5px solid #2563eb", fontSize: "12px", background: "#ffffff", color: "#0f172a", fontWeight: "700", outline: "none" }}>
                 <option value="Todos">Todos ({pedidos.length})</option>
-                {LISTA_PREVENTISTAS.map((p, i) => <option key={i} value={p}>{p}</option>)}
+                {preventistasReales.map((p, i) => <option key={i} value={p}>{p}</option>)}
               </select>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: "1 1 130px" }}>
@@ -233,6 +279,7 @@ export default function MonitorPedidos() {
           </div>
         </main>
       </div>
+    </div>
     </div>
   );
 }

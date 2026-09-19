@@ -136,7 +136,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
     setGuardando(true);
     try {
       const pedidoPayload = {
-        comercio_id: comercio?.id || 104,
+        comercio_id: comercio?.id || Date.now(),
         comercio_nombre: comercio?.nombre || 'Almacén Los Amigos',
         comercio_direccion: comercio?.direccion || 'Av. Mitre 4820, Avellaneda',
         preventista: usuario?.nombre || 'Alex Preventista',
@@ -168,7 +168,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
       if (enviarWsp) {
         const telLimpio = (comercio?.telefono || '1166646806').replace(/\D/g, '');
         const msj = encodeURIComponent(
-          `*📦 PEDIDO #${esAnexoOPrevio ? '104 (ACTUALIZADO)' : '104'} - ${comercio?.nombre || 'Comercio'}*\n` +
+          `*📦 PEDIDO #${comercio?.id ? String(comercio.id).slice(-4) : 'REF-' + Date.now().toString().slice(-4)} - ${comercio?.nombre || 'Comercio'}*\n` +
           `Preventista: ${usuario?.nombre || 'Alex'}\n` +
           `Medio de Pago: ${medioPago}\n` +
           `--------------------------\n` +
@@ -176,7 +176,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
           `\n--------------------------\n` +
           `*TOTAL A COBRAR: $${totalFinal.toLocaleString()} ARS*\n` +
           (observaciones ? `Notas: ${observaciones}\n` : '') +
-          `_RutaComercio · Comanda Oficial_`
+          `📋 *${(comercio?.empresa || 'Elifiant').toUpperCase()} · Comanda Oficial de Preventa*`
         );
         window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
       }
@@ -202,7 +202,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         </button>
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
-            {esAnexoOPrevio ? 'Modificar Pedido #104' : 'Toma de Pedido'}
+            {esAnexoOPrevio ? `Modificar Pedido #${comercio?.id ? String(comercio.id).slice(-4) : 'ACTIVO'}` : 'Toma de Pedido'}
           </h1>
           {esAnexoOPrevio && (
             <span style={{ fontSize: '11px', color: '#d97706', fontWeight: '700' }}>
@@ -221,7 +221,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <span style={{ backgroundColor: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase' }}>
-                Ficha #{comercio?.id || 104}
+                Ficha #{comercio?.id || 'LOCAL'}
               </span>
               <h2 style={{ margin: '4px 0 2px', fontSize: '17px', fontWeight: '800' }}>{comercio?.nombre || 'Almacén Los Amigos'}</h2>
               <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>📍 {comercio?.direccion || 'Av. Mitre 4820, Avellaneda'}</p>
@@ -238,7 +238,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
           <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '12px', padding: '12px', marginBottom: '16px', display: 'flex', gap: '10px' }}>
             <span style={{ fontSize: '20px' }}>✏️</span>
             <div>
-              <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>Modificando Pedido #104 (Unificación Activa)</div>
+              <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>Modificando Pedido Unificado en Curso</div>
               <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#1e3a8a' }}>
                 Los nuevos ítems se unificarán en una <strong>sola comanda de reparto</strong> antes del despacho del camión.
               </p>
@@ -466,7 +466,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
               <span>✅ Comanda Registrada y Enviada</span>
             ) : esAnexoOPrevio ? (
               <>
-                <span>🔁 Actualizar y Reenviar Pedido #104</span>
+                <span>🔁 Actualizar y Reenviar Pedido</span>
                 <span style={{ fontSize: '11px', fontWeight: 'normal', opacity: 0.9 }}>Comanda Única · Sincroniza Depósito, WhatsApp y Supervisor</span>
               </>
             ) : (
