@@ -184,7 +184,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
           `--------------------------\n` +
           itemsPedido.map(it => `• ${it.cant}x ${it.nombre} (${it.bonif > 0 ? it.bonif + '% OFF' : 'Neto'}): $${((it.precioLista * it.cant) * (1 - it.bonif / 100)).toLocaleString()}`).join('\n') +
           `\n--------------------------\n` +
-          `*TOTAL A COBRAR: $${totalFinal.toLocaleString()} ARS*\n` +
+          `*IMPORTE del PEDIDO: $${totalFinal.toLocaleString()} ARS*\n` +
           (observaciones ? `Notas: ${observaciones}\n` : '') +
           `📋 *${(comercio?.empresa || 'Elifiant').toUpperCase()} · Comanda Oficial de Preventa*`
         );
