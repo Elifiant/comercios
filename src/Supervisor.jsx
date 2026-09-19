@@ -74,6 +74,10 @@ export default function Supervisor() {
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [comercioFoco, setComercioFoco] = useState(null);
   const [comercioDetalleModal, setComercioDetalleModal] = useState(null);
+  const [editPrevFicha, setEditPrevFicha] = useState("");
+  const [editDiaFicha, setEditDiaFicha] = useState("");
+  const [guardandoFicha, setGuardandoFicha] = useState(false);
+  const [msgExitoFicha, setMsgExitoFicha] = useState(false);
   const [filtroEmpresa, setFiltroEmpresa] = useState("TODAS");
   const [secuenciaPersonalizada, setSecuenciaPersonalizada] = useState([]);
   const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
@@ -271,6 +275,76 @@ export default function Supervisor() {
     a.download = "reporte_supervisor_" + hoyStr + ".csv";
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  
+  
+  const cerrarModalComercioFicha = () => {
+    try {
+      if (typeof audioActivoObj !== "undefined" && audioActivoObj && typeof audioActivoObj.pause === "function") {
+        audioActivoObj.pause();
+      }
+    } catch(e) {}
+    try { setReproduciendoAudio(false); } catch(e) {}
+    try { setMsgExitoFicha(false); } catch(e) {}
+    setComercioDetalleModal(null);
+  };
+
+  const guardarReasignacionComercio = async () => {
+    if (!comercioDetalleModal) return;
+    setGuardandoFicha(true);
+    try {
+      const pFinal = String(editPrevFicha || comercioDetalleModal.preventista || "Walter").trim();
+      const dFinal = editDiaFicha ? String(editDiaFicha).trim().toUpperCase() : "";
+      
+      const { error } = await supabase
+        .from("comercios")
+        .update({ preventista: pFinal, dia_visita: dFinal })
+        .eq("id", comercioDetalleModal.id);
+        
+      if (error) throw error;
+      
+      // 1. Actualizamos el estado global de comercios
+      const nuevosComercios = (comercios || []).map(item => {
+        if (item.id === comercioDetalleModal.id) {
+          return { ...item, preventista: pFinal, dia_visita: dFinal };
+        }
+        return item;
+      });
+      setComercios(nuevosComercios);
+      
+      // 2. Actualizamos la modal abierta para que se vea reflejado al instante
+      setComercioDetalleModal(prev => prev ? { ...prev, preventista: pFinal, dia_visita: dFinal } : null);
+      setEditPrevFicha(pFinal);
+      setEditDiaFicha(dFinal);
+      
+      // 3. Reactividad inmediata en la secuencia del mapa y lista de paradas
+      if (typeof setSecuenciaPersonalizada === "function") {
+        setSecuenciaPersonalizada(prev => {
+          // Si estamos filtrando por un día específico y el comercio ya no pertenece a ese día, lo quitamos de la vista activa
+          if (filtroDiaMapa && filtroDiaMapa !== "TODOS") {
+            if (dFinal !== filtroDiaMapa) {
+              return (prev || []).filter(item => item.id !== comercioDetalleModal.id);
+            }
+          }
+          // Si pertenece al día o estamos en TODOS, actualizamos sus datos en la lista activa
+          return (prev || []).map(item => {
+            if (item.id === comercioDetalleModal.id) {
+              return { ...item, preventista: pFinal, dia_visita: dFinal };
+            }
+            return item;
+          });
+        });
+      }
+      
+      setMsgExitoFicha(true);
+      setTimeout(() => setMsgExitoFicha(false), 2000);
+    } catch (err) {
+      console.error("Error al reasignar comercio:", err);
+      alert("Error al guardar reasignación: " + (err.message || "Verifique conexión"));
+    } finally {
+      setGuardandoFicha(false);
+    }
   };
 
   const handleToggleAudioFicha = (audioBase64) => {
@@ -503,7 +577,7 @@ export default function Supervisor() {
                 secuenciaPersonalizada.map((c, i) => (
                   <div
                     key={c.id || i}
-                    onClick={() => { setComercioFoco(c); setComercioDetalleModal(c); }}
+                    onClick={() => { setComercioFoco(c); setComercioDetalleModal(c); setEditPrevFicha(c.preventista || "Walter"); setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : ""); }}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -612,7 +686,7 @@ export default function Supervisor() {
                           <p style={{ margin: "2px 0 0 0", fontSize: "10px", color: "#64748b" }}>{c.direccion || "Sin dirección"}</p>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); setComercioDetalleModal(c); }}
+                            onClick={(e) => { e.stopPropagation(); setComercioDetalleModal(c); setEditPrevFicha(c.preventista || "Walter"); setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : ""); }}
                             style={{ marginTop: "6px", width: "100%", background: "#2563eb", color: "#fff", border: "none", borderRadius: "4px", padding: "4px", fontSize: "10px", fontWeight: "bold", cursor: "pointer" }}
                           >
                             Ver Ficha & Audio
@@ -637,7 +711,7 @@ export default function Supervisor() {
                   <span style={{ fontSize: "10px", fontWeight: "bold", background: "#2563eb", padding: "2px 6px", borderRadius: "4px", textTransform: "uppercase" }}>Ficha Operativa</span>
                   <h3 style={{ margin: "2px 0 0 0", fontSize: "15px", fontWeight: "800" }}>{comercioDetalleModal.nombre || ("Comercio #" + comercioDetalleModal.id)}</h3>
                 </div>
-                <button onClick={() => { if (audioActivoObj) audioActivoObj.pause(); setReproduciendoAudio(false); setComercioDetalleModal(null); }} style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", width: "26px", height: "26px", borderRadius: "50%", cursor: "pointer", fontSize: "14px", fontWeight: "bold" }}>✕</button>
+                <button type="button" onClick={cerrarModalComercioFicha} style={{ background: "rgba(255,255,255,0.25)", border: "none", color: "#fff", width: "32px", height: "32px", borderRadius: "50%", cursor: "pointer", fontSize: "16px", fontWeight: "bold", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>✕</button>
               </div>
 
               <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -694,8 +768,66 @@ export default function Supervisor() {
                     <img src={comercioDetalleModal.foto_url} alt="" style={{ width: "70px", height: "70px", objectFit: "cover", borderRadius: "6px", border: "1px solid #cbd5e1" }} />
                   )}
                   <div style={{ flex: 1, fontSize: "11px" }}>
-                    <div>👤 Preventista: <strong>{comercioDetalleModal.preventista || "Walter"}</strong></div>
-                    <div>🗓️ Día: <strong>{comercioDetalleModal.dia_visita || "No asignado"}</strong></div>
+                    
+              {/* REASIGNACIÓN DIRECTA DE PREVENTISTA Y DÍA DE VISITA */}
+              <div style={{ marginTop: "10px", padding: "10px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: "11px", fontWeight: "800", color: "#0f172a", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  ⚙️ Reasignar Preventista y Ruta
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "10px", fontWeight: "bold", color: "#64748b", marginBottom: "3px" }}>👤 Preventista Asignado</label>
+                    <select
+                      value={editPrevFicha || comercioDetalleModal.preventista || "Walter"}
+                      onChange={(e) => setEditPrevFicha(e.target.value)}
+                      style={{ width: "100%", padding: "6px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#fff", color: "#0f172a", fontWeight: "600" }}
+                    >
+                      {listaPreventistas.map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "10px", fontWeight: "bold", color: "#64748b", marginBottom: "3px" }}>🗓️ Día de Visita</label>
+                    <select
+                      value={editDiaFicha ? String(editDiaFicha).trim().toUpperCase() : ""}
+                      onChange={(e) => setEditDiaFicha(e.target.value)}
+                      style={{ width: "100%", padding: "6px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#fff", color: "#0f172a", fontWeight: "600" }}
+                    >
+                      <option value="">(Sin asignar)</option>
+                      {["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO"].map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={guardarReasignacionComercio}
+                  disabled={guardandoFicha}
+                  style={{
+                    width: "100%",
+                    marginTop: "8px",
+                    background: guardandoFicha ? "#94a3b8" : "#2563eb",
+                    color: "#fff",
+                    border: "none",
+                    padding: "7px 12px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: guardandoFicha ? "not-allowed" : "pointer",
+                    boxShadow: "0 2px 6px rgba(37,99,235,0.2)"
+                  }}
+                >
+                  {guardandoFicha ? "Guardando en Supabase..." : "💾 Guardar Reasignación"}
+                </button>
+                {msgExitoFicha && (
+                  <div style={{ marginTop: "6px", fontSize: "11px", color: "#16a34a", fontWeight: "bold", textAlign: "center" }}>
+                    ✅ Reasignado con éxito en Supabase y mapa
+                  </div>
+                )}
+              </div>
+
                     {comercioDetalleModal.telefono && (
                       <a href={"https://wa.me/" + comercioDetalleModal.telefono.replace(/[^0-9]/g, "")} target="_blank" rel="noreferrer" style={{ background: "#22c55e", color: "#fff", padding: "4px 8px", borderRadius: "4px", textDecoration: "none", fontSize: "11px", fontWeight: "bold", display: "inline-block", marginTop: "4px" }}>
                         💬 WhatsApp
