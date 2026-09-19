@@ -57,6 +57,50 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 
 export default function App() {
 
+  const emitirActividadEnVivo = async () => {
+    try {
+      const email = sesion?.user?.email || perfil?.email;
+      const prevNombre = perfil?.nombre || "Walter";
+      const emp = perfil?.empresa || "Elifiant";
+      if (!email) return;
+      
+      // Actualiza perfiles
+      await supabase.from("perfiles").update({ 
+        ultima_conexion: new Date().toISOString(),
+        activo_hoy: true 
+      }).eq("email", email);
+
+      // Registra en visitas para que el Supervisor lo tome como actividad hoy
+      await supabase.from("visitas").insert([{
+        preventista: prevNombre,
+        empresa: emp,
+        fecha: new Date().toISOString().slice(0, 10),
+        hora: new Date().toLocaleTimeString(),
+        tipo: "actividad_app"
+      }]);
+    } catch(err) {
+      console.warn("Actividad en vivo:", err.message);
+    }
+  };
+  
+
+  const registrarActividadEnVivo = async () => {
+    try {
+      const emailUsuario = sesion?.user?.email || perfil?.email;
+      if (!emailUsuario) return;
+      await supabase
+        .from("perfiles")
+        .update({ 
+          ultima_conexion: new Date().toISOString(),
+          activo_hoy: true 
+        })
+        .eq("email", emailUsuario);
+    } catch (e) {
+      console.warn("Aviso actividad:", e.message);
+    }
+  };
+
+
   // Estados para notas de voz en Ficha de Comercio
   const [grabandoAudio, setGrabandoAudio] = useState(false);
   const [tiempoGrabacion, setTiempoGrabacion] = useState(0);
@@ -248,7 +292,7 @@ export default function App() {
       const empNombre = (typeof perfil !== 'undefined' && perfil?.empresa) ? perfil.empresa : 'Elifiant';
 
       if (!jornadaActiva) {
-        setJornadaActiva(true);
+        setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
         setHoraInicioJornada(ahora);
         localStorage.setItem('jornada_activa', 'true');
         localStorage.setItem('hora_inicio_jornada', ahora);
@@ -447,7 +491,7 @@ export default function App() {
     localStorage.setItem("rutacomercio_jornada_activa", "true");
     localStorage.setItem("rutacomercio_inicio_jornada", timestampInicio);
     if (typeof setInicioTimestamp === "function") setInicioTimestamp(timestampInicio);
-    setJornadaActiva(true);
+    setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
     setHoraInicioJornada(h);
     setTiempoTranscurrido('0m');
     try {
@@ -468,7 +512,7 @@ export default function App() {
       resumen = horas > 0 ? (horas + 'h ' + mins + 'm') : (mins + 'm');
     }
     alert('🏁 Jornada cerrada. Tiempo total de trabajo: ' + resumen);
-    setJornadaActiva(false);
+    setJornadaActiva(false); emitirActividadEnVivo();
     setHoraInicioJornada('');
     setTiempoTranscurrido('0m');
     try {
@@ -484,7 +528,7 @@ export default function App() {
       const activa = localStorage.getItem("jornada_activa") === "true";
       if (!activa) {
         const ahora = Date.now().toString();
-        setJornadaActiva(true);
+        setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
         setInicioJornada(ahora);
         localStorage.setItem("jornada_activa", "true");
         localStorage.setItem("inicio_jornada", ahora);
@@ -493,6 +537,7 @@ export default function App() {
   };
 
   const agregarComercioInmediato = async () => {
+    registrarActividadEnVivo();
     activarJornadaSiEstaInactiva();
     const lat = (posicionActual && posicionActual[0]) ? posicionActual[0] : -34.719;
     const lng = (posicionActual && posicionActual[1]) ? posicionActual[1] : -58.265;
@@ -1295,13 +1340,13 @@ export default function App() {
             <button
               onClick={() => {
                 if (jornadaActiva) {
-                    setJornadaActiva(false);
+                    setJornadaActiva(false); emitirActividadEnVivo();
                     localStorage.removeItem("rutacomercio_jornada_activa");
                     localStorage.removeItem("rutacomercio_inicio_jornada");
                     if (typeof setInicioTimestamp === "function") setInicioTimestamp(null);
                   } else {
                     const timestampInicio = Date.now().toString();
-                    setJornadaActiva(true);
+                    setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
                     localStorage.setItem("rutacomercio_jornada_activa", "true");
                     localStorage.setItem("rutacomercio_inicio_jornada", timestampInicio);
                     if (typeof setInicioTimestamp === "function") setInicioTimestamp(timestampInicio);

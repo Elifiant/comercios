@@ -4,92 +4,85 @@ import { supabase } from './supabase';
 export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExistente = null }) {
   const [busqueda, setBusqueda] = useState('');
   const [categoriaSel, setCategoriaSel] = useState('TODOS');
+  const [pedidoCargadoPrevio, setPedidoCargadoPrevio] = useState(pedidoExistente);
+  const esAnexoOPrevio = Boolean(pedidoExistente || pedidoCargadoPrevio);
   const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || []);
   const [medioPago, setMedioPago] = useState('Efectivo');
-  const [observaciones, setObservaciones] = useState(pedidoExistente?.observaciones || "");
+  const [observaciones, setObservaciones] = useState(pedidoExistente?.observaciones || '');
   const [enviarWsp, setEnviarWsp] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [exitoGuardado, setExitoGuardado] = useState(false);
+  // Recuperación automática del último pedido del comercio
+  useEffect(() => {
+    if (esAnexoOPrevio) return;
+    try {
+      const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
+      const previo = historico.find(p => String(p.comercio_id) === String(comercio?.id));
+      if (previo && previo.items && previo.items.length > 0) {
+        setItemsPedido(previo.items);
+        if (previo.observaciones) setObservaciones(previo.observaciones);
+        if (previo.medio_pago) setMedioPago(previo.medio_pago);
+        setPedidoCargadoPrevio(previo);
+      }
+    } catch (e) {
+      console.warn("Aviso al recuperar pedido:", e);
+    }
+  }, [comercio]);
 
   // Catálogo base de artículos disponibles
-    // Catálogo base de preventa (fallback seguro para calle)
-    // Catálogo base enriquecido con múltiples artículos y códigos "104"
   
   const [catalogo, setCatalogo] = useState([]);
-  const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
+  const [cargandoCat, setCargandoCat] = useState(true);
 
   useEffect(() => {
     async function cargarArticulosReales() {
       try {
-        // Intento 1: Traer desde lista_productos cruzado con productos
-        const { data: dataLista, error: errLista } = await supabase
+        // Traemos de lista_productos
+        const { data: lpData } = await supabase
           .from("lista_productos")
-          .select(`
-            id,
-            codigo_lista,
-            detalle_en_lista,
-            precio,
-            productos (
-              id,
-              codigo_cge,
-              nombre,
-              marca,
-              presentacion,
-              empresa
-            )
-          `)
-          .eq("activo", true);
+          .select("id, codigo_lista, detalle_en_lista, precio, producto_id")
+          .limit(1000);
 
-        if (!errLista && dataLista && dataLista.length > 0) {
-          const prods = dataLista.map(item => ({
-            id: item.id,
-            codigo: item.productos?.codigo_cge || item.codigo_lista || "S/C",
-            nombre: item.productos?.nombre || item.detalle_en_lista || "Producto sin nombre",
-            marca: item.productos?.marca || "",
-            presentacion: item.productos?.presentacion || "",
-            precio: parseFloat(item.precio) || 0
+        if (lpData && lpData.length > 0) {
+          const items = lpData.map(lp => ({
+            id: lp.id,
+            codigo: lp.codigo_lista || "S/C",
+            marca: "General",
+            nombre: lp.detalle_en_lista || "Artículo",
+            precio: Number(lp.precio) || 0,
+            categoria: "TODOS"
           }));
-          setCatalogo(prods);
+          setCatalogo(items);
         } else {
-          // Intento 2 (Fallback directo): Traer directo de la tabla productos
-          const { data: dataProds } = await supabase
+          // Fallback a productos directo
+          const { data: pData } = await supabase
             .from("productos")
-            .select("*")
-            .eq("activo", true);
-
-          if (dataProds && dataProds.length > 0) {
-            setCatalogo(dataProds.map(p => ({
+            .select("id, codigo_cge, nombre, presentacion, marca")
+            .limit(1000);
+          if (pData && pData.length > 0) {
+            setCatalogo(pData.map(p => ({
               id: p.id,
               codigo: p.codigo_cge || "S/C",
-              nombre: p.nombre || "Sin nombre",
-              marca: p.marca || "",
-              presentacion: p.presentacion || "",
-              precio: 0
+              marca: p.marca || "General",
+              nombre: p.nombre || "Artículo",
+              precio: 0,
+              categoria: "TODOS"
             })));
           }
         }
       } catch (err) {
-        console.error("Error cargando productos de Supabase:", err);
+        console.warn("Aviso catalogo:", err);
       } finally {
-        setCargandoCatalogo(false);
+        setCargandoCat(false);
       }
     }
     cargarArticulosReales();
   }, []);
 
 
-  // Búsqueda inteligente por código, nombre o marca
   const catalogoFiltrado = catalogo.filter(p => {
-    const q = (busqueda || "").toLowerCase().trim();
-    const codLimpio = (p.codigo || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const qLimpio = q.replace(/[^a-z0-9]/g, "");
-
-    const coincideCodigo = qLimpio && (codLimpio.includes(qLimpio) || String(p.id).includes(qLimpio));
-    const coincideNombre = (p.nombre || "").toLowerCase().includes(q);
-    const coincideMarca = (p.marca || "").toLowerCase().includes(q);
-    const coincideTexto = !q || coincideCodigo || coincideNombre || coincideMarca;
-
-    const coincideCat = categoriaSel === "TODOS" || p.categoria === categoriaSel;
+    const coincideTexto = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || p.codigo.toLowerCase().includes(busqueda.toLowerCase()) || p.marca.toLowerCase().includes(busqueda.toLowerCase());
+    const coincideCat = categoriaSel === 'TODOS' || p.categoria === categoriaSel;
     return coincideTexto && coincideCat;
   });
 
@@ -98,7 +91,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
     if (yaExiste) {
       setItemsPedido(itemsPedido.map(it => it.codigo === producto.codigo ? { ...it, cant: it.cant + 1 } : it));
     } else {
-      setItemsPedido([{
+      setItemsPedido([...itemsPedido, {
         id: Date.now(),
         codigo: producto.codigo,
         marca: producto.marca,
@@ -106,9 +99,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         precioLista: producto.precio,
         bonif: 0,
         cant: 1,
-        esNuevo: !!pedidoExistente,
+        esNuevo: !!esAnexoOPrevio,
         nota: ''
-      }, ...itemsPedido]);
+      }]);
     }
   };
 
@@ -154,7 +147,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         medio_pago: medioPago,
         observaciones: observaciones,
         items: itemsPedido,
-        es_anexo: !!pedidoExistente,
+        es_anexo: !!esAnexoOPrevio,
         estado: 'Confirmado / Listo para Reparto',
         fecha: new Date().toISOString()
       };
@@ -175,7 +168,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
       if (enviarWsp) {
         const telLimpio = (comercio?.telefono || '1166646806').replace(/\D/g, '');
         const msj = encodeURIComponent(
-          `*📦 PEDIDO #${pedidoExistente ? '104 (ACTUALIZADO)' : '104'} - ${comercio?.nombre || 'Comercio'}*\n` +
+          `*📦 PEDIDO #${esAnexoOPrevio ? '104 (ACTUALIZADO)' : '104'} - ${comercio?.nombre || 'Comercio'}*\n` +
           `Preventista: ${usuario?.nombre || 'Alex'}\n` +
           `Medio de Pago: ${medioPago}\n` +
           `--------------------------\n` +
@@ -209,9 +202,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         </button>
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
-            {pedidoExistente ? 'Modificar Pedido #104' : 'Toma de Pedido'}
+            {esAnexoOPrevio ? 'Modificar Pedido #104' : 'Toma de Pedido'}
           </h1>
-          {pedidoExistente && (
+          {esAnexoOPrevio && (
             <span style={{ fontSize: '11px', color: '#d97706', fontWeight: '700' }}>
               ⏱️ Ventana abierta: 15 min restantes
             </span>
@@ -241,7 +234,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         </div>
 
         {/* Alerta de Reedición / Anexo Rápido */}
-        {pedidoExistente && (
+        {esAnexoOPrevio && (
           <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '12px', padding: '12px', marginBottom: '16px', display: 'flex', gap: '10px' }}>
             <span style={{ fontSize: '20px' }}>✏️</span>
             <div>
@@ -298,70 +291,20 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
           <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '8px', marginBottom: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
             <div style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', padding: '4px 8px', textTransform: 'uppercase' }}>Artículos Encontrados</div>
             {catalogoFiltrado.map(prod => (
-            <div
-              key={prod.id || prod.codigo}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "4px 8px",
-                background: "#ffffff",
-                borderRadius: "6px",
-                border: "1px solid #e2e8f0",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
-                gap: "8px"
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "4px", lineHeight: "1" }}>
-                  <span style={{ fontSize: "9px", fontWeight: "700", color: "#2563eb", background: "#eff6ff", padding: "1px 4px", borderRadius: "3px" }}>
-                    {prod.codigo || "S/C"}
-                  </span>
-                  {prod.marca && (
-                    <span style={{ fontSize: "10px", fontWeight: "600", color: "#64748b", textTransform: "uppercase" }}>
-                      {prod.marca}
-                    </span>
-                  )}
+              <div key={prod.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '800' }}>{prod.codigo} · {prod.marca}</div>
+                  <div style={{ fontSize: '13px', fontWeight: '700' }}>{prod.nombre}</div>
+                  <div style={{ fontSize: '12px', color: '#16a34a', fontWeight: '800' }}>${prod.precio.toLocaleString()}</div>
                 </div>
-                <div style={{ fontSize: "12px", fontWeight: "600", color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: "1px" }}>
-                  {prod.nombre || prod.detalle_en_lista}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", marginTop: "1px" }}>
-                  <span style={{ fontWeight: "700", color: "#2563eb" }}>
-                    $ {Number(prod.precio || 0).toLocaleString("es-AR")}
-                  </span>
-                  {prod.stock !== undefined && (
-                    <span style={{ color: "#64748b", fontSize: "10px" }}>
-                      · Stock: {prod.stock}u
-                    </span>
-                  )}
-                </div>
+                <button
+                  onClick={() => { agregarAlPedido(prod); setBusqueda(''); }}
+                  style={{ backgroundColor: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '6px 12px', fontWeight: '800', fontSize: '12px', cursor: 'pointer' }}
+                >
+                  ➕ Agregar
+                </button>
               </div>
-
-              <button
-                type="button"
-                onClick={() => agregarAlPedido(prod)}
-                style={{
-                  background: "#2563eb",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "5px",
-                  padding: "3px 8px",
-                  fontSize: "11px",
-                  fontWeight: "700",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "2px",
-                  flexShrink: 0,
-                  height: "26px",
-                  boxShadow: "0 1px 4px rgba(37,99,235,0.2)"
-                }}
-              >
-                +1 Bulto
-              </button>
-            </div>
-          ))}
+            ))}
           </div>
         )}
 
@@ -503,7 +446,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
             disabled={guardando || exitoGuardado}
             style={{
               width: '100%',
-              backgroundColor: exitoGuardado ? '#16a34a' : pedidoExistente ? '#d97706' : '#2563eb',
+              backgroundColor: exitoGuardado ? '#16a34a' : esAnexoOPrevio ? '#d97706' : '#2563eb',
               color: '#ffffff',
               border: 'none',
               borderRadius: '12px',
@@ -521,7 +464,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
               <span>⏳ Procesando Comanda...</span>
             ) : exitoGuardado ? (
               <span>✅ Comanda Registrada y Enviada</span>
-            ) : pedidoExistente ? (
+            ) : esAnexoOPrevio ? (
               <>
                 <span>🔁 Actualizar y Reenviar Pedido #104</span>
                 <span style={{ fontSize: '11px', fontWeight: 'normal', opacity: 0.9 }}>Comanda Única · Sincroniza Depósito, WhatsApp y Supervisor</span>
