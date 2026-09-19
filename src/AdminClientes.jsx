@@ -146,45 +146,34 @@ export default function AdminClientes() {
   };
 
   const abrirEditarEmpresa = (emp) => {
-    let t = {};
-    try {
-      const guardadas = JSON.parse(localStorage.getItem("tarifas_empresas") || "{}");
-      t = guardadas[emp] || {};
-    } catch(e){}
+    const t = tarifasMap[emp] || {};
     setEmpresaAEditar(emp);
-    setDiaCobroModal(t.dia_cobro || t.diaCobro || (diasCorteMap[emp] ? diasCorteMap[emp].dia : "05"));
-    setEstadoCobroModal(t.estado_pago || (diasCorteMap[emp] ? diasCorteMap[emp].estado : "Al Día"));
-    setTarifaEditada(t.valor || t.tarifa || "13000");
-    setCupoEditado(t.cupo || (diasCorteMap[emp] ? String(diasCorteMap[emp].cupo || 5) : "5"));
-    setMonedaEditada(t.moneda || "ARS");
-    setTipoTarifaEditada(t.tipo_tarifa || t.tipo || "preventista");
-    setPaisEditado(t.pais || "Argentina");
+    if (typeof setDiaCobroModal === "function") setDiaCobroModal(t.dia || t.diaCobro || t.dia_cobro || 10);
+    if (typeof setEstadoCobroModal === "function") setEstadoCobroModal(t.estado || "al_dia");
+    if (typeof setCupoEditado === "function") setCupoEditado(t.cupo || 5);
+    if (typeof setTarifaEditada === "function") setTarifaEditada(t.tarifa || 35000);
+    if (typeof setMonedaEditada === "function") setMonedaEditada(t.moneda || "ARS");
     setMostrarModalEditar(true);
   };
 
-  const guardarEdicionEmpresa = () => {
+  const guardarEdicionEmpresa = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!empresaAEditar) return;
-    const colorEstado = estadoCobroModal === "Al Día" ? "#10b981" : estadoCobroModal === "Por Vencer" ? "#f59e0b" : "#ef4444";
+    const colorEstado = estadoCobroModal === "al_dia" ? "#22c55e" : estadoCobroModal === "vence_hoy" ? "#f59e0b" : "#ef4444";
     const datosActualizados = {
       ...(tarifasMap[empresaAEditar] || {}),
-      diaCobro: diaCobroModal,
-      dia_cobro: diaCobroModal,
-      estado_pago: estadoCobroModal,
-      valor: tarifaEditada,
-      tarifa: tarifaEditada,
+      dia: Number(diaCobroModal) || 10, diaCobro: Number(diaCobroModal) || 10, dia_cobro: Number(diaCobroModal) || 10,
+      estado: estadoCobroModal || "al_dia",
+      color: colorEstado,
       cupo: Number(cupoEditado) || 5,
-      moneda: monedaEditada,
-      tipo: tipoTarifaEditada,
-      tipo_tarifa: tipoTarifaEditada,
-      pais: paisEditado
+      tarifa: Number(tarifaEditada) || 35000,
+      moneda: monedaEditada || "ARS"
     };
     const nuevoMapa = { ...tarifasMap, [empresaAEditar]: datosActualizados };
     setTarifasMap(nuevoMapa);
-    try { localStorage.setItem("tarifas_empresas", JSON.stringify(nuevoMapa)); } catch(e){}
-    setDiasCorteMap(prev => ({
-      ...prev,
-      [empresaAEditar]: { dia: diaCobroModal, estado: estadoCobroModal, color: colorEstado, cupo: Number(cupoEditado) || 5 }
-    }));
+    try {
+      localStorage.setItem("rutacomercio_tarifas_empresas", JSON.stringify(nuevoMapa));
+    } catch (err) {}
     setMostrarModalEditar(false);
   };
 
@@ -225,22 +214,56 @@ export default function AdminClientes() {
     }
   };
   
-  const guardarPago = (e) => {
-    e.preventDefault();
-    const nuevo = {
-      id: Date.now(),
-      fecha: "Hoy, recién",
-      empresa: empresaPago,
-      monto: montoPago,
-      moneda: monedaPago,
-      metodo: metodoPago,
-      ref: comprobantePago || "OP-" + Math.floor(100000 + Math.random() * 900000),
-      estado: "Confirmado"
+  const guardarPago = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!empresaPago) return;
+    
+    const nuevoPagoObj = {
+      empresa: String(empresaPago),
+      monto: Number(montoPago) || 0,
+      moneda: String(monedaPago || "ARS"),
+      metodo: String(metodoPago || "Transferencia"),
+      comprobante: String(comprobantePago || "OP-" + Math.floor(100000 + Math.random() * 900000))
     };
-    setHistorialPagos(prev => [nuevo, ...prev]);
-    setDiasCorteMap(prev => ({ ...prev, [empresaPago]: { ...(prev[empresaPago] || { dia: "05", cupo: 5 }), estado: "Al Día", color: "#10b981" } }));
+
+    try {
+      const { data, error } = await supabase.from("pagos_empresas").insert([nuevoPagoObj]).select();
+      if (error) {
+        console.error("Error al guardar en Supabase:", error.message);
+        alert("Aviso Supabase: " + error.message);
+      } else {
+        alert("✓ ¡Pago de " + empresaPago + " registrado y guardado en Supabase!");
+      }
+    } catch(err) {
+      console.error("Excepción al guardar pago:", err.message);
+      alert("Excepción: " + err.message);
+    }
+
+    if (typeof setHistorialPagos === "function") {
+      setHistorialPagos(prev => [{ ...nuevoPagoObj, id: Date.now(), fecha: new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" }) }, ...(Array.isArray(prev) ? prev : [])]);
+    }
+
+    if (typeof setTarifasMap === "function") {
+      setTarifasMap(prev => {
+        const tActual = (prev && prev[empresaPago]) || {};
+        const actualizado = { ...tActual, estado: "al_dia", color: "#22c55e" };
+        const mapaNuevo = { ...prev, [empresaPago]: actualizado };
+        try {
+          localStorage.setItem("rutacomercio_tarifas_empresas", JSON.stringify(mapaNuevo));
+        } catch(err){}
+        return mapaNuevo;
+      });
+    }
+
+    if (monedaPago === "ARS" && typeof setCobradoARS === "function") {
+      setCobradoARS(prev => (Number(prev) || 0) + (Number(montoPago) || 0));
+    } else if (monedaPago === "USD" && typeof setCobradoUSD === "function") {
+      setCobradoUSD(prev => (Number(prev) || 0) + (Number(montoPago) || 0));
+    } else if (monedaPago === "USDT" && typeof setCobradoUSDT === "function") {
+      setCobradoUSDT(prev => (Number(prev) || 0) + (Number(montoPago) || 0));
+    }
+
     setMostrarModalPago(false);
-    setComprobantePago("");
   };
 
   const crearNuevoPreventista = async (e) => {
@@ -305,7 +328,7 @@ export default function AdminClientes() {
   empresas.forEach(emp => {
     const t = tarifasMap[emp] || {};
     const cInfo = diasCorteMap[emp] || {};
-    const diaCorte = Number(t.diaCobro || t.dia_cobro || cInfo.dia || 5);
+    const diaCorte = Number(t.dia || t.diaCobro || t.dia_cobro || (cInfo && cInfo.dia) || 10);
     const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase()).length;
     const valor = Number(t.valor || t.tarifa || (t.moneda === "ARS" ? 10000 : 50));
     const moneda = t.moneda || "ARS";
@@ -506,7 +529,7 @@ export default function AdminClientes() {
                 const tipo = t.tipo || t.tipo_tarifa || "preventista";
                 const totalEst = tipo === "preventista" ? (prevsCount * Number(valor)) : Number(valor);
                 const bandera = (t.pais === "México") ? "🇲🇽" : (t.pais === "Colombia") ? "🇨🇴" : (t.pais === "Brasil") ? "🇧🇷" : (t.pais === "Internacional") ? "🌐" : "🇦🇷";
-                const diaCorte = t.diaCobro || t.dia_cobro || cInfoRaw.dia || "05";
+                const diaCorte = t.dia || t.diaCobro || t.dia_cobro || (cInfoRaw && cInfoRaw.dia) || "10";
 
                 return (
                   <tr key={emp} style={{ borderBottom: "1px solid #334155" }}>
@@ -754,6 +777,110 @@ export default function AdminClientes() {
           </div>
         </div>
       )}
+    
+      {/* MODAL: EDITAR EMPRESA (TARIFA, DÍA Y CUPO) */}
+      {mostrarModalEditar && empresaAEditar && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "480px", boxSizing: "border-box", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "18px", color: "#f8fafc" }}>✏️ Editar Empresa: <span style={{ color: "#38bdf8" }}>{empresaAEditar}</span></h3>
+              <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "18px", cursor: "pointer" }}>✕</button>
+            </div>
+            <form onSubmit={guardarEdicionEmpresa}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>🗓️ Día de Cobro (1-31)</label>
+                  <input type="number" min="1" max="31" value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>🚦 Estado de Facturación</label>
+                  <select value={estadoCobroModal} onChange={(e) => setEstadoCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="al_dia">🟢 Al Día</option>
+                    <option value="vence_hoy">🟡 Vence Pronto</option>
+                    <option value="mora">🔴 En Mora</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>💰 Tarifa Pactada</label>
+                  <input type="number" value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>💵 Moneda</label>
+                  <select value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="ARS">ARS ($)</option>
+                    <option value="USD">USD (u$s)</option>
+                    <option value="USDT">USDT (₮)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>👥 Cupo de Preventistas Autorizados</label>
+                <input type="number" min="1" max="100" value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                <span style={{ fontSize: "11px", color: "#64748b" }}>Si la empresa supera este límite en campo, el sistema te avisará en la grilla.</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}>Cancelar</button>
+                <button type="submit" style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}>💾 Guardar Cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    
+      {/* MODAL: REGISTRAR COBRO / PAGO DE SUSCRIPCIÓN */}
+      {mostrarModalPago && empresaPago && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "480px", boxSizing: "border-box", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "18px", color: "#f8fafc" }}>💳 Registrar Cobro: <span style={{ color: "#38bdf8" }}>{empresaPago}</span></h3>
+              <button type="button" onClick={() => setMostrarModalPago(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "18px", cursor: "pointer" }}>✕</button>
+            </div>
+            <form onSubmit={guardarPago}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>💰 Monto Recibido</label>
+                  <input type="number" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", fontSize: "15px", fontWeight: "bold" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>💵 Moneda</label>
+                  <select value={monedaPago} onChange={(e) => setMonedaPago(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="ARS">ARS ($)</option>
+                    <option value="USD">USD (u$s)</option>
+                    <option value="USDT">USDT (₮)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: "12px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>🏦 Medio de Pago Utilizado</label>
+                <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                  <option value="Transferencia / MP">🏦 Transferencia Bancaria / Mercado Pago</option>
+                  <option value="USDT / Crypto">🪙 USDT / Cripto (Paytaca, Binance, Lemon, Belo)</option>
+                  <option value="Efectivo">💵 Efectivo / Cobro Directo</option>
+                  <option value="Cheque">📑 Cheque de Terceros / eCheq</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>📑 N° de Comprobante / Hash / Ref (Opcional)</label>
+                <input type="text" value={comprobantePago} onChange={(e) => setComprobantePago(e.target.value)} placeholder="Ej. Transf #98432 / TXID..." style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button type="button" onClick={() => setMostrarModalPago(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}>Cancelar</button>
+                <button type="submit" style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}>✓ Confirmar Pago Recibido</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }
