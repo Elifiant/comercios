@@ -129,6 +129,12 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
   const totalFinal = subtotalBruto - totalDescuentos;
 
   const confirmarPedido = async () => {
+
+    // Timestamp internacional AAMMDD-HHMMSS (disponible para Supabase, histórico y WhatsApp)
+    const ahoraPed = new Date();
+    const padPed = (n) => String(n).padStart(2, '0');
+    const codPedido = `${String(ahoraPed.getFullYear()).slice(-2)}${padPed(ahoraPed.getMonth() + 1)}${padPed(ahoraPed.getDate())}-${padPed(ahoraPed.getHours())}${padPed(ahoraPed.getMinutes())}${padPed(ahoraPed.getSeconds())}`;
+
     if (itemsPedido.length === 0) {
       alert('Agregá al menos un artículo al pedido');
       return;
@@ -168,7 +174,11 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
       if (enviarWsp) {
         const telLimpio = (comercio?.telefono || '1166646806').replace(/\D/g, '');
         const msj = encodeURIComponent(
-          `*📦 PEDIDO #${comercio?.id ? String(comercio.id).slice(-4) : 'REF-' + Date.now().toString().slice(-4)} - ${comercio?.nombre || 'Comercio'}*\n` +
+          
+      // Código de pedido internacional con Timestamp: AAMMDD-HHMMSS
+      
+
+          `*📦 PEDIDO #${codPedido} - ${comercio?.nombre || 'Comercio'}*\n` +
           `Preventista: ${usuario?.nombre || 'Alex'}\n` +
           `Medio de Pago: ${medioPago}\n` +
           `--------------------------\n` +
