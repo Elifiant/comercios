@@ -28,58 +28,64 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
   const map = useMap();
   useEffect(() => {
     if (puntoActivo && puntoActivo[0] && puntoActivo[1]) {
-      map.setView(puntoActivo, 16, { animate: true });
+      map.flyTo(puntoActivo, 16, { animate: true });
     } else if (puntos && puntos.length > 0) {
-      const bounds = L.latLngBounds(puntos);
-      map.fitBounds(bounds, { padding: [30, 30] });
+      const validos = puntos.filter(p => p && p[0] && p[1]);
+      if (validos.length > 0) {
+        const bounds = L.latLngBounds(validos);
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+      }
     }
   }, [puntos, puntoActivo, map]);
   return null;
 }
 
 export default function Supervisor() {
+
+  // Carga automática de comercios desde Supabase para el Supervisor
+  useEffect(() => {
+    async function obtenerComerciosSupervisor() {
+      try {
+        setCargando(true);
+        const res = await supabase
+          .from("comercios")
+          .select("*")
+          .order("id", { ascending: false });
+        if (res.data) {
+          setComercios(res.data);
+        }
+      } catch (err) {
+        console.error("Fallo al traer comercios:", err);
+      } finally {
+        setCargando(false);
+      }
+    }
+    obtenerComerciosSupervisor();
+  }, []);
+
+  const [comercios, setComercios] = useState([]);
+  const [seccionActiva, setSeccionActiva] = useState("monitoreo");
+  const [cargando, setCargando] = useState(true);
   const [perfiles, setPerfiles] = useState([]);
+  const [sesionSupervisor, setSesionSupervisor] = useState(null);
+  const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
+  const diaSemana = filtroDiaMapa || "TODOS";
+  const [preventistaSeleccionado, setPreventistaSeleccionado] = useState("Walter");
+  const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
+  const [comercioFoco, setComercioFoco] = useState(null);
   const [comercioDetalleModal, setComercioDetalleModal] = useState(null);
   const [filtroEmpresa, setFiltroEmpresa] = useState("TODAS");
-  const [comercios, setComercios] = useState([]);
-  const [cargando, setCargando] = useState(true);
-  const [sesionSupervisor, setSesionSupervisor] = useState(null);
-  const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
-  const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
-  const [diaSemana, setDiaSemana] = useState("TODOS");
-  const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
-  const [seccionActiva, setSeccionActiva] = useState("monitoreo");
   const [secuenciaPersonalizada, setSecuenciaPersonalizada] = useState([]);
-  const [comercioFoco, setComercioFoco] = useState(null);
-  const [reproduciendoAudio, setReproduciendoAudio] = useState(false);
-  const [audioActivoObj, setAudioActivoObj] = useState(null);
+  const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
 
-  const cargarDatos = async () => {
-    setCargando(true);
-    try {
-      const { data, error } = await supabase
-        .from("comercios")
-        .select("*")
-        .order("id", { ascending: false });
-      if (!error && data) {
-        setComercios(data);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setCargando(false);
-    }
-  };
 
-  useEffect(() => {
-    cargarDatos();
-  }, []);
 
   // Lista única de preventistas
   const listaPreventistas = Array.from(new Set([
-    ...((comercios || []).map(c => c.preventista)),
-    ...((perfiles || []).filter(p => p.rol === "preventista").map(p => p.nombre))
-  ].filter(Boolean)));
+    ...(perfiles || []).filter(p => p.rol === "preventista").map(p => p.nombre),
+    ...(comercios || []).map(co => co.preventista).filter(Boolean),
+    "Walter"
+  ])).filter(Boolean);
 
   // Autoseleccionar preventista si no hay ninguno
   useEffect(() => {
@@ -109,42 +115,84 @@ export default function Supervisor() {
   });
 
   // Comercios visibles con buscador
-  const comerciosVisibles = comerciosFiltradosPorDia.filter(com => {
+  // Comercios visibles filtrados por día y por buscador
+  const comerciosVisibles = (comerciosFiltradosPorDia || []).filter(com => {
     if (!busquedaSupervisor || busquedaSupervisor.trim() === "") return true;
-    const q = busquedaSupervisor.toLowerCase().trim();
-    const nom = (com.nombre || "").toLowerCase();
-    const dir = (com.direccion || "").toLowerCase();
-    const cuit = (com.cuit || "").toLowerCase();
-    const idS = String(com.id || "");
-    return nom.includes(q) || dir.includes(q) || cuit.includes(q) || idS.includes(q);
   });
-
-  // Sincronizar la secuencia de paradas con los comercios visibles
   useEffect(() => {
-    setSecuenciaPersonalizada(comerciosVisibles);
-  }, [preventistaSeleccionado, diaActivo, busquedaSupervisor, comercios]);
+    if (comerciosVisibles && comerciosVisibles.length > 0) {
+      const ordenados = [...comerciosVisibles].sort((a, b) => {
+                const ordA = a.orden_visita !== null && a.orden_visita !== undefined ? a.orden_visita : 999;
+        const ordB = b.orden_visita !== null && b.orden_visita !== undefined ? b.orden_visita : 999;
+        return ordA - ordB;
+      });
+      // Solo sincroniza si la secuencia estaba vacía o si cambió de preventista/día
+      setSecuenciaPersonalizada(prev => {
+        if (!prev || prev.length === 0) return ordenados;
+        const idsPrev = prev.map(p => p.id).sort().join(',');
+        const idsNuevos = ordenados.map(p => p.id).sort().join(',');
+        if (idsPrev !== idsNuevos) return ordenados;
+        return prev; // Mantiene intacto el orden que vos acomodás con las flechas
+      });
+    } else {
+      setSecuenciaPersonalizada([]);
+    }
+  }, [filtroDiaMapa, preventistaSeleccionado]);
 
-  // Funciones para reordenar paradas
+    // Funciones para reordenar paradas de forma reactiva y estable
   const moverParada = (index, direccion) => {
-    const nuevoIndex = index + direccion;
-    if (nuevoIndex < 0 || nuevoIndex >= secuenciaPersonalizada.length) return;
-    const copia = [...secuenciaPersonalizada];
-    const temp = copia[index];
-    copia[index] = copia[nuevoIndex];
-    copia[nuevoIndex] = temp;
-    setSecuenciaPersonalizada(copia);
+    setSecuenciaPersonalizada(prev => {
+      const nuevoIndex = index + direccion;
+      if (nuevoIndex < 0 || nuevoIndex >= prev.length) return prev;
+      const copia = [...prev];
+      const temp = copia[index];
+      copia[index] = copia[nuevoIndex];
+      copia[nuevoIndex] = temp;
+      return copia;
+    });
   };
 
   const fijarInicioRuta = (index) => {
-    if (index === 0) return;
-    const copia = [...secuenciaPersonalizada];
-    const seleccionado = copia.splice(index, 1)[0];
-    copia.unshift(seleccionado);
-    setSecuenciaPersonalizada(copia);
+    setSecuenciaPersonalizada(prev => {
+      if (index <= 0 || index >= prev.length) return prev;
+      const copia = [...prev];
+      const seleccionado = copia.splice(index, 1)[0];
+      copia.unshift(seleccionado);
+      return copia;
+    });
   };
 
-  const guardarSecuenciaEnBase = () => {
-    alert("✓ Secuencia guardada con éxito para los días " + diaSemana);
+    const guardarSecuenciaEnBase = async () => {
+    if (!secuenciaPersonalizada || secuenciaPersonalizada.length === 0) return;
+    try {
+      setCargando(true);
+      const promesas = secuenciaPersonalizada.map((c, index) => {
+        return supabase
+          .from("comercios")
+          .update({ orden_visita: index + 1 })
+          .eq("id", c.id);
+      });
+      await Promise.all(promesas);
+
+      // Actualizamos el estado global comercios en memoria
+      setComercios(prev => {
+        const mapa = {};
+        secuenciaPersonalizada.forEach((c, idx) => { mapa[c.id] = idx + 1; });
+        return prev.map(item => {
+          if (mapa[item.id] !== undefined) {
+            return { ...item, orden_visita: mapa[item.id] };
+          }
+          return item;
+        });
+      });
+
+      alert("✓ Hoja de ruta guardada con éxito.");
+    } catch (err) {
+      console.error("Error al guardar hoja de ruta:", err);
+      alert("Error al guardar: " + (err.message || "Verificar conexión"));
+    } finally {
+      setCargando(false);
+    }
   };
 
   // Coordenadas válidas para el mapa (usa el orden del secuenciador si está en el planificador)
@@ -184,7 +232,7 @@ export default function Supervisor() {
   const exportarCSV = () => {
     if (comercios.length === 0) return;
     const encabezados = ["ID", "Nombre", "Empresa", "Preventista", "Rubro", "Direccion", "Latitud", "Longitud", "Fecha"];
-    const filas = comercios.map(c => [
+    const filas = (comercios || []).map(c => [
       c.id,
       String(c.nombre || "").replace(/"/g, ""),
       String(c.empresa || "Elifiant").replace(/"/g, ""),
@@ -316,6 +364,56 @@ export default function Supervisor() {
           </div>
         </div>
 
+        
+        {/* TELEMETRÍA DE FLOTA (TARJETAS DE PREVENTISTAS) */}
+        <div style={{ marginBottom: "14px" }}>
+          <div style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginBottom: "6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>Flota de Preventistas</span>
+            {preventistaSeleccionado && (
+              <button
+                type="button"
+                onClick={() => setPreventistaSeleccionado(null)}
+                style={{ background: "none", border: "none", color: "#2563eb", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}
+              >
+                ✕ Ver Todos
+              </button>
+            )}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+            {telemetriaFlota.map((prev, idx) => {
+              const seleccionado = (preventistaSeleccionado?.nombre || preventistaSeleccionado) === prev.nombre;
+              return (
+                <div
+                  key={prev.nombre || idx}
+                  onClick={() => setPreventistaSeleccionado(seleccionado ? null : prev)}
+                  style={{
+                    backgroundColor: seleccionado ? "#eff6ff" : "#ffffff",
+                    border: seleccionado ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    boxShadow: seleccionado ? "0 2px 8px rgba(37,99,235,0.15)" : "none"
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>👤 {prev.nombre}</div>
+                    <div style={{ fontSize: "11px", color: prev.activoHoy ? "#16a34a" : "#64748b", marginTop: "2px", fontWeight: "600" }}>
+                      {prev.activoHoy ? "🟢 En ruta" : "💤 Standby"}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#2563eb" }}>{prev.paradasTotales || 0}</div>
+                    <div style={{ fontSize: "10px", color: "#94a3b8" }}>comercios</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* SELECTOR DE DÍAS (ULTRA COMPACTO) */}
         <div style={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", padding: "8px 14px", marginBottom: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -326,8 +424,8 @@ export default function Supervisor() {
                 <button
                   key={d}
                   onClick={() => {
-                    if (seccionActiva === "planificador") setDiaSemana(d);
-                    else setFiltroDiaMapa(d);
+                    const diaElegido = d.toUpperCase();
+                    setFiltroDiaMapa(diaElegido);
                   }}
                   style={{
                     padding: "3px 10px",
@@ -604,3 +702,4 @@ export default function Supervisor() {
     </div>
   );
 }
+
