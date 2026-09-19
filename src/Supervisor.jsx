@@ -318,18 +318,7 @@ export default function Supervisor() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-          <button
-            onClick={exportarCSV}
-            style={{ padding: "6px 12px", backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "12px", fontWeight: "600", color: "#334155", cursor: "pointer" }}
-          >
-            📑 Exportar CSV
-          </button>
-          <button
-            onClick={() => window.location.href = "/"}
-            style={{ padding: "6px 12px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}
-          >
-            📱 App Preventa
-          </button>
+          
           <a href="/pagos" style={{ display: "inline-flex", alignItems: "center", gap: "6px", backgroundColor: "#1e293b", color: "#ffffff", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", textDecoration: "none", fontWeight: "700" }}>
             💳 Pagos
           </a>
