@@ -811,7 +811,7 @@ export default function App() {
             alignItems: 'center',
             justifyContent: 'center'
           }}>
-            <img src="/logo.png" alt="RutaComercio" style={{ width: '76px', height: '76px', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; }} />
+            <img src="/logo.svg" onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} alt="RutaComercio" style={{ width: '76px', height: '76px', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; }} />
           </div>
         </div> <h2 style={{ margin: 0, color: "#fff", fontSize: "20px", fontWeight: "700" }}>RutaComercio</h2> <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: "13px" }}>Ingreso seguro para preventistas</p> </div> <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Correo electrónico</label> <input type="email" required value={emailLogin} onChange={(e) => setEmailLogin(e.target.value)} placeholder="ej: tu_correo@empresa.com" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Contraseña</label> <input type="password" required value={passwordLogin} onChange={(e) => setPasswordLogin(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> {errorLogin && ( <div style={{ padding: "10px", borderRadius: "8px", backgroundColor: "rgba(239, 68, 68, 0.15)", border: "1px solid #ef4444", color: "#f87171", fontSize: "12px", textAlign: "center" }}> {errorLogin} </div> )} <button type="submit" style={{ marginTop: "6px", padding: "13px", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", fontWeight: "700", fontSize: "14px", cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.4)" }} > Iniciar Sesión </button> </form> </div> </div> ); } if (modoManejo) {
     const latM = (posicionActual && posicionActual[0]) ? posicionActual[0] : -34.719;
@@ -822,7 +822,7 @@ export default function App() {
         <header style={{ padding: "10px 16px", backgroundColor: "#0f172a", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 10, boxShadow: "0 2px 10px rgba(0,0,0,0.3)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <div style={{ width: "38px", height: "38px", backgroundColor: "#ffffff", borderRadius: "10px", padding: "3px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.35)", flexShrink: 0, border: "1px solid #e2e8f0" }}>
-              <img src="/logo.png" alt="RutaComercio" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} />
+              <img src="/logo.svg" onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} alt="RutaComercio" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} />
             </div>
             <div>
               <div style={{ fontSize: "17px", fontWeight: "900", color: "#ffffff", letterSpacing: "-0.3px", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>RutaComercio</div>
@@ -1042,7 +1042,7 @@ export default function App() {
         <header style={{ padding: "12px 16px", backgroundColor: "#0f172a", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <div style={{ width: "36px", height: "36px", backgroundColor: "#ffffff", borderRadius: "10px", padding: "2px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)", flexShrink: 0 }}>
-              <img src="/logo.png" alt="RutaComercio" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              <img src="/logo.svg" onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} alt="RutaComercio" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
             <div>
               <div style={{ fontSize: "17px", fontWeight: "900", color: "#ffffff", letterSpacing: "-0.3px", textShadow: "0 1px 2px rgba(0,0,0,0.4)" }}>RutaComercio</div>
