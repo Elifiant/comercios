@@ -461,12 +461,11 @@ export default function App() {
  if (error) setErrorLogin('Credenciales incorrectas o usuario no registrado.');
  };
 
-  const handleCerrarSesion = async () => {
- try { await supabase.auth.signOut(); } catch(e) {}
- localStorage.clear();
- sessionStorage.clear();
- setSesion(null);
- };
+            const handleCerrarSesion = async () => {
+    try { await supabase.auth.signOut(); } catch (e) {}
+    try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}
+    window.location.replace("/");
+  };
  const [posicionBotonManejo, setPosicionBotonManejo] = useState(() => {
     try {
       const guardada = localStorage.getItem("rutacomercio_pos_boton_manejo");
@@ -804,7 +803,33 @@ export default function App() {
   
     // Vista de mapas y navegación
   if (modoManejo) {
+      if (!sesion) {
     return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif" }}>
+        <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#1e293b", borderRadius: "16px", padding: "32px 24px", textAlign: "center", border: "1px solid #334155" }}>
+          <img src="/logo.png" alt="RutaComercio" style={{ width: "160px", margin: "0 auto 16px auto", display: "block" }} />
+          <h2 style={{ color: "#fff", fontSize: "20px", margin: "0 0 8px 0", fontWeight: "bold" }}>Acceso Preventa</h2>
+          <p style={{ color: "#94a3b8", fontSize: "13px", margin: "0 0 20px 0" }}>Ingresá tu correo y clave de preventista</p>
+          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "12px", textAlign: "left" }}>
+            {errorLogin && <div style={{ backgroundColor: "rgba(239,68,68,0.2)", color: "#f87171", padding: "8px 12px", borderRadius: "6px", fontSize: "12px" }}>{errorLogin}</div>}
+            <div>
+              <label style={{ color: "#cbd5e1", fontSize: "12px", display: "block", marginBottom: "4px" }}>Correo</label>
+              <input type="email" required value={emailLogin} onChange={e => setEmailLogin(e.target.value)} style={{ width: "100%", padding: "10px", backgroundColor: "#0f172a", border: "1px solid #475569", borderRadius: "8px", color: "#fff", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ color: "#cbd5e1", fontSize: "12px", display: "block", marginBottom: "4px" }}>Contraseña</label>
+              <input type="password" required value={passwordLogin} onChange={e => setPasswordLogin(e.target.value)} style={{ width: "100%", padding: "10px", backgroundColor: "#0f172a", border: "1px solid #475569", borderRadius: "8px", color: "#fff", boxSizing: "border-box" }} />
+            </div>
+            <button type="submit" disabled={cargandoAuth} style={{ width: "100%", padding: "12px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", marginTop: "8px" }}>
+              {cargandoAuth ? "Ingresando..." : "Iniciar Sesión"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+return (
       <div style={{ position: "relative", minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", display: "flex", flexDirection: "column" }}>
         {/* Cabecera Modo Manejo */}
         <div style={{ padding: "12px 16px", backgroundColor: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155" }}>
@@ -1209,7 +1234,7 @@ export default function App() {
               </div>
             </div>
           </div>
-         <button onClick={handleCerrarSesion} style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+         <button onClick={async () => { try { await supabase.auth.signOut(); localStorage.clear(); sessionStorage.clear(); } catch(e){} window.location.replace("/"); }} style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
           >
             ✕ Salir
           </button> 
