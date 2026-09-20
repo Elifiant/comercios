@@ -66,6 +66,8 @@ export default function App() {
 
   // 📡 EMISIÓN DE GPS EN VIVO DEL PREVENTISTA AL PERFIL
   useEffect(() => {
+    /* safety-unblock-auth */
+    const tSafe = setTimeout(() => { setCargandoAuth(false); }, 300);
     if (!sesion?.user?.id || !posicionActual) return;
     const emitirGPS = async () => {
       try {
@@ -361,7 +363,7 @@ export default function App() {
       console.warn("Error cargando perfil:", e);
     }
   };
- const [cargandoAuth, setCargandoAuth] = useState(true);
+ const [cargandoAuth, setCargandoAuth] = useState(false);
  const [emailLogin, setEmailLogin] = useState('');
  const [passwordLogin, setPasswordLogin] = useState('');
  const [errorLogin, setErrorLogin] = useState(null);
@@ -800,79 +802,25 @@ export default function App() {
 
 
   
-  // Vista del Editor de Ubicación en Mapa con Pin Arrastrable
-   if (cargandoAuth) { return ( <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: "sans-serif" }}> Iniciando RutaComercio... </div> ); } if (!sesion) { return ( <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif", boxSizing: "border-box" }}> <div style={{ width: "100%", maxWidth: "360px", backgroundColor: "#1e293b", padding: "28px 24px", borderRadius: "16px", border: "1px solid #334155", boxShadow: "0 10px 25px rgba(0,0,0,0.5)" }}> <div style={{ textAlign: "center", marginBottom: "24px" }}> <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-          <div style={{
-            background: '#ffffff',
-            padding: '12px',
-            borderRadius: '20px',
-            boxShadow: '0 8px 20px -4px rgba(37,99,235,0.25)',
-            border: '1px solid rgba(226,232,240,0.9)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <img src="/logo.svg" onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} alt="RutaComercio" style={{ width: '76px', height: '76px', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; }} />
-          </div>
-        </div> <h2 style={{ margin: 0, color: "#fff", fontSize: "20px", fontWeight: "700" }}>RutaComercio</h2> <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: "13px" }}>Ingreso seguro para preventistas</p> </div> <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Correo electrónico</label> <input type="email" required value={emailLogin} onChange={(e) => setEmailLogin(e.target.value)} placeholder="ej: tu_correo@empresa.com" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> <div> <label style={{ display: "block", fontSize: "12px", color: "#cbd5e1", marginBottom: "6px", fontWeight: "600" }}>Contraseña</label> <input type="password" required value={passwordLogin} onChange={(e) => setPasswordLogin(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "14px", boxSizing: "border-box" }} /> </div> {errorLogin && ( <div style={{ padding: "10px", borderRadius: "8px", backgroundColor: "rgba(239, 68, 68, 0.15)", border: "1px solid #ef4444", color: "#f87171", fontSize: "12px", textAlign: "center" }}> {errorLogin} </div> )} <button type="submit" style={{ marginTop: "6px", padding: "13px", borderRadius: "8px", border: "none", backgroundColor: "#2563eb", color: "#fff", fontWeight: "700", fontSize: "14px", cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.4)" }} > Iniciar Sesión </button> </form> </div> </div> ); } if (modoManejo) {
-    const latM = (posicionActual && posicionActual[0]) ? posicionActual[0] : -34.719;
-    const lngM = (posicionActual && posicionActual[1]) ? posicionActual[1] : -58.265;
+    // Vista de mapas y navegación
+  if (modoManejo) {
     return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif", position: "relative", overflow: "hidden" }}>
-        {/* HEADER MODO MANEJO */}
-        <header style={{ padding: "10px 16px", backgroundColor: "#0f172a", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 10, boxShadow: "0 2px 10px rgba(0,0,0,0.3)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <div style={{ width: "38px", height: "38px", backgroundColor: "#ffffff", borderRadius: "10px", padding: "3px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.35)", flexShrink: 0, border: "1px solid #e2e8f0" }}>
-              <img src="/logo.svg" onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} alt="RutaComercio" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} />
-            </div>
-            <div>
-              <div style={{ fontSize: "17px", fontWeight: "900", color: "#ffffff", letterSpacing: "-0.3px", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>RutaComercio</div>
-              <div style={{ fontSize: "12px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "6px", marginTop: "1px" }}>
-                <span style={{ fontWeight: "700", color: "#38bdf8" }}>👤 {(typeof perfil !== "undefined" && perfil && perfil.nombre) ? perfil.nombre : (typeof sesion !== "undefined" && sesion?.user?.email ? sesion.user.email.split("@")[0] : "demo02")}</span>
-                <span style={{ color: "#475569" }}>·</span>
-                <span style={{ color: "#cbd5e1", fontWeight: "600" }}>{(typeof perfil !== "undefined" && perfil && perfil.empresa) ? perfil.empresa : "DEMO S.A."}</span>
-              </div>
-            </div>
+      <div style={{ position: "relative", minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", display: "flex", flexDirection: "column" }}>
+        {/* Cabecera Modo Manejo */}
+        <div style={{ padding: "12px 16px", backgroundColor: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "20px" }}>🚗</span>
+            <span style={{ fontWeight: "bold", fontSize: "15px" }}>Modo Manejo Activo</span>
           </div>
           <button
-            type="button"
-            onClick={handleCerrarSesion}
-            style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid #ef4444", backgroundColor: "rgba(239, 68, 68, 0.15)", color: "#f87171", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}
+            onClick={() => setModoManejo(false)}
+            style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 14px", fontWeight: "bold", cursor: "pointer", fontSize: "13px" }}
           >
             ✕ Salir
           </button>
-        </header>
-
-        {/* 1. AVISO DE CERCANÍA: ARRIBA DE TODO */}
-        {comercioCercano && (
-          <div style={{ padding: "10px 14px", background: "#16a34a", color: "#fff", textAlign: "center", fontWeight: "800", fontSize: "13px", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", zIndex: 1000, borderBottom: "2px solid #bbf7d0" }}>
-            🔔 Cerca de: {comercioCercano.nombre || ("Comercio #" + comercioCercano.id)} ({comercioCercano.distancia}m)
-          </div>
-        )}
-
-        {/* 2. MAPA EN VIVO: CENTRO COMPLETO */}
-        <div style={{ flex: 1, position: "relative", width: "100%", height: "100%" }}>
-          <MapContainer center={[latM, lngM]} zoom={16} style={{ height: "100%", width: "100%" }}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            {posicionActual && <Marker position={posicionActual} />}
-            {comercios.map((com) => {
-              const cLat = com.ubicacion_exacta_latitud || com.latitud;
-              const cLng = com.ubicacion_exacta_longitud || com.longitud;
-              if (!cLat || !cLng) return null;
-              return (
-                <Marker key={com.id} position={[cLat, cLng]}>
-                  <Popup>{com.nombre || "Comercio #" + com.id}</Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
         </div>
-
-        {/* 3. BOTÓN GIGANTE: ABAJO DE TODO AL ALCANCE DEL PULGAR */}
         {/* 3. BOTÓN GIGANTE ARRASTRABLE LIBRE */}
-        <div 
-          style={{ 
-            position: "fixed", 
+        <div style={{ position: "fixed", 
             left: posicionBotonManejo.x + "px", 
             top: posicionBotonManejo.y + "px", 
             width: "calc(100% - 32px)",
@@ -1037,8 +985,7 @@ export default function App() {
     );
   }
 
-  if (comercioSeleccionado) {
-    return (
+  return (
       <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif', paddingBottom: '40px' }}>
         <header style={{ padding: "12px 16px", backgroundColor: "#0f172a", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1206,5 +1153,4 @@ export default function App() {
       </button>
     </div>
   );
-}
 }
