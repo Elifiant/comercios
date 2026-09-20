@@ -60,8 +60,8 @@ export default function App() {
   const emitirActividadEnVivo = async () => {
     try {
       const email = sesion?.user?.email || perfil?.email;
-      const prevNombre = perfil?.nombre || "Walter";
-      const emp = perfil?.empresa || "Elifiant";
+      const prevNombre = perfil?.nombre || "";
+      const emp = perfil?.empresa || "";
       if (!email) return;
       
       // Actualiza perfiles

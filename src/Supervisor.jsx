@@ -42,35 +42,15 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
 
 export default function Supervisor() {
 
-  // Carga automática de comercios desde Supabase para el Supervisor
-  useEffect(() => {
-    async function obtenerComerciosSupervisor() {
-      try {
-        setCargando(true);
-        const res = await supabase
-          .from("comercios")
-          .select("*")
-          .order("id", { ascending: false });
-        if (res.data) {
-          setComercios(res.data);
-        }
-      } catch (err) {
-        console.error("Fallo al traer comercios:", err);
-      } finally {
-        setCargando(false);
-      }
-    }
-    obtenerComerciosSupervisor();
-  }, []);
-
   const [comercios, setComercios] = useState([]);
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
   const [cargando, setCargando] = useState(true);
   const [perfiles, setPerfiles] = useState([]);
+  const [perfilSupervisor, setPerfilSupervisor] = useState(null);
   const [sesionSupervisor, setSesionSupervisor] = useState(null);
   const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
   const diaSemana = filtroDiaMapa || "TODOS";
-  const [preventistaSeleccionado, setPreventistaSeleccionado] = useState("Walter");
+  const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [comercioFoco, setComercioFoco] = useState(null);
   const [comercioDetalleModal, setComercioDetalleModal] = useState(null);
@@ -81,45 +61,92 @@ export default function Supervisor() {
   const [filtroEmpresa, setFiltroEmpresa] = useState("TODAS");
   const [secuenciaPersonalizada, setSecuenciaPersonalizada] = useState([]);
   const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
+  const [reproduciendoAudio, setReproduciendoAudio] = useState(false);
+  const [audioActivoObj, setAudioActivoObj] = useState(null);
 
+  // Inicialización de supervisor y datos
+  useEffect(() => {
+    async function inicializarSupervisor() {
+    let empSupervisor = "DEMO S.A.";
+      try {
+        setCargando(true);
+        const { data: authData } = await supabase.auth.getSession();
+        if (authData && authData.session) {
+          setSesionSupervisor(authData.session);
+          const { data: pData } = await supabase
+            .from("perfiles")
+            .select("*")
+            .eq("id", authData.session.user.id)
+            .maybeSingle();
+          if (pData) {
+            setPerfilSupervisor(pData);
+          }
+        }
 
+        const { data: perfilesData } = await supabase.from("perfiles").select("*");
+        if (perfilesData) setPerfiles(perfilesData);
 
-  // Lista única de preventistas
+        let queryComercios = supabase.from("comercios").select("*");
+      const empActual = (perfilSupervisor?.empresa || (typeof empSupervisor !== "undefined" ? empSupervisor : "DEMO S.A.")).trim();
+      if (empActual && empActual !== "TODAS") {
+        queryComercios = queryComercios.ilike("empresa", "%DEMO S.A.%");
+      }
+      queryComercios = queryComercios.order("id", { ascending: false });
+        const { data: comerciosData, error: errCom } = await queryComercios;
+        if (comerciosData) {
+          setComercios(comerciosData);
+          console.log("Comercios cargados con éxito:", comerciosData.length);
+        }
+      } catch (err) {
+        console.error("Fallo al inicializar supervisor:", err);
+      } finally {
+        setCargando(false);
+      }
+    }
+    inicializarSupervisor();
+  }, []);
+
+  // Empresa del supervisor logueado
+  const miEmpresa = (perfilSupervisor && (perfilSupervisor.empresa || perfilSupervisor.nombre_empresa)) || "";
+
+  // Lista única de preventistas aislada por empresa
   const listaPreventistas = Array.from(new Set([
-    ...(perfiles || []).filter(p => p.rol === "preventista").map(p => p.nombre),
-    ...(comercios || []).map(co => co.preventista).filter(Boolean),
-    "Walter"
+    ...(perfiles || [])
+      .filter(p => p.rol === "preventista" && (!miEmpresa || miEmpresa === "TODAS" || miEmpresa === "SuperAdmin" || p.empresa === miEmpresa))
+      .map(p => p.nombre),
+    ...(comercios || [])
+      .filter(co => !miEmpresa || miEmpresa === "TODAS" || miEmpresa === "SuperAdmin" || co.empresa === miEmpresa)
+      .map(co => co.preventista)
+      .filter(Boolean)
   ])).filter(Boolean);
 
-  // Autoseleccionar preventista si no hay ninguno
+  // Autoseleccionar preventista de la empresa actual
   useEffect(() => {
-    if (!preventistaSeleccionado && listaPreventistas.length > 0) {
-      const walter = listaPreventistas.find(p => p.toUpperCase().includes("WALTER"));
-      setPreventistaSeleccionado(walter || listaPreventistas[0]);
+    if (listaPreventistas.length > 0) {
+      const nomActual = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado?.nombre : preventistaSeleccionado;
+      const existe = listaPreventistas.find(p => (nomActual || "").trim().toUpperCase() === (p || "").trim().toUpperCase());
+      if (!existe) {
+        setPreventistaSeleccionado(listaPreventistas[0]);
+      }
+    } else {
+      setPreventistaSeleccionado(null);
     }
   }, [listaPreventistas, preventistaSeleccionado]);
 
-  // Comercios asignados al preventista actual
-  
+  // Ordenamiento por secuencia
   const ordenarPorSecuenciaGuardada = (lista) => {
     if (!Array.isArray(lista)) return [];
     return [...lista].sort((a, b) => {
       const ordA = a.orden_visita !== null && a.orden_visita !== undefined ? Number(a.orden_visita) : 999999;
       const ordB = b.orden_visita !== null && b.orden_visita !== undefined ? Number(b.orden_visita) : 999999;
       if (ordA !== ordB) return ordA - ordB;
-      return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+      return String(a.nombre || "").localeCompare(String(b.nombre || ""));
     });
   };
 
-  const comerciosPreventista = (comercios || []).filter(c => {
-    if (!preventistaSeleccionado) return true;
-    const nombrePrev = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado.nombre : preventistaSeleccionado;
-    const asignado = (c.preventista || "").trim().toUpperCase();
-    const target = (nombrePrev || "").trim().toUpperCase();
-    return asignado === target || asignado.includes(target) || target.includes(asignado);
-  });
+  // Comercios asignados al preventista
+  const comerciosPreventista = (comercios || []).filter(item => { const target = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim(); if (!target || target === "todos") return true; const asignado = String(item.preventista || "").toLowerCase().trim(); return asignado === target || asignado.includes(target) || target.includes(asignado); });
 
-  // Filtro por día activo
   const diaActivo = seccionActiva === "planificador" ? diaSemana : filtroDiaMapa;
 
   const comerciosFiltradosPorDia = comerciosPreventista.filter(com => {
@@ -129,8 +156,6 @@ export default function Supervisor() {
     return dCom === dFiltro || dCom.includes(dFiltro);
   });
 
-  // Comercios visibles con buscador
-  // Comercios visibles filtrados por día y por buscador
   const comerciosVisibles = ordenarPorSecuenciaGuardada(
     (comerciosFiltradosPorDia || []).filter(com => {
       if (!busquedaSupervisor || busquedaSupervisor.trim() === "") return true;
@@ -143,27 +168,26 @@ export default function Supervisor() {
       return nom.includes(q) || dir.includes(q) || rub.includes(q) || cuitStr.includes(q) || idStr.includes(q);
     })
   );
+
   useEffect(() => {
     if (comerciosVisibles && comerciosVisibles.length > 0) {
       const ordenados = [...comerciosVisibles].sort((a, b) => {
-                const ordA = a.orden_visita !== null && a.orden_visita !== undefined ? a.orden_visita : 999;
+        const ordA = a.orden_visita !== null && a.orden_visita !== undefined ? a.orden_visita : 999;
         const ordB = b.orden_visita !== null && b.orden_visita !== undefined ? b.orden_visita : 999;
         return ordA - ordB;
       });
-      // Solo sincroniza si la secuencia estaba vacía o si cambió de preventista/día
       setSecuenciaPersonalizada(prev => {
         if (!prev || prev.length === 0) return ordenados;
-        const idsPrev = prev.map(p => p.id).sort().join(',');
-        const idsNuevos = ordenados.map(p => p.id).sort().join(',');
+        const idsPrev = prev.map(p => p.id).sort().join(",");
+        const idsNuevos = ordenados.map(p => p.id).sort().join(",");
         if (idsPrev !== idsNuevos) return ordenados;
-        return prev; // Mantiene intacto el orden que vos acomodás con las flechas
+        return prev;
       });
     } else {
       setSecuenciaPersonalizada([]);
     }
-  }, [filtroDiaMapa, preventistaSeleccionado]);
+  }, [filtroDiaMapa, preventistaSeleccionado, comercios]);
 
-    // Funciones para reordenar paradas de forma reactiva y estable
   const moverParada = (index, direccion) => {
     setSecuenciaPersonalizada(prev => {
       const nuevoIndex = index + direccion;
@@ -176,17 +200,7 @@ export default function Supervisor() {
     });
   };
 
-  const fijarInicioRuta = (index) => {
-    setSecuenciaPersonalizada(prev => {
-      if (index <= 0 || index >= prev.length) return prev;
-      const copia = [...prev];
-      const seleccionado = copia.splice(index, 1)[0];
-      copia.unshift(seleccionado);
-      return copia;
-    });
-  };
-
-    const guardarSecuenciaEnBase = async () => {
+  const guardarSecuenciaEnBase = async () => {
     if (!secuenciaPersonalizada || secuenciaPersonalizada.length === 0) return;
     try {
       setCargando(true);
@@ -198,7 +212,6 @@ export default function Supervisor() {
       });
       await Promise.all(promesas);
 
-      // Actualizamos el estado global comercios en memoria
       setComercios(prev => {
         const mapa = {};
         secuenciaPersonalizada.forEach((c, idx) => { mapa[c.id] = idx + 1; });
@@ -219,7 +232,6 @@ export default function Supervisor() {
     }
   };
 
-  // Coordenadas válidas para el mapa (usa el orden del secuenciador si está en el planificador)
   const listaParaMapa = (seccionActiva === "planificador" && secuenciaPersonalizada.length > 0)
     ? secuenciaPersonalizada
     : comerciosVisibles;
@@ -253,40 +265,14 @@ export default function Supervisor() {
   const activosEnCalle = telemetriaFlota.filter(p => p.activoHoy).length;
   const porcentajeActivos = telemetriaFlota.length > 0 ? Math.round((activosEnCalle / telemetriaFlota.length) * 100) : 0;
 
-  const exportarCSV = () => {
-    if (comercios.length === 0) return;
-    const encabezados = ["ID", "Nombre", "Empresa", "Preventista", "Rubro", "Direccion", "Latitud", "Longitud", "Fecha"];
-    const filas = (comercios || []).map(c => [
-      c.id,
-      String(c.nombre || "").replace(/"/g, ""),
-      String(c.empresa || "Elifiant").replace(/"/g, ""),
-      String(c.preventista || "Walter").replace(/"/g, ""),
-      String(c.rubro || "General").replace(/"/g, ""),
-      String(c.direccion || "").replace(/"/g, ""),
-      c.ubicacion_exacta_latitud || c.latitud || "",
-      c.ubicacion_exacta_longitud || c.longitud || "",
-      c.fecha || ""
-    ]);
-    const contenido = [encabezados.join(","), ...filas.map(f => f.join(","))].join("\n");
-    const blob = new Blob([contenido], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "reporte_supervisor_" + hoyStr + ".csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  
-  
   const cerrarModalComercioFicha = () => {
     try {
-      if (typeof audioActivoObj !== "undefined" && audioActivoObj && typeof audioActivoObj.pause === "function") {
+      if (audioActivoObj && typeof audioActivoObj.pause === "function") {
         audioActivoObj.pause();
       }
     } catch(e) {}
-    try { setReproduciendoAudio(false); } catch(e) {}
-    try { setMsgExitoFicha(false); } catch(e) {}
+    setReproduciendoAudio(false);
+    setMsgExitoFicha(false);
     setComercioDetalleModal(null);
   };
 
@@ -294,7 +280,7 @@ export default function Supervisor() {
     if (!comercioDetalleModal) return;
     setGuardandoFicha(true);
     try {
-      const pFinal = String(editPrevFicha || comercioDetalleModal.preventista || "Walter").trim();
+      const pFinal = String(editPrevFicha || comercioDetalleModal.preventista || "").trim();
       const dFinal = editDiaFicha ? String(editDiaFicha).trim().toUpperCase() : "";
       
       const { error } = await supabase
@@ -304,7 +290,6 @@ export default function Supervisor() {
         
       if (error) throw error;
       
-      // 1. Actualizamos el estado global de comercios
       const nuevosComercios = (comercios || []).map(item => {
         if (item.id === comercioDetalleModal.id) {
           return { ...item, preventista: pFinal, dia_visita: dFinal };
@@ -312,30 +297,22 @@ export default function Supervisor() {
         return item;
       });
       setComercios(nuevosComercios);
-      
-      // 2. Actualizamos la modal abierta para que se vea reflejado al instante
       setComercioDetalleModal(prev => prev ? { ...prev, preventista: pFinal, dia_visita: dFinal } : null);
       setEditPrevFicha(pFinal);
       setEditDiaFicha(dFinal);
-      
-      // 3. Reactividad inmediata en la secuencia del mapa y lista de paradas
-      if (typeof setSecuenciaPersonalizada === "function") {
-        setSecuenciaPersonalizada(prev => {
-          // Si estamos filtrando por un día específico y el comercio ya no pertenece a ese día, lo quitamos de la vista activa
-          if (filtroDiaMapa && filtroDiaMapa !== "TODOS") {
-            if (dFinal !== filtroDiaMapa) {
-              return (prev || []).filter(item => item.id !== comercioDetalleModal.id);
-            }
+
+      setSecuenciaPersonalizada(prev => {
+        const lista = Array.isArray(prev) ? prev : [];
+        if (filtroDiaMapa && filtroDiaMapa !== "TODOS" && dFinal !== filtroDiaMapa) {
+          return lista.filter(item => item.id !== comercioDetalleModal.id);
+        }
+        return lista.map(item => {
+          if (item.id === comercioDetalleModal.id) {
+            return { ...item, preventista: pFinal, dia_visita: dFinal };
           }
-          // Si pertenece al día o estamos en TODOS, actualizamos sus datos en la lista activa
-          return (prev || []).map(item => {
-            if (item.id === comercioDetalleModal.id) {
-              return { ...item, preventista: pFinal, dia_visita: dFinal };
-            }
-            return item;
-          });
+          return item;
         });
-      }
+      });
       
       setMsgExitoFicha(true);
       setTimeout(() => setMsgExitoFicha(false), 2000);
@@ -370,8 +347,7 @@ export default function Supervisor() {
     }
   };
 
-  const nombrePrevActivo = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado?.nombre : (preventistaSeleccionado || "Walter");
-
+  const nombrePrevActivo = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado?.nombre : (preventistaSeleccionado || "");
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* CABECERA PRINCIPAL */}
@@ -577,7 +553,7 @@ export default function Supervisor() {
                 secuenciaPersonalizada.map((c, i) => (
                   <div
                     key={c.id || i}
-                    onClick={() => { setComercioFoco(c); setComercioDetalleModal(c); setEditPrevFicha(c.preventista || "Walter"); setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : ""); }}
+                    onClick={() => { setComercioFoco(c); setComercioDetalleModal(c); setEditPrevFicha(c.preventista || ""); setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : ""); }}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -686,7 +662,7 @@ export default function Supervisor() {
                           <p style={{ margin: "2px 0 0 0", fontSize: "10px", color: "#64748b" }}>{c.direccion || "Sin dirección"}</p>
                           <button
                             type="button"
-                            onClick={(e) => { e.stopPropagation(); setComercioDetalleModal(c); setEditPrevFicha(c.preventista || "Walter"); setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : ""); }}
+                            onClick={(e) => { e.stopPropagation(); setComercioDetalleModal(c); setEditPrevFicha(c.preventista || ""); setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : ""); }}
                             style={{ marginTop: "6px", width: "100%", background: "#2563eb", color: "#fff", border: "none", borderRadius: "4px", padding: "4px", fontSize: "10px", fontWeight: "bold", cursor: "pointer" }}
                           >
                             Ver Ficha & Audio
@@ -778,7 +754,7 @@ export default function Supervisor() {
                   <div>
                     <label style={{ display: "block", fontSize: "10px", fontWeight: "bold", color: "#64748b", marginBottom: "3px" }}>👤 Preventista Asignado</label>
                     <select
-                      value={editPrevFicha || comercioDetalleModal.preventista || "Walter"}
+                      value={editPrevFicha || comercioDetalleModal.preventista || ""}
                       onChange={(e) => setEditPrevFicha(e.target.value)}
                       style={{ width: "100%", padding: "6px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#fff", color: "#0f172a", fontWeight: "600" }}
                     >

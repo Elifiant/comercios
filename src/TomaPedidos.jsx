@@ -146,7 +146,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         comercio_nombre: comercio?.nombre || 'Almacén Los Amigos',
         comercio_direccion: comercio?.direccion || 'Av. Mitre 4820, Avellaneda',
         preventista: usuario?.nombre || 'Alex Preventista',
-        empresa: usuario?.empresa || 'Elifiant',
+        empresa: usuario?.empresa || "",
         subtotal: subtotalBruto,
         descuentos: totalDescuentos,
         total: totalFinal,
@@ -186,7 +186,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
           `\n--------------------------\n` +
           `*IMPORTE del PEDIDO: $${totalFinal.toLocaleString()} ARS*\n` +
           (observaciones ? `Notas: ${observaciones}\n` : '') +
-          `📋 *${(comercio?.empresa || 'Elifiant').toUpperCase()} · Comanda Oficial de Preventa*`
+          `📋 *${(comercio?.empresa || "").toUpperCase()} · Comanda Oficial de Preventa*`
         );
         window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
       }
