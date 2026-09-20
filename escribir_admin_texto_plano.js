@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+const fs = require('fs');
+
+const contenido = `import React, { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 export default function AdminClientes() {
@@ -49,7 +51,7 @@ export default function AdminClientes() {
     setEmpresaSeleccionada(emp);
     setTarifaEditada(emp.tarifa_pactada || 0);
     setCupoEditado(emp.cupo_preventistas || 0);
-    const diaLimpio = String(emp.dia_cobro || "01").replace(/\D/g, "").slice(0, 2) || "01";
+    const diaLimpio = String(emp.dia_cobro || "01").replace(/\\D/g, "").slice(0, 2) || "01";
     setDiaCobroEditado(diaLimpio);
     setMonedaEditada(emp.moneda || "ARS");
     setPaisEditado(emp.pais || "Argentina");
@@ -348,3 +350,7 @@ export default function AdminClientes() {
     </div>
   );
 }
+`;
+
+fs.writeFileSync('src/AdminClientes.jsx', contenido, 'utf8');
+console.log('🎉 CODIGO_TEXTO_PLANO_ESCRITO_CORRECTAMENTE');

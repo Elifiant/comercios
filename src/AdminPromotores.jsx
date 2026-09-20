@@ -1,12 +1,4 @@
-import React, { useState, useEffect } from "react"; export default function AdminPromotores() { const [partners, setPartners] = useState(() => {
-    try {
-      const g = localStorage.getItem("rutacomercio_partners_v1");
-      if (g) return JSON.parse(g);
-    } catch (e) {}
-    return [ { id: "PR-8821", nombre: "Mariana Solís", email: "mariana.solis@rutacomercio.lat", telefono: "+54 9 351 234-8899", rolEtiqueta: "Senior Partner • Hermana", tipoAcuerdo: "Exclusiva", comisionPct: 7.5, activo: true, territorios: [ { pais: "Argentina", bandera: "🇦🇷", zona: "Córdoba (Capital & Gran Cba)" }, { pais: "Uruguay", bandera: "🇺🇾", zona: "Uruguay (País Completo)" }, { pais: "México", bandera: "🇲🇽", zona: "Jalisco (Guadalajara & Zapopan)" } ], auditoria: "142 PDVs Auditados • Preventistas Asignados: 6 Rutas", ultimaZona: "Jalisco (Hace 3 días)" }, { id: "PR-3419", nombre: "Carlos Mendoza", email: "c.mendoza.dist@rutacomercio.lat", telefono: "+54 9 11 6543-2211", rolEtiqueta: "Comisionista Regional", tipoAcuerdo: "Compartido (GBA)", comisionPct: 6.0, activo: true, territorios: [ { pais: "Argentina", bandera: "🇦🇷", zona: "GBA Sur (Quilmes, Berazategui, Avellaneda)" }, { pais: "Argentina", bandera: "🇦🇷", zona: "Santa Fe (Rosario & Cordón Industrial)" }, { pais: "Paraguay", bandera: "🇵🇾", zona: "Asunción (Gran Asunción & Luque)" } ], auditoria: "98 PDVs Auditados • Preventistas Asignados: 4 Rutas", ultimaZona: "Asunción / PY (Hace 1 semana)" }, { id: "PR-5102", nombre: "Valentina Rojas", email: "v.rojas@andestrack.cl", telefono: "+56 9 8765-4321", rolEtiqueta: "Country Partner Andino", tipoAcuerdo: "Exclusiva Región RM", comisionPct: 8.0, activo: true, territorios: [ { pais: "Chile", bandera: "🇨🇱", zona: "Santiago RM (Providencia, Las Condes)" }, { pais: "Chile", bandera: "🇨🇱", zona: "Valparaíso & Viña (Costa Central)" }, { pais: "Colombia", bandera: "🇨🇴", zona: "Medellín / Antioquia (Valle de Aburrá)" } ], auditoria: "176 PDVs Auditados • Preventistas Asignados: 8 Rutas", ultimaZona: "Medellín (Hace 2 semanas)"
-    }
-  ];
-  });
+import React, { useState, useEffect } from "react"; export default function AdminPromotores() { const [partners, setPartners] = useState([]);
   useEffect(() => {
     try {
       localStorage.setItem("rutacomercio_partners_v1", JSON.stringify(partners));

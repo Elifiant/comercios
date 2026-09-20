@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from "react";
+const fs = require('fs');
+
+const codigoCero = `import React, { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 export default function AdminClientes() {
@@ -11,14 +13,14 @@ export default function AdminClientes() {
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
   const [empresaSeleccionada, setEmpresaSeleccionada] = useState(null);
 
-  // Edición comercial (en cero real)
+  // Estados de edición comercial (en cero real)
   const [tarifaEditada, setTarifaEditada] = useState(0);
   const [cupoEditado, setCupoEditado] = useState(0);
   const [diaCobroEditado, setDiaCobroEditado] = useState("01");
   const [monedaEditada, setMonedaEditada] = useState("ARS");
   const [paisEditado, setPaisEditado] = useState("Argentina");
 
-  // Registro de cobro
+  // Estado de registro de pago
   const [montoPago, setMontoPago] = useState(0);
   const [metodoPago, setMetodoPago] = useState("Transferencia CBU/CVU");
 
@@ -49,7 +51,7 @@ export default function AdminClientes() {
     setEmpresaSeleccionada(emp);
     setTarifaEditada(emp.tarifa_pactada || 0);
     setCupoEditado(emp.cupo_preventistas || 0);
-    const diaLimpio = String(emp.dia_cobro || "01").replace(/\D/g, "").slice(0, 2) || "01";
+    const diaLimpio = String(emp.dia_cobro || "01").replace(/\\D/g, "").slice(0, 2) || "01";
     setDiaCobroEditado(diaLimpio);
     setMonedaEditada(emp.moneda || "ARS");
     setPaisEditado(emp.pais || "Argentina");
@@ -64,7 +66,7 @@ export default function AdminClientes() {
     const payload = {
       tarifa_pactada: Number(tarifaEditada) || 0,
       cupo_preventistas: Number(cupoEditado) || 0,
-      dia_cobro: "Día " + String(diaCobroEditado).padStart(2, "0") + " c/mes",
+      dia_cobro: "Día " + diaCobroEditado.padStart(2, "0") + " c/mes",
       moneda: monedaEditada,
       pais: paisEditado
     };
@@ -104,7 +106,7 @@ export default function AdminClientes() {
         fecha: new Date().toISOString()
       }]);
 
-      alert("Cobro asentado con éxito para " + empresaSeleccionada.nombre);
+      alert("✓ Cobro asentado con éxito para " + empresaSeleccionada.nombre);
       setMostrarModalPago(false);
       cargarDatosMaestros();
     } catch (err) {
@@ -129,13 +131,14 @@ export default function AdminClientes() {
     }
   };
 
-  // Métricas reales calculadas exclusivamente desde la base
+  // Métricas reales calculadas exclusivamente desde la base (cero chamuyo)
   const totalPreventistasCalle = perfiles.filter(p => p.rol === "preventista" || !p.rol).length;
-
+  
+  // Suma matemática pura de tarifas según lo cargado en Supabase
   const totalFacturacionARS = empresas
     .filter(e => !e.moneda || e.moneda === "ARS")
     .reduce((sum, e) => sum + (Number(e.tarifa_pactada) || 0), 0);
-
+  
   const totalFacturacionUSD = empresas
     .filter(e => e.moneda === "USD" || e.moneda === "USDT")
     .reduce((sum, e) => sum + (Number(e.tarifa_pactada) || 0), 0);
@@ -167,13 +170,11 @@ export default function AdminClientes() {
               {empresas.length > 0 ? "● En base de datos" : "Sin empresas cargadas"}
             </span>
           </div>
-
           <div style={{ backgroundColor: "#ffffff", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
             <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Preventistas en Calle</span>
             <div style={{ fontSize: "24px", fontWeight: "800", margin: "4px 0", color: "#0f172a" }}>{totalPreventistasCalle} en Operación</div>
             <span style={{ fontSize: "12px", color: "#2563eb", fontWeight: "700" }}>Flota activa</span>
           </div>
-
           <div style={{ backgroundColor: "#ffffff", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
             <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Facturación Mensual Estimada</span>
             <div style={{ fontSize: "20px", fontWeight: "800", margin: "4px 0", color: "#0f172a" }}>
@@ -181,7 +182,6 @@ export default function AdminClientes() {
             </div>
             <span style={{ fontSize: "12px", color: "#64748b" }}>Suma real de tarifas pactadas</span>
           </div>
-
           <div style={{ backgroundColor: "#ffffff", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
             <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Previsión 15 Días</span>
             <div style={{ fontSize: "24px", fontWeight: "800", margin: "4px 0", color: "#0f172a" }}>
@@ -191,7 +191,7 @@ export default function AdminClientes() {
           </div>
         </div>
 
-        {/* TABLA SUPABASE */}
+        {/* TABLA OFICIAL SUPABASE */}
         <div style={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflow: "hidden" }}>
           <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
@@ -226,7 +226,6 @@ export default function AdminClientes() {
                     const cantPrev = perfiles.filter(p => (p.empresa || "").toLowerCase().trim() === (emp.nombre || "").toLowerCase().trim()).length;
                     const cupoMax = Number(emp.cupo_preventistas) || 0;
                     const excedida = cupoMax > 0 ? cantPrev > cupoMax : false;
-                    const tarifaVal = Number(emp.tarifa_pactada) || 0;
 
                     return (
                       <tr key={emp.id || emp.nombre} style={{ borderBottom: "1px solid #f1f5f9" }}>
@@ -243,7 +242,7 @@ export default function AdminClientes() {
                           </div>
                         </td>
                         <td style={{ padding: "14px 16px" }}>
-                          <div style={{ fontWeight: "800", color: "#0f172a" }}>$ {tarifaVal.toLocaleString()} {emp.moneda || "ARS"}</div>
+                          <div style={{ fontWeight: "800", color: "#0f172a" }}>${Number(emp.tarifa_pactada || 0).toLocaleString()} {emp.moneda || "ARS"}</div>
                           <div style={{ fontSize: "11px", color: "#64748b" }}>{emp.modelo_cobro || "Plan Pactado"}</div>
                         </td>
                         <td style={{ padding: "14px 16px", color: "#475569", fontWeight: "700" }}>
@@ -259,9 +258,9 @@ export default function AdminClientes() {
                         </td>
                         <td style={{ padding: "14px 16px", textAlign: "right" }}>
                           <div style={{ display: "inline-flex", gap: "6px" }}>
-                            <button onClick={() => abrirCobro(emp)} style={{ backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", padding: "6px 10px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>💳 Cobro</button>
-                            <button onClick={() => abrirEdicion(emp)} style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", color: "#1d4ed8", padding: "6px 10px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>✏️ Editar</button>
-                            <button onClick={() => eliminarEmpresa(emp)} style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", padding: "6px 8px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>🗑️</button>
+                            <button onClick={() => abrirCobro(emp)} style={{ backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", padding: "6px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>💳 Cobro</button>
+                            <button onClick={() => abrirEdicion(emp)} style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", color: "#1d4ed8", padding: "6px 10px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>✏️ Editar</button>
+                            <button onClick={() => eliminarEmpresa(emp)} style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", padding: "6px 8px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>🗑️</button>
                           </div>
                         </td>
                       </tr>
@@ -348,3 +347,7 @@ export default function AdminClientes() {
     </div>
   );
 }
+`;
+
+fs.writeFileSync('src/AdminClientes.jsx', codigoCero, 'utf8');
+console.log('🎉 ADMIN_CLIENTES_EN_CERO_REAL_SIN_CHAMUYO');
