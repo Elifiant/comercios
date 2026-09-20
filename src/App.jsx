@@ -1,3 +1,4 @@
+/* v2.4.9-logo-ok */
 import TomaPedidos from "./TomaPedidos";
 const obtenerDiaActual = () => {
   const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
