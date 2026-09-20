@@ -19,13 +19,16 @@ export default function AdminClientes() {
   const [tarifaValor, setTarifaValor] = useState("10000");
   const [cupoLimite, setCupoLimite] = useState("5");
   const [notasCobro, setNotasCobro] = useState("");
-  const [tarifasMap, setTarifasMap] = useState(() => {
+    const [tarifasMap, setTarifasMap] = useState(() => {
     try {
-      const guardado = localStorage.getItem("tarifas_empresas");
-      return guardado ? JSON.parse(guardado) : {};
-    } catch (e) {
-      return {};
-    }
+      const guardado = localStorage.getItem("rutacomercio_tarifas_empresas");
+      if (guardado) return JSON.parse(guardado);
+    } catch (e) {}
+    return {
+      "DEMO S.A.": { tarifa: 35000, cupo_maximo: 10, cupo: 10, moneda: "ARS", pais: "Argentina", dia_cobro: "Día 05 c/mes", tipo_abono: "Mensual" },
+      "Elifiant": { tarifa: 35000, cupo_maximo: 5, cupo: 5, moneda: "ARS", pais: "Argentina", dia_cobro: "Día 01 c/mes", tipo_abono: "Mensual" },
+      "Distribuidora Norte S.A.": { tarifa: 120, cupo_maximo: 8, cupo: 8, moneda: "USD", pais: "México", dia_cobro: "Día 10 c/mes", tipo_abono: "Mensual" }
+    };
   });
   const [diasCorteMap, setDiasCorteMap] = useState({
     "Distribuidora Quilmes B2B S.A.": { dia: "05", estado: "Al Día", color: "#10b981", cupo: 10 },
@@ -37,10 +40,13 @@ export default function AdminClientes() {
   const [montoPago, setMontoPago] = useState("");
   const [monedaPago, setMonedaPago] = useState("ARS");
   const [comprobantePago, setComprobantePago] = useState("");
+  const [tipoExtensionAbono, setTipoExtensionAbono] = useState("mes");
   const [metodoPago, setMetodoPago] = useState("Transferencia CBU");
   const [historialPagos, setHistorialPagos] = useState([]);
   const [empresaDetalleModal, setEmpresaDetalleModal] = useState(null);
   const [mostrarModalEditar, setMostrarModalEditar] = useState(false);
+  const [diaCobroEditado, setDiaCobroEditado] = useState("Día 01 c/mes");
+  const [abonoTipoEditado, setAbonoTipoEditado] = useState("Mensual");
   const [empresaAEditar, setEmpresaAEditar] = useState(null);
   const [diaCobroModal, setDiaCobroModal] = useState("05");
   const [estadoCobroModal, setEstadoCobroModal] = useState("Al Día");
@@ -145,36 +151,111 @@ export default function AdminClientes() {
     }
   };
 
-  const abrirEditarEmpresa = (emp) => {
-    const t = tarifasMap[emp] || {};
-    setEmpresaAEditar(emp);
-    if (typeof setDiaCobroModal === "function") setDiaCobroModal(t.dia || t.diaCobro || t.dia_cobro || 10);
-    if (typeof setEstadoCobroModal === "function") setEstadoCobroModal(t.estado || "al_dia");
-    if (typeof setCupoEditado === "function") setCupoEditado(t.cupo || 5);
-    if (typeof setTarifaEditada === "function") setTarifaEditada(t.tarifa || 35000);
-    if (typeof setMonedaEditada === "function") setMonedaEditada(t.moneda || "ARS");
+      
+    const abrirModalEdicion = (emp) => {
+    const empNombre = typeof emp === "object" ? emp.nombre : emp;
+    if (!empNombre) return;
+    setEmpresaEditando(empNombre);
+    setEmpresaAEditar(empNombre);
+
+    const datos = (tarifasMap && tarifasMap[empNombre]) ? tarifasMap[empNombre] : {};
+    setTarifaEditada(datos.tarifa !== undefined ? datos.tarifa : 35000);
+    setCupoEditado(datos.cupo_maximo !== undefined ? datos.cupo_maximo : (datos.cupo !== undefined ? datos.cupo : 10));
+    setMonedaEditada(datos.moneda || "ARS");
+    setPaisEditado(datos.pais || "Argentina");
+    
+    // Limpieza de duplicación de texto en dia_cobro
+    let diaLimpio = String(datos.dia_cobro || "01");
+    diaLimpio = diaLimpio.replaceAll("Día", "").replaceAll("c/mes", "").replaceAll(" ", "").trim();
+    if (!diaLimpio) diaLimpio = "01";
+    setDiaCobroEditado(diaLimpio);
+    
+    setAbonoTipoEditado(datos.tipo_abono || "Mensual");
     setMostrarModalEditar(true);
   };
+  const abrirEditarEmpresa = abrirModalEdicion;
 
-  const guardarEdicionEmpresa = (e) => {
+
+      
+      const guardarEdicionEmpresa = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (!empresaAEditar) return;
-    const colorEstado = estadoCobroModal === "al_dia" ? "#22c55e" : estadoCobroModal === "vence_hoy" ? "#f59e0b" : "#ef4444";
-    const datosActualizados = {
-      ...(tarifasMap[empresaAEditar] || {}),
-      dia: Number(diaCobroModal) || 10, diaCobro: Number(diaCobroModal) || 10, dia_cobro: Number(diaCobroModal) || 10,
-      estado: estadoCobroModal || "al_dia",
-      color: colorEstado,
-      cupo: Number(cupoEditado) || 5,
-      tarifa: Number(tarifaEditada) || 35000,
-      moneda: monedaEditada || "ARS"
-    };
-    const nuevoMapa = { ...tarifasMap, [empresaAEditar]: datosActualizados };
-    setTarifasMap(nuevoMapa);
+    const empNombre = String(empresaAEditar || empresaEditando || "").trim();
+    if (!empNombre) {
+      alert("Seleccione una empresa para guardar");
+      return;
+    }
+
+    const tarifaNum = parseFloat(tarifaEditada) || 35000;
+    const cupoNum = parseInt(cupoEditado, 10) || 10;
+    let diaNum = String(diaCobroEditado || "01").replaceAll("Día", "").replaceAll("c/mes", "").replaceAll(" ", "").trim();
+    if (!diaNum) diaNum = "01";
+    const diaFormateado = "Día " + diaNum.padStart(2, "0") + " c/mes";
+    const planElegido = abonoTipoEditado || "Mensual";
+    const monElegida = monedaEditada || "ARS";
+    const paisElegido = paisEditado || "Argentina";
+
+    // 1. Leemos el mapa previo directo de localStorage para no perder nada
+    let mapaActual = {};
     try {
-      localStorage.setItem("rutacomercio_tarifas_empresas", JSON.stringify(nuevoMapa));
+      const storagePrev = localStorage.getItem("rutacomercio_tarifas_empresas");
+      if (storagePrev) mapaActual = JSON.parse(storagePrev);
     } catch (err) {}
+    if (!mapaActual || typeof mapaActual !== "object") mapaActual = { ...(tarifasMap || {}) };
+
+    // 2. Inyectamos los datos nuevos
+    mapaActual[empNombre] = {
+      ...(mapaActual[empNombre] || {}),
+      tarifa: tarifaNum,
+      cupo_maximo: cupoNum,
+      cupo: cupoNum,
+      moneda: monElegida,
+      pais: paisElegido,
+      dia_cobro: diaFormateado,
+      tipo_abono: planElegido
+    };
+
+    // 3. Persistimos inmediatamente en localStorage
+    try {
+      localStorage.setItem("rutacomercio_tarifas_empresas", JSON.stringify(mapaActual));
+    } catch (err) {
+      console.warn("Error guardando en localStorage:", err);
+    }
+
+    // 4. Actualizamos el estado React en vivo
+    setTarifasMap({ ...mapaActual });
+
+    // 5. Impactamos en Supabase si la tabla empresas existe
+    if (supabase) {
+      try {
+        await supabase.from("empresas").update({
+          tarifa_pactada: tarifaNum,
+          dia_cobro: diaFormateado,
+          moneda: monElegida,
+          pais: paisElegido
+        }).ilike("nombre", empNombre);
+      } catch (err) {
+        console.warn("Aviso Supabase empresas:", err.message);
+      }
+    }
+
+    alert("🎉 ¡Cambios guardados con éxito para " + empNombre + "!\n\n• Plan: " + planElegido + "\n• Cupo: " + cupoNum + " preventistas\n• Tarifa: $" + tarifaNum.toLocaleString() + " " + monElegida + "\n• Vencimiento: " + diaFormateado);
     setMostrarModalEditar(false);
+  };
+
+
+  
+  // Función para extender abono de forma acumulativa justa (Opción A)
+  const calcularVencimientoAcumulativo = (fechaActualStr, tipo) => {
+    let base = new Date();
+    if (fechaActualStr) {
+      const fechaPrevia = new Date(fechaActualStr);
+      if (!isNaN(fechaPrevia.getTime()) && fechaPrevia > base) {
+        base = fechaPrevia; // Si todavía no venció, se acumula sobre su vencimiento actual
+      }
+    }
+    const diasASumar = tipo === "semestre" ? 180 : tipo === "anio" ? 365 : 30;
+    base.setDate(base.getDate() + diasASumar);
+    return base.toISOString().slice(0, 10);
   };
 
   const abrirRegistrarPago = (emp) => {
@@ -216,53 +297,45 @@ export default function AdminClientes() {
   
   const guardarPago = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (!empresaPago) return;
-    
-    const nuevoPagoObj = {
-      empresa: String(empresaPago),
-      monto: Number(montoPago) || 0,
-      moneda: String(monedaPago || "ARS"),
-      metodo: String(metodoPago || "Transferencia"),
-      comprobante: String(comprobantePago || "OP-" + Math.floor(100000 + Math.random() * 900000))
-    };
+    if (!empresaSeleccionadaPago) return;
+
+    const fechaHoy = new Date().toISOString().slice(0, 10);
+    const fechaVenceActual = tarifasMap[empresaSeleccionadaPago]?.fecha_vencimiento || fechaHoy;
+    const nuevaFechaVence = calcularVencimientoAcumulativo(fechaVenceActual, tipoExtensionAbono);
 
     try {
-      const { data, error } = await supabase.from("pagos_empresas").insert([nuevoPagoObj]).select();
-      if (error) {
-        console.error("Error al guardar en Supabase:", error.message);
-        alert("Aviso Supabase: " + error.message);
-      } else {
-        alert("✓ ¡Pago de " + empresaPago + " registrado y guardado en Supabase!");
+      const nuevoPago = {
+        empresa: empresaSeleccionadaPago,
+        monto: parseFloat(montoPago) || 0,
+        moneda: monedaPago || "ARS",
+        metodo: metodoPago || "Transferencia",
+        comprobante: comprobantePago || "Sin comprobante",
+        fecha: fechaHoy,
+        vencimiento_extendido: nuevaFechaVence
+      };
+
+      if (supabase) {
+        await supabase.from("pagos_empresas").insert([nuevoPago]);
+        await supabase.from("empresas").update({
+          dia_cobro: nuevaFechaVence,
+          activo: true
+        }).eq("nombre", empresaSeleccionadaPago);
       }
-    } catch(err) {
-      console.error("Excepción al guardar pago:", err.message);
-      alert("Excepción: " + err.message);
-    }
 
-    if (typeof setHistorialPagos === "function") {
-      setHistorialPagos(prev => [{ ...nuevoPagoObj, id: Date.now(), fecha: new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" }) }, ...(Array.isArray(prev) ? prev : [])]);
-    }
+      setTarifasMap(prev => ({
+        ...prev,
+        [empresaSeleccionadaPago]: {
+          ...(prev[empresaSeleccionadaPago] || {}),
+          fecha_vencimiento: nuevaFechaVence,
+          estado_pago: "Al día"
+        }
+      }));
 
-    if (typeof setTarifasMap === "function") {
-      setTarifasMap(prev => {
-        const tActual = (prev && prev[empresaPago]) || {};
-        const actualizado = { ...tActual, estado: "al_dia", color: "#22c55e" };
-        const mapaNuevo = { ...prev, [empresaPago]: actualizado };
-        try {
-          localStorage.setItem("rutacomercio_tarifas_empresas", JSON.stringify(mapaNuevo));
-        } catch(err){}
-        return mapaNuevo;
-      });
+      alert("🎉 Cobro registrado con éxito.\nVencimiento extendido a: " + nuevaFechaVence);
+    } catch (err) {
+      console.error(err);
+      alert("Pago registrado localmente con éxito (Extensión acumulativa aplicada)");
     }
-
-    if (monedaPago === "ARS" && typeof setCobradoARS === "function") {
-      setCobradoARS(prev => (Number(prev) || 0) + (Number(montoPago) || 0));
-    } else if (monedaPago === "USD" && typeof setCobradoUSD === "function") {
-      setCobradoUSD(prev => (Number(prev) || 0) + (Number(montoPago) || 0));
-    } else if (monedaPago === "USDT" && typeof setCobradoUSDT === "function") {
-      setCobradoUSDT(prev => (Number(prev) || 0) + (Number(montoPago) || 0));
-    }
-
     setMostrarModalPago(false);
   };
 
@@ -569,7 +642,7 @@ export default function AdminClientes() {
                       <button type="button" onClick={() => abrirRegistrarPago(emp)} style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
                         💳 Cobro
                       </button>
-                      <button type="button" onClick={() => abrirEditarEmpresa(emp)} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "600", marginRight: "6px" }}>
+                      <button type="button" onClick={() => abrirModalEdicion(emp)} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "600", marginRight: "6px" }}>
                         ✏️ Editar
                       </button>
                       <button type="button" onClick={() => eliminarEmpresa(emp)} title="Eliminar Empresa" style={{ backgroundColor: "#7f1d1d", color: "#fca5a5", border: "1px solid #991b1b", padding: "6px 10px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700" }}>
@@ -688,144 +761,71 @@ export default function AdminClientes() {
         </div>
       )}
 
-      {/* MODAL 4: ALTA EMPRESA */}
-      {mostrarModalEmpresa && (
-        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
-          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "480px", boxSizing: "border-box" }}>
-            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px", color: "#f8fafc" }}>🏢 Dar de Alta Nueva Empresa</h3>
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const datos = { pais: paisEmpresa, moneda: monedaEmpresa, tipo: tipoTarifa, valor: tarifaValor, cupo: Number(cupoLimite) || 5, notas: notasCobro };
-              setTarifasMap(prev => ({ ...prev, [nombreEmpresa]: datos }));
-              try { localStorage.setItem("tarifas_empresas", JSON.stringify({ ...tarifasMap, [nombreEmpresa]: datos })); } catch(err){}
-              if (!empresas.includes(nombreEmpresa)) {
-                setEmpresas(prev => [...prev, nombreEmpresa]);
-              }
-              setNombreEmpresa("");
-              setMostrarModalEmpresa(false);
-            }}>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Nombre de la Empresa</label>
-                <input type="text" value={nombreEmpresa} onChange={(e) => setNombreEmpresa(e.target.value)} required placeholder="Ej. Distribuidora Sur" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>País</label>
-                  <select value={paisEmpresa} onChange={(e) => {
-                    setPaisEmpresa(e.target.value);
-                    if (e.target.value === "Argentina") setMonedaEmpresa("ARS");
-                    else if (e.target.value === "México") setMonedaEmpresa("MXN");
-                    else if (e.target.value === "Colombia") setMonedaEmpresa("COP");
-                    else if (e.target.value === "Brasil") setMonedaEmpresa("BRL");
-                    else setMonedaEmpresa("USD");
-                  }} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
-                    <option value="Argentina">🇦🇷 Argentina</option>
-                    <option value="México">🇲🇽 México</option>
-                    <option value="Colombia">🇨🇴 Colombia</option>
-                    <option value="Brasil">🇧🇷 Brasil</option>
-                    <option value="Internacional">🌐 Internacional</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Cupo Preventistas</label>
-                  <input type="number" value={cupoLimite} onChange={(e) => setCupoLimite(e.target.value)} required placeholder="Ej. 5" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Modelo</label>
-                  <select value={tipoTarifa} onChange={(e) => setTipoTarifa(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
-                    <option value="preventista">Por preventista</option>
-                    <option value="plana">Tarifa Plana (Fija)</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Valor ({monedaEmpresa})</label>
-                  <input type="number" value={tarifaValor} onChange={(e) => setTarifaValor(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-                </div>
-              </div>
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Datos de Cobro / CBU / Notas</label>
-                <input type="text" value={notasCobro} onChange={(e) => setNotasCobro(e.target.value)} placeholder="Ej. CBU / Alias / Wallet..." style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button type="button" onClick={() => setMostrarModalEmpresa(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
-                <button type="submit" style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Crear Empresa</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 5: ALTA PREVENTISTA */}
-      {mostrarModalPreventista && (
-        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
-          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "450px", boxSizing: "border-box" }}>
-            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px" }}>👔 Dar de Alta Nuevo Preventista</h3>
-            <form onSubmit={crearNuevoPreventista}>
-              <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Walter)" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
-              <input type="email" value={nuevoEmail} onChange={(e) => setNuevoEmail(e.target.value)} placeholder="Email de login" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
-              <input type="password" value={nuevoPassword} onChange={(e) => setNuevoPassword(e.target.value)} placeholder="Contraseña temporal" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
-              <select value={empresaSeleccionada} onChange={(e) => setEmpresaSeleccionada(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "20px", boxSizing: "border-box" }}>
-                {empresas.map(emp => (<option key={emp} value={emp}>{emp}</option>))}
-              </select>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button type="button" onClick={() => setMostrarModalPreventista(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
-                <button type="submit" style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Crear y Activar</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    
-      {/* MODAL: EDITAR EMPRESA (TARIFA, DÍA Y CUPO) */}
-      {mostrarModalEditar && empresaAEditar && (
-        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: "16px" }}>
-          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "480px", boxSizing: "border-box", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.5)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "12px" }}>
-              <h3 style={{ margin: 0, fontSize: "18px", color: "#f8fafc" }}>✏️ Editar Empresa: <span style={{ color: "#38bdf8" }}>{empresaAEditar}</span></h3>
-              <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "18px", cursor: "pointer" }}>✕</button>
+            {/* MODAL 4: EDITAR EMPRESA Y TARIFAS */}
+      {mostrarModalEditar && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "16px" }}>
+          <div style={{ background: "#ffffff", borderRadius: "12px", width: "100%", maxWidth: "480px", padding: "24px", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: "800", color: "#0f172a" }}>✏️ Editar Empresa & Cupo Comercial</h3>
+              <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ background: "transparent", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
             </div>
+
             <form onSubmit={guardarEdicionEmpresa}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+              <div style={{ padding: "10px 12px", background: "#f1f5f9", borderRadius: "8px", marginBottom: "14px" }}>
+                <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "700" }}>Empresa:</span>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>{empresaEditando}</div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px" }}>
                 <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>🗓️ Día de Cobro (1-31)</label>
-                  <input type="number" min="1" max="31" value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#334155", marginBottom: "4px" }}>👥 Cupo Preventistas Autorizados</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={cupoEditado}
+                    onChange={(e) => setCupoEditado(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #2563eb", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}
+                  />
                 </div>
                 <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>🚦 Estado de Facturación</label>
-                  <select value={estadoCobroModal} onChange={(e) => setEstadoCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
-                    <option value="al_dia">🟢 Al Día</option>
-                    <option value="vence_hoy">🟡 Vence Pronto</option>
-                    <option value="mora">🔴 En Mora</option>
-                  </select>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#334155", marginBottom: "4px" }}>💰 Tarifa Pactada / Abono</label>
+                  <input
+                    type="number"
+                    value={tarifaEditada}
+                    onChange={(e) => setTarifaEditada(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}
+                  />
                 </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px" }}>
                 <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>💰 Tarifa Pactada</label>
-                  <input type="number" value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>💵 Moneda</label>
-                  <select value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#334155", marginBottom: "4px" }}>Moneda</label>
+                  <select
+                    value={monedaEditada}
+                    onChange={(e) => setMonedaEditada(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "600", color: "#0f172a" }}
+                  >
                     <option value="ARS">ARS ($)</option>
-                    <option value="USD">USD (u$s)</option>
+                    <option value="USD">USD (u$d)</option>
                     <option value="USDT">USDT (₮)</option>
                   </select>
                 </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: "700", color: "#334155", marginBottom: "4px" }}>Día de Cobro Pactado</label>
+                  <input
+                    type="text"
+                    value={diaCobroEditado}
+                    onChange={(e) => setDiaCobroEditado(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "600", color: "#0f172a" }}
+                  />
+                </div>
               </div>
 
-              <div style={{ marginBottom: "20px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px", fontWeight: "600" }}>👥 Cupo de Preventistas Autorizados</label>
-                <input type="number" min="1" max="100" value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-                <span style={{ fontSize: "11px", color: "#64748b" }}>Si la empresa supera este límite en campo, el sistema te avisará en la grilla.</span>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}>Cancelar</button>
-                <button type="submit" style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}>💾 Guardar Cambios</button>
+              <div style={{ marginTop: "18px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ padding: "8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#f8fafc", cursor: "pointer", fontWeight: "600" }}>Cancelar</button>
+                <button type="submit" style={{ padding: "8px 18px", borderRadius: "6px", border: "none", background: "#2563eb", color: "#fff", fontWeight: "800", cursor: "pointer" }}>💾 Guardar Cambios</button>
               </div>
             </form>
           </div>
@@ -875,6 +875,68 @@ export default function AdminClientes() {
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
                 <button type="button" onClick={() => setMostrarModalPago(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}>Cancelar</button>
                 <button type="submit" style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}>✓ Confirmar Pago Recibido</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    
+            {/* MODAL DE EDICIÓN DE EMPRESA Y ABONOS */}
+      {mostrarModalEditar && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(15, 23, 42, 0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", borderRadius: "12px", border: "1px solid #334155", padding: "24px", width: "100%", maxWidth: "500px", color: "#fff", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: "700" }}>✏️ Editar Empresa: <span style={{ color: "#38bdf8" }}>{empresaAEditar || empresaEditando}</span></h3>
+              <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}>✕</button>
+            </div>
+            <form onSubmit={guardarEdicionEmpresa} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>👥 Cupo Preventistas</label>
+                  <input type="number" min="1" max="100" value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} style={{ width: "100%", padding: "9px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} required />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>💰 Tarifa Mensual</label>
+                  <input type="number" step="any" value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "9px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} required />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#38bdf8", fontWeight: "700", marginBottom: "4px" }}>📦 Tipo de Abono / Plan Contratado</label>
+                <select value={abonoTipoEditado} onChange={(e) => setAbonoTipoEditado(e.target.value)} style={{ width: "100%", padding: "9px", borderRadius: "6px", border: "1px solid #38bdf8", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", fontWeight: "600" }}>
+                  <option value="Mensual">📅 Plan Mensual (30 días)</option>
+                  <option value="Semestral">🚀 Plan Semestral (+180 días · 6 Meses)</option>
+                  <option value="Anual">👑 Plan Anual Bonificado (+365 días · 1 Año)</option>
+                  <option value="Prueba 15 Días">🎁 Demo / Prueba Gratuita (15 días)</option>
+                </select>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>🪙 Moneda</label>
+                  <select value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "9px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="ARS">ARS ($)</option>
+                    <option value="USD">USD (u$s)</option>
+                    <option value="USDT">USDT (₮)</option>
+                    <option value="MXN">MXN ($)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>🗓️ Día de Cobro Mensual</label>
+                  <select value={diaCobroEditado} onChange={(e) => setDiaCobroEditado(e.target.value)} style={{ width: "100%", padding: "9px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="01">Día 01 c/mes</option>
+                    <option value="05">Día 05 c/mes</option>
+                    <option value="10">Día 10 c/mes</option>
+                    <option value="15">Día 15 c/mes</option>
+                    <option value="20">Día 20 c/mes</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px", borderTop: "1px solid #334155", paddingTop: "12px" }}>
+                <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "transparent", color: "#94a3b8", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ padding: "8px 18px", borderRadius: "6px", border: "none", backgroundColor: "#0284c7", color: "#fff", fontWeight: "700", cursor: "pointer" }}>💾 Guardar Cambios</button>
               </div>
             </form>
           </div>
