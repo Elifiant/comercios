@@ -61,6 +61,14 @@ function iconoAutoGPS(nombre) {
 }
 
 export default function Supervisor() {
+  const cerrarSesionSupervisor = async () => {
+    try {
+      await supabase.auth.signOut();
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch(e) {}
+    window.location.href = "/";
+  };
 
   const [comercios, setComercios] = useState([]);
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
@@ -384,6 +392,7 @@ export default function Supervisor() {
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* CABECERA PRINCIPAL */}
       <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+        {/* IZQUIERDA: MARCA Y LOGO OFICIAL */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <img src="/logo.svg" alt="RutaComercio" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
           <div>
@@ -397,6 +406,66 @@ export default function Supervisor() {
               Panel de Control y Supervisión Territorial
             </p>
           </div>
+        </div>
+
+        {/* DERECHA: ESTADO ABONO + PAGOS + SALIR */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          {/* CARTEL DE VIGENCIA DE ABONO */}
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            backgroundColor: "#f8fafc",
+            border: "1px solid #cbd5e1",
+            padding: "6px 12px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontWeight: "700",
+            color: "#334155"
+          }}>
+            <span>🗓️</span>
+            <span>Abono: <strong style={{ color: "#16a34a" }}>18 días restantes</strong></span>
+          </div>
+
+          <a
+            href="/pagos"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              backgroundColor: "#eff6ff",
+              color: "#2563eb",
+              border: "1px solid #bfdbfe",
+              padding: "7px 14px",
+              borderRadius: "8px",
+              fontSize: "13px",
+              fontWeight: "700",
+              textDecoration: "none",
+              cursor: "pointer"
+            }}
+          >
+            <span>💳</span> Pagos & Suscripción
+          </a>
+
+          <button
+            type="button"
+            onClick={cerrarSesionSupervisor}
+            style={{
+              backgroundColor: "#fee2e2",
+              color: "#dc2626",
+              border: "1px solid #fca5a5",
+              padding: "7px 14px",
+              borderRadius: "8px",
+              fontSize: "13px",
+              fontWeight: "700",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px"
+            }}
+          >
+            <span>✕</span> Salir
+          </button>
         </div>
       </header>
 
