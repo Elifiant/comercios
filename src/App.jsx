@@ -985,6 +985,214 @@ export default function App() {
     );
   }
 
+  if (comercioSeleccionado) {
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#090d16", color: "#fff", fontFamily: "sans-serif", paddingBottom: "40px" }}>
+        {/* CABECERA DE LA FICHA */}
+        <header style={{ padding: "12px 16px", backgroundColor: "#0f172a", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 10 }}>
+          <button
+            onClick={() => setComercioSeleccionado(null)}
+            style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "15px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontWeight: "bold" }}
+          >
+            ← Volver al Listado
+          </button>
+          <span style={{ fontSize: "12px", color: "#38bdf8", fontWeight: "bold", background: "rgba(56,189,248,0.1)", padding: "4px 8px", borderRadius: "6px" }}>
+            Ficha Oficial
+          </span>
+        </header>
+
+        <div style={{ padding: "16px", maxWidth: "600px", margin: "0 auto" }}>
+          {/* BOTÓN TOMAR PEDIDO DESTACADO ARRIBA */}
+          <button
+            onClick={() => setTomandoPedido(true)}
+            style={{ width: "100%", padding: "14px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "12px", fontSize: "16px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", boxShadow: "0 4px 12px rgba(37,99,235,0.4)", marginBottom: "16px" }}
+          >
+            <span>📦</span> Tomar Pedido / Reedición
+          </button>
+
+          {/* FOTO DE FACHADA */}
+          <div style={{ marginBottom: "16px", borderRadius: "12px", overflow: "hidden", backgroundColor: "#0f172a", border: "1px solid #1e293b", textAlign: "center" }}>
+            {comercioSeleccionado.foto_url ? (
+              <img src={comercioSeleccionado.foto_url} alt="Fachada" style={{ width: "100%", maxHeight: "240px", objectFit: "cover" }} />
+            ) : (
+              <div style={{ padding: "30px 16px", color: "#64748b" }}>
+                <span style={{ fontSize: "36px", display: "block", marginBottom: "8px" }}>📷</span>
+                Sin foto de fachada registrada
+              </div>
+            )}
+            <div style={{ padding: "10px", backgroundColor: "#0f172a", borderTop: "1px solid #1e293b" }}>
+              <label style={{ backgroundColor: "#334155", color: "#fff", padding: "8px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", cursor: "pointer", display: "inline-block" }}>
+                📷 {comercioSeleccionado.foto_url ? "Cambiar Foto de Fachada" : "Capturar Foto de Fachada"}
+                <input type="file" accept="image/*" capture="environment" onChange={subirFotoFachada} style={{ display: "none" }} />
+              </label>
+            </div>
+          </div>
+
+          {/* FORMULARIO Y DATOS DEL COMERCIO */}
+          <div style={{ backgroundColor: "#0f172a", padding: "16px", borderRadius: "12px", border: "1px solid #1e293b", marginBottom: "16px" }}>
+            <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", fontWeight: "bold", marginBottom: "6px" }}>Nombre del Comercio</label>
+            <input
+              type="text"
+              value={comercioSeleccionado.nombre || ""}
+              onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, nombre: e.target.value })}
+              style={{ width: "100%", padding: "10px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "15px", boxSizing: "border-box", marginBottom: "12px" }}
+            />
+
+            <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", fontWeight: "bold", marginBottom: "6px" }}>Dirección</label>
+            <input
+              type="text"
+              value={comercioSeleccionado.direccion || ""}
+              onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, direccion: e.target.value })}
+              style={{ width: "100%", padding: "10px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "14px", boxSizing: "border-box", marginBottom: "12px" }}
+            />
+
+            <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", fontWeight: "bold", marginBottom: "6px" }}>Rubro</label>
+            <input
+              type="text"
+              value={comercioSeleccionado.rubro || ""}
+              onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, rubro: e.target.value })}
+              style={{ width: "100%", padding: "10px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "14px", boxSizing: "border-box", marginBottom: "12px" }}
+            />
+
+            <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", fontWeight: "bold", marginBottom: "6px" }}>🗓️ Día de Visita Asignado</label>
+            <select
+              value={comercioSeleccionado.dia_visita || "TODOS"}
+              onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, dia_visita: e.target.value })}
+              style={{ width: "100%", padding: "10px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "14px", boxSizing: "border-box", marginBottom: "12px" }}
+            >
+              <option value="TODOS">Todos los días (Flexible)</option>
+              <option value="Lunes">Lunes</option>
+              <option value="Martes">Martes</option>
+              <option value="Miércoles">Miércoles</option>
+              <option value="Jueves">Jueves</option>
+              <option value="Viernes">Viernes</option>
+              <option value="Sábado">Sábado</option>
+            </select>
+
+            <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", fontWeight: "bold", marginBottom: "6px" }}>Teléfono / WhatsApp</label>
+            <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+              <input
+                type="text"
+                value={comercioSeleccionado.telefono || ""}
+                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, telefono: e.target.value })}
+                placeholder="Ej: 1122501680"
+                style={{ flex: 1, padding: "10px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "14px", boxSizing: "border-box" }}
+              />
+              <button
+                type="button"
+                onClick={enviarWhatsApp}
+                style={{ padding: "10px 14px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+              >
+                💬 Chat
+              </button>
+            </div>
+
+            {/* SECCIÓN FISCAL CUIT Y CONDICIÓN */}
+            <div style={{ padding: "12px", backgroundColor: "#090d16", borderRadius: "8px", border: "1px solid #1e293b", marginBottom: "12px" }}>
+              <div style={{ fontSize: "12px", fontWeight: "bold", color: "#38bdf8", marginBottom: "8px" }}>🏛️ Datos de Facturación Fiscal</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "8px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", color: "#64748b", marginBottom: "4px" }}>CUIT / DNI</label>
+                  <input
+                    type="text"
+                    value={comercioSeleccionado.cuit || ""}
+                    onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, cuit: e.target.value })}
+                    placeholder="20-XXXXXXXX-X"
+                    style={{ width: "100%", padding: "8px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "6px", color: "#fff", fontSize: "13px", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "11px", color: "#64748b", marginBottom: "4px" }}>Condición Fiscal</label>
+                  <input
+                    type="text"
+                    value={comercioSeleccionado.condicion_fiscal || ""}
+                    onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, condicion_fiscal: e.target.value })}
+                    placeholder="Resp. Inscripto / Monotributo"
+                    style={{ width: "100%", padding: "8px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "6px", color: "#fff", fontSize: "13px", boxSizing: "border-box" }}
+                  />
+                </div>
+              </div>
+              <label style={{ display: "block", fontSize: "11px", color: "#64748b", marginBottom: "4px" }}>Razón Social</label>
+              <input
+                type="text"
+                value={comercioSeleccionado.razon_social || ""}
+                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, razon_social: e.target.value })}
+                placeholder="Razón Social Fiscal"
+                style={{ width: "100%", padding: "8px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "6px", color: "#fff", fontSize: "13px", boxSizing: "border-box" }}
+              />
+            </div>
+
+            {/* SECCIÓN NOTAS DE AUDIO / VOZ */}
+            <div style={{ padding: "12px", backgroundColor: "#090d16", borderRadius: "8px", border: "1px solid #1e293b", marginBottom: "12px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "#38bdf8" }}>🎙️ Nota de Voz del Cliente</span>
+                {grabandoAudio && <span style={{ fontSize: "11px", color: "#ef4444", fontWeight: "bold" }}>● Grabando...</span>}
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {!grabandoAudio ? (
+                  <button
+                    type="button"
+                    onClick={iniciarGrabacionVoz}
+                    style={{ padding: "8px 12px", backgroundColor: "#ef4444", color: "#fff", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}
+                  >
+                    🔴 Grabar Nota de Voz
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={detenerGrabacionVoz}
+                    style={{ padding: "8px 12px", backgroundColor: "#3b82f6", color: "#fff", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}
+                  >
+                    ⏹ Detener y Guardar
+                  </button>
+                )}
+                {comercioSeleccionado.notas_audio && (
+                  <audio controls src={comercioSeleccionado.notas_audio} style={{ height: "36px", flex: 1 }} />
+                )}
+              </div>
+            </div>
+
+            {/* NOTAS ESCRITAS */}
+            <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", fontWeight: "bold", marginBottom: "6px" }}>Notas Escritas</label>
+            <textarea
+              value={comercioSeleccionado.notas || ""}
+              onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, notas: e.target.value })}
+              rows={3}
+              style={{ width: "100%", padding: "10px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "14px", boxSizing: "border-box", marginBottom: "16px", resize: "vertical" }}
+            />
+
+            {/* BOTÓN AJUSTAR UBICACIÓN EXACTA */}
+            <button
+              type="button"
+              onClick={() => setEditandoUbicacion(true)}
+              style={{ width: "100%", padding: "10px", backgroundColor: "#334155", color: "#fff", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: "bold", cursor: "pointer", marginBottom: "16px" }}
+            >
+              📍 Ajustar Ubicación en Mapa
+            </button>
+
+            {/* BOTÓN GUARDAR Y ELIMINAR */}
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                type="button"
+                onClick={guardarEdicion}
+                style={{ flex: 2, padding: "12px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontSize: "15px", fontWeight: "bold", cursor: "pointer" }}
+              >
+                💾 Guardar Cambios
+              </button>
+              <button
+                type="button"
+                onClick={() => eliminarComercio(comercioSeleccionado.id)}
+                style={{ flex: 1, padding: "12px", backgroundColor: "#dc2626", color: "#fff", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: "bold", cursor: "pointer" }}
+              >
+                🗑️ Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
       <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif', paddingBottom: '40px' }}>
         <header style={{ padding: "12px 16px", backgroundColor: "#0f172a", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 10 }}>
