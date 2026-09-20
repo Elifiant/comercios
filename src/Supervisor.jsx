@@ -103,7 +103,7 @@ export default function Supervisor() {
           }
         }
 
-        const { data: perfilesData } = await supabase.from("perfiles").select("*");
+        const { data: perfilesData } = await supabase.from("perfiles").select("id, nombre, email, empresa, rol, latitud, longitud, ultima_posicion_at");
         if (perfilesData) setPerfiles(perfilesData);
 
         let queryComercios = supabase.from("comercios").select("*");
@@ -770,6 +770,45 @@ export default function Supervisor() {
                           <strong style={{ color: "#2563eb", fontSize: "13px" }}>🚗 {perfilConGPS?.nombre || "Preventista"}</strong>
                           <div style={{ color: "#16a34a", fontWeight: "bold", marginTop: "2px" }}>● En ruta en tiempo real</div>
                           <div style={{ color: "#64748b", fontSize: "11px", marginTop: "2px" }}>Última señal: {perfilConGPS?.ultima_posicion_at ? new Date(perfilConGPS.ultima_posicion_at).toLocaleTimeString() : "Ahora"}</div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })()}
+
+                
+                {/* 🚗 AUTITO PREVENTISTA EN VIVO EN EL MAPA */}
+                {(() => {
+                  const targetNom = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
+                  
+                  const pVivo = (perfiles || []).find(p => {
+                    const n = String(p.nombre || p.email || "").toLowerCase().trim();
+                    return targetNom && (n === targetNom || n.includes(targetNom) || targetNom.includes(n));
+                  });
+
+                  let latA = parseFloat(pVivo?.latitud);
+                  let lngA = parseFloat(pVivo?.longitud);
+
+                  // FALLBACK: si el perfil aun no emitio GPS directo hoy, toma la coordenada del ultimo comercio cargado hoy
+                  if ((!latA || !lngA || isNaN(latA) || isNaN(lngA)) && comerciosVisibles && comerciosVisibles.length > 0) {
+                    const ultCom = comerciosVisibles[comerciosVisibles.length - 1];
+                    latA = parseFloat(ultCom.ubicacion_exacta_latitud || ultCom.latitud);
+                    lngA = parseFloat(ultCom.ubicacion_exacta_longitud || ultCom.longitud);
+                  }
+
+                  if (!latA || !lngA || isNaN(latA) || isNaN(lngA)) return null;
+
+                  const etiquetaNombre = pVivo?.nombre || targetNom || "Preventista";
+
+                  return (
+                    <Marker position={[latA, lngA]} icon={iconoAutoGPS(etiquetaNombre)}>
+                      <Popup>
+                        <div style={{ textAlign: "center", fontSize: "12px", padding: "6px" }}>
+                          <strong style={{ color: "#2563eb", fontSize: "14px" }}>🚗 {etiquetaNombre}</strong>
+                          <div style={{ color: "#16a34a", fontWeight: "bold", marginTop: "3px" }}>● En ruta en tiempo real</div>
+                          <div style={{ color: "#64748b", fontSize: "11px", marginTop: "3px" }}>
+                            Última actividad: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Hoy en ruta"}
+                          </div>
                         </div>
                       </Popup>
                     </Marker>
