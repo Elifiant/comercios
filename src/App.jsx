@@ -57,6 +57,35 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 
 export default function App() {
 
+  // Jornada activa durante 9 horas seguidas (32400000 ms)
+  const NUEVE_HORAS_MS = 9 * 60 * 60 * 1000;
+  const iniciarJornadaNueveHoras = () => {
+    try {
+      const ahora = Date.now();
+      localStorage.setItem("jornada_inicio_ts", String(ahora));
+      localStorage.setItem("jornada_activa", "true");
+      setJornadaActiva(true);
+    } catch(e) {}
+  };
+
+  const verificarJornadaActiva = () => {
+    try {
+      const inicio = localStorage.getItem("jornada_inicio_ts");
+      if (!inicio) return false;
+      const transcurrido = Date.now() - parseInt(inicio, 10);
+      if (transcurrido < NUEVE_HORAS_MS) {
+        return true;
+      } else {
+        localStorage.removeItem("jornada_inicio_ts");
+        localStorage.removeItem("jornada_activa");
+        return false;
+      }
+    } catch(e) {
+      return false;
+    }
+  };
+
+
   const emitirPosicionGPS = async (lat, lng) => {
     try {
       if (!lat || !lng || !sesion?.user?.id) return;
@@ -579,6 +608,7 @@ export default function App() {
     const lng = (posicionActual && posicionActual[1]) ? posicionActual[1] : -58.265;
     const cod = Math.floor(1000 + Math.random() * 9000);
 
+    iniciarJornadaNueveHoras();
     const nuevo = {
       nombre: "Comercio #" + cod,
                   latitud: lat,
@@ -1367,7 +1397,7 @@ export default function App() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
               <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", textTransform: "uppercase" }}>Jornada</span>
               <span style={{ fontSize: "10px", color: jornadaActiva ? "#4ade80" : "#94a3b8", fontWeight: "bold" }}>
-                {jornadaActiva ? "● En vivo" : "○ Inactiva"}
+                {verificarJornadaActiva() || jornadaActiva ? "● En vivo (En ruta)" : "○ Inactiva"}
               </span>
             </div>
             <div style={{ fontSize: "16px", fontWeight: "800", color: "#fff" }}>
