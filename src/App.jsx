@@ -56,6 +56,8 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 }
 
 export default function App() {
+  const [sesion, setSesion] = useState(null);
+
   const [posicionActual, setPosicionActual] = useState(null);
 
 
@@ -333,8 +335,7 @@ export default function App() {
 
 
 
-   const [sesion, setSesion] = useState(null);
-  const [perfil, setPerfil] = useState(null);
+   const [perfil, setPerfil] = useState(null);
 
   const cargarPerfil = async (session) => {
     if (!session?.user) {
