@@ -50,6 +50,16 @@ function iconoPreventistaVivo(nombre) {
   });
 }
 
+
+function iconoAutoGPS(nombre) {
+  return L.divIcon({
+    className: "pin-auto-gps",
+    html: '<div style="background:#2563eb; color:#fff; border:2px solid #fff; border-radius:50%; width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:20px; box-shadow:0 0 16px rgba(37,99,235,0.95); position:relative;"><span style="position:absolute; width:100%; height:100%; border-radius:50%; border:2px solid #38bdf8; animation:ping 1.5s infinite;"></span>🚗</div><div style="background:#0f172a; color:#fff; font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; margin-top:2px; white-space:nowrap; text-align:center; box-shadow:0 2px 6px rgba(0,0,0,0.6);">' + (nombre || "Preventista") + ' (En vivo)</div>',
+    iconSize: [38, 54],
+    iconAnchor: [19, 27]
+  });
+}
+
 export default function Supervisor() {
 
   const [comercios, setComercios] = useState([]);
@@ -734,6 +744,32 @@ export default function Supervisor() {
                         <div style={{ textAlign: "center", fontSize: "12px" }}>
                           <strong style={{ color: "#2563eb", fontSize: "13px" }}>🚗 {pVivo?.nombre || "Preventista"} (En vivo)</strong>
                           <div style={{ color: "#64748b", marginTop: "3px" }}>Última señal: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Reciente"}</div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })()}
+
+                
+                {/* AUTO PREVENTISTA EN TIEMPO REAL */}
+                {(() => {
+                  const target = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
+                  const pVivo = (perfiles || []).find(p => {
+                    const n = String(p.nombre || p.email || "").toLowerCase().trim();
+                    return target && (n === target || n.includes(target) || target.includes(n));
+                  });
+                  // Si no encontró por nombre, toma el primer perfil con coordenadas
+                  const perfilConGPS = pVivo || (perfiles || []).find(p => p.latitud && p.longitud);
+                  const latA = parseFloat(perfilConGPS?.latitud);
+                  const lngA = parseFloat(perfilConGPS?.longitud);
+                  if (!latA || !lngA || isNaN(latA) || isNaN(lngA)) return null;
+                  return (
+                    <Marker position={[latA, lngA]} icon={iconoAutoGPS(perfilConGPS?.nombre || target)}>
+                      <Popup>
+                        <div style={{ textAlign: "center", fontSize: "12px", padding: "4px" }}>
+                          <strong style={{ color: "#2563eb", fontSize: "13px" }}>🚗 {perfilConGPS?.nombre || "Preventista"}</strong>
+                          <div style={{ color: "#16a34a", fontWeight: "bold", marginTop: "2px" }}>● En ruta en tiempo real</div>
+                          <div style={{ color: "#64748b", fontSize: "11px", marginTop: "2px" }}>Última señal: {perfilConGPS?.ultima_posicion_at ? new Date(perfilConGPS.ultima_posicion_at).toLocaleTimeString() : "Ahora"}</div>
                         </div>
                       </Popup>
                     </Marker>

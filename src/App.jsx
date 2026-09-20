@@ -57,6 +57,19 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 
 export default function App() {
 
+  const emitirPosicionGPS = async (lat, lng) => {
+    try {
+      if (!lat || !lng || !sesion?.user?.id) return;
+      await supabase.from("perfiles").update({
+        latitud: lat,
+        longitud: lng,
+        ultima_posicion_at: new Date().toISOString(),
+        activo_hoy: true
+      }).eq("id", sesion.user.id);
+    } catch(e) {}
+  };
+
+
   // Transmisión continua de posición en vivo a Supabase
   const transmitirUbicacionEnVivo = async (lat, lng) => {
     try {
@@ -1383,7 +1396,7 @@ export default function App() {
               style={{ width: "100%", marginTop: "6px", padding: "6px 0", backgroundColor: jornadaActiva ? "#dc2626" : "#1e293b", color: jornadaActiva ? "#fff" : "#94a3b8", border: jornadaActiva ? "none" : "1px solid #334155", borderRadius: "6px", fontSize: "10px", fontWeight: "700", cursor: jornadaActiva ? "pointer" : "default" }}
                 disabled={!jornadaActiva}
               >
-                {jornadaActiva ? "🛑 Finalizar Jornada" : "⏳ En espera (Inicia con Check-in)"}
+                {jornadaActiva ? "🛑 Finalizar Jornada" : "⏳ En ruta"}
               </button>
           </div>
 
