@@ -8,6 +8,8 @@ export default function AdminClientes() {
   const [preventistas, setPreventistas] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [mostrarModalEmpresa, setMostrarModalEmpresa] = useState(false);
+  const [partnerAsignado, setPartnerAsignado] = useState("Directo Alex (Sin Partner)");
+  const [comisionPartnerPct, setComisionPartnerPct] = useState(20);
   
   const [modalResetClave, setModalResetClave] = useState(null); // { usuario, nuevoPass: "" }
   const [modalCambiarEmail, setModalCambiarEmail] = useState(null); // { usuario, nuevoEmail: "" }
@@ -937,6 +939,146 @@ export default function AdminClientes() {
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px", borderTop: "1px solid #334155", paddingTop: "12px" }}>
                 <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "transparent", color: "#94a3b8", cursor: "pointer" }}>Cancelar</button>
                 <button type="submit" style={{ padding: "8px 18px", borderRadius: "6px", border: "none", backgroundColor: "#0284c7", color: "#fff", fontWeight: "700", cursor: "pointer" }}>💾 Guardar Cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    
+      {/* MODAL: ALTA NUEVA EMPRESA CON ASIGNACIÓN DE PARTNER */}
+      {mostrarModalEmpresa && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", width: "100%", maxWidth: "580px", padding: "24px", color: "#f8fafc", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "10px" }}>
+              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: "800", color: "#38bdf8" }}>🏢 Dar de Alta Nueva Empresa Cliente</h3>
+              <button type="button" onClick={() => setMostrarModalEmpresa(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}>✕</button>
+            </div>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                const nombre = e.target.nombre.value.trim();
+                const cuit = e.target.cuit.value.trim();
+                const pais = e.target.pais.value;
+                const moneda = e.target.moneda.value;
+                const tarifa = Number(e.target.tarifa.value) || 0;
+                const diaCobro = Number(e.target.diaCobro.value) || 5;
+                const cupo = Number(e.target.cupo.value) || 5;
+
+                if (!nombre) { alert("Ingresá el nombre de la empresa"); return; }
+
+                const nuevaEmp = {
+                  nombre,
+                  cuit: cuit || "S/CUIT",
+                  pais,
+                  moneda,
+                  tarifa_pactada: tarifa,
+                  dia_cobro: diaCobro,
+                  cupo_preventistas: cupo,
+                  partner: partnerAsignado,
+                  comision_pct: Number(comisionPartnerPct) || 0,
+                  activo: true
+                };
+
+                const { error } = await supabase.from("empresas").insert([nuevaEmp]);
+                if (error) throw error;
+
+                // Actualizamos estado local
+                setEmpresas(prev => [nuevaEmp, ...prev]);
+                setMostrarModalEmpresa(false);
+                alert("¡Empresa " + nombre + " creada con éxito!");
+              } catch(err) {
+                alert("Error al crear empresa: " + (err.message || "Verifique conexión"));
+              }
+            }} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Nombre Oficial de la Empresa *</label>
+                <input name="nombre" required placeholder="Ej: Distribuidora Los Primos SRL" style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>CUIT / Identificación Fiscal</label>
+                  <input name="cuit" placeholder="30-71829304-8" style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>País</label>
+                  <select name="pais" defaultValue="Argentina" style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="Argentina">🇦🇷 Argentina</option>
+                    <option value="Uruguay">🇺🇾 Uruguay</option>
+                    <option value="Chile">🇨🇱 Chile</option>
+                    <option value="México">🇲🇽 México</option>
+                    <option value="Colombia">🇨🇴 Colombia</option>
+                    <option value="Internacional">🌍 Otro / Internacional</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Moneda</label>
+                  <select name="moneda" defaultValue="ARS" style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="ARS">ARS ($)</option>
+                    <option value="USD">USD (u$s)</option>
+                    <option value="USDT">USDT (₮)</option>
+                    <option value="BCH">BCH (Bitcoin Cash)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Tarifa Base ($)</label>
+                  <input name="tarifa" type="number" defaultValue="35000" style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Día Vencimiento</label>
+                  <input name="diaCobro" type="number" min="1" max="31" defaultValue="5" style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Cupo Máximo Preventistas Incluidos</label>
+                <input name="cupo" type="number" defaultValue="5" style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+
+              {/* SECCIÓN PARTNER / PROMOTOR ASOCIADO */}
+              <div style={{ backgroundColor: "#0f172a", padding: "14px", borderRadius: "8px", border: "1px solid #334155", marginTop: "4px" }}>
+                <div style={{ fontSize: "13px", fontWeight: "800", color: "#38bdf8", marginBottom: "8px" }}>🤝 Partner / Promotor Comercial Asignado</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "10px" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "11px", color: "#94a3b8", marginBottom: "4px" }}>Seleccionar Partner</label>
+                    <select
+                      value={partnerAsignado}
+                      onChange={(e) => setPartnerAsignado(e.target.value)}
+                      style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#1e293b", color: "#fff", fontSize: "12px" }}
+                    >
+                      <option value="Directo Alex (Sin Partner)">Directo Alex (Sin Comisión Partner)</option>
+                      <option value="Gonzalo Beltrán">Gonzalo Beltrán (GBA Sur)</option>
+                      <option value="Mariana Solís (Hermana / Especial)">Mariana Solís (Hermana / Especial)</option>
+                      <option value="Comisionista Córdoba">Comisionista Córdoba</option>
+                      <option value="Comisionista La Pampa">Comisionista La Pampa</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "11px", color: "#94a3b8", marginBottom: "4px" }}>% Comisión Pactada</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={comisionPartnerPct}
+                        onChange={(e) => setComisionPartnerPct(e.target.value)}
+                        style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "#1e293b", color: "#38bdf8", fontWeight: "800", fontSize: "13px" }}
+                      />
+                      <span style={{ fontWeight: "800", color: "#94a3b8" }}>%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "12px", borderTop: "1px solid #334155", paddingTop: "12px" }}>
+                <button type="button" onClick={() => setMostrarModalEmpresa(false)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #475569", backgroundColor: "transparent", color: "#94a3b8", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ padding: "8px 18px", borderRadius: "6px", border: "none", backgroundColor: "#16a34a", color: "#fff", fontWeight: "700", cursor: "pointer" }}>✓ Crear y Guardar Empresa</button>
               </div>
             </form>
           </div>
