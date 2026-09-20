@@ -56,6 +56,8 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 }
 
 export default function App() {
+  const [posicionActual, setPosicionActual] = useState(null);
+
 
   
 
@@ -500,8 +502,6 @@ export default function App() {
   
   const [comercioCercano, setComercioCercano] = useState(null);
   const [distanciaCercano, setDistanciaCercano] = useState(null);
-  const [posicionActual, setPosicionActual] = useState(null);
-
   useEffect(() => {
     if (!navigator.geolocation) return;
     const wId = navigator.geolocation.watchPosition(
