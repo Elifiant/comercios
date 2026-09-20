@@ -40,6 +40,16 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
   return null;
 }
 
+
+function iconoPreventistaVivo(nombre) {
+  return L.divIcon({
+    className: "custom-marker-preventista",
+    html: '<div style="background:#2563eb; color:#fff; border:2px solid #fff; box-shadow:0 0 12px rgba(37,99,235,0.8); border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:16px; position:relative;"><span style="position:absolute; width:100%; height:100%; border-radius:50%; border:2px solid #38bdf8; animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></span>🚗</div><div style="background:#0f172a; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; margin-top:2px; white-space:nowrap; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.4);">' + (nombre || "Preventista") + '</div>',
+    iconSize: [34, 50],
+    iconAnchor: [17, 25]
+  });
+}
+
 export default function Supervisor() {
 
   const [comercios, setComercios] = useState([]);
@@ -348,6 +358,18 @@ export default function Supervisor() {
   };
 
   const nombrePrevActivo = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado?.nombre : (preventistaSeleccionado || "");
+  
+  // Auto-actualización periódica en segundo plano cada 12 segundos
+  useEffect(() => {
+    const intervalo = setInterval(() => {
+      if (typeof cargarDatos === "function") {
+        cargarDatos();
+      }
+    }, 12000);
+    return () => clearInterval(intervalo);
+  }, [preventistaSeleccionado, filtroDiaMapa]);
+
+
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* CABECERA PRINCIPAL */}
@@ -672,7 +694,53 @@ export default function Supervisor() {
                     </Marker>
                   );
                 })}
-              </MapContainer>
+              
+                {/* MARCADOR DEL PREVENTISTA EN VIVO */}
+                {(() => {
+                  const targetPrev = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
+                  const pVivo = (perfiles || []).find(p => {
+                    const n = String(p.nombre || p.email || "").toLowerCase().trim();
+                    return targetPrev && (n === targetPrev || n.includes(targetPrev) || targetPrev.includes(n));
+                  });
+                  const latP = parseFloat(pVivo?.latitud);
+                  const lngP = parseFloat(pVivo?.longitud);
+                  if (!latP || !lngP || isNaN(latP) || isNaN(lngP)) return null;
+                  return (
+                    <Marker position={[latP, lngP]} icon={iconoPreventistaVivo(pVivo?.nombre || targetPrev)}>
+                      <Popup>
+                        <div style={{ fontSize: "12px", textAlign: "center" }}>
+                          <strong style={{ color: "#2563eb", fontSize: "13px" }}>📡 {pVivo?.nombre || "Preventista"} (En vivo)</strong>
+                          <div style={{ color: "#64748b", marginTop: "4px" }}>Última señal: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Reciente"}</div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })()}
+
+                
+                {/* MARCADOR DEL PREVENTISTA EN TIEMPO REAL */}
+                {(() => {
+                  const target = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
+                  const pVivo = (perfiles || []).find(p => {
+                    const n = String(p.nombre || p.email || "").toLowerCase().trim();
+                    return target && (n === target || n.includes(target) || target.includes(n));
+                  });
+                  const latP = parseFloat(pVivo?.latitud);
+                  const lngP = parseFloat(pVivo?.longitud);
+                  if (!latP || !lngP || isNaN(latP) || isNaN(lngP)) return null;
+                  return (
+                    <Marker position={[latP, lngP]} icon={iconoPreventistaVivo(pVivo?.nombre || target)}>
+                      <Popup>
+                        <div style={{ textAlign: "center", fontSize: "12px" }}>
+                          <strong style={{ color: "#2563eb", fontSize: "13px" }}>🚗 {pVivo?.nombre || "Preventista"} (En vivo)</strong>
+                          <div style={{ color: "#64748b", marginTop: "3px" }}>Última señal: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Reciente"}</div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })()}
+
+                </MapContainer>
             </div>
           </div>
 

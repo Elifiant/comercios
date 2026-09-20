@@ -57,6 +57,23 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 
 export default function App() {
 
+  // Transmisión continua de posición en vivo a Supabase
+  const transmitirUbicacionEnVivo = async (lat, lng) => {
+    try {
+      if (!lat || !lng || !sesion?.user?.id) return;
+      await supabase.from("perfiles").update({
+        latitud: lat,
+        longitud: lng,
+        ultima_posicion_at: new Date().toISOString(),
+        ultima_conexion: new Date().toISOString(),
+        activo_hoy: true
+      }).eq("id", sesion.user.id);
+    } catch (e) {
+      console.warn("Error enviando telemetria:", e.message);
+    }
+  };
+
+
   const emitirActividadEnVivo = async () => {
     try {
       const email = sesion?.user?.email || perfil?.email;
@@ -67,7 +84,10 @@ export default function App() {
       // Actualiza perfiles
       await supabase.from("perfiles").update({ 
         ultima_conexion: new Date().toISOString(),
-        activo_hoy: true 
+        activo_hoy: true,
+        latitud: pos?.coords?.latitude || null,
+        longitud: pos?.coords?.longitude || null,
+        ultima_posicion_at: new Date().toISOString() 
       }).eq("email", email);
 
       // Registra en visitas para que el Supervisor lo tome como actividad hoy
@@ -92,7 +112,10 @@ export default function App() {
         .from("perfiles")
         .update({ 
           ultima_conexion: new Date().toISOString(),
-          activo_hoy: true 
+        activo_hoy: true,
+        latitud: pos?.coords?.latitude || null,
+        longitud: pos?.coords?.longitude || null,
+        ultima_posicion_at: new Date().toISOString() 
         })
         .eq("email", emailUsuario);
     } catch (e) {
