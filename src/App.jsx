@@ -819,14 +819,24 @@ export default function App() {
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif", position: "relative", overflow: "hidden" }}>
         {/* HEADER MODO MANEJO */}
-        <header style={{ padding: "12px 16px", background: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155", zIndex: 1001 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "20px" }}>🚗</span>
-            <span style={{ fontWeight: "800", fontSize: "15px" }}>Modo Manejo Activo</span>
+        <header style={{ padding: "10px 16px", backgroundColor: "#0f172a", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 10, boxShadow: "0 2px 10px rgba(0,0,0,0.3)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ width: "38px", height: "38px", backgroundColor: "#ffffff", borderRadius: "10px", padding: "3px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.35)", flexShrink: 0, border: "1px solid #e2e8f0" }}>
+              <img src="/logo.png" alt="RutaComercio" style={{ width: "100%", height: "100%", objectFit: "contain" }} onError={(e) => { e.target.onerror = null; e.target.src = "/icon-192.png"; }} />
+            </div>
+            <div>
+              <div style={{ fontSize: "17px", fontWeight: "900", color: "#ffffff", letterSpacing: "-0.3px", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>RutaComercio</div>
+              <div style={{ fontSize: "12px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "6px", marginTop: "1px" }}>
+                <span style={{ fontWeight: "700", color: "#38bdf8" }}>👤 {(typeof perfil !== "undefined" && perfil && perfil.nombre) ? perfil.nombre : (typeof sesion !== "undefined" && sesion?.user?.email ? sesion.user.email.split("@")[0] : "demo02")}</span>
+                <span style={{ color: "#475569" }}>·</span>
+                <span style={{ color: "#cbd5e1", fontWeight: "600" }}>{(typeof perfil !== "undefined" && perfil && perfil.empresa) ? perfil.empresa : "DEMO S.A."}</span>
+              </div>
+            </div>
           </div>
-          <button 
-            onClick={() => setModoManejo(false)} 
-            style={{ background: "#dc2626", color: "#fff", border: "none", padding: "6px 14px", borderRadius: "8px", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}
+          <button
+            type="button"
+            onClick={handleCerrarSesion}
+            style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid #ef4444", backgroundColor: "rgba(239, 68, 68, 0.15)", color: "#f87171", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}
           >
             ✕ Salir
           </button>
@@ -1029,414 +1039,17 @@ export default function App() {
   if (comercioSeleccionado) {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif', paddingBottom: '40px' }}>
-        <header style={{ padding: '14px 16px', background: '#131b2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', position: 'sticky', top: 0, zIndex: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '18px' }}>🏪</span>
-            <span style={{ fontSize: '15px', fontWeight: 'bold' }}>Ficha de Comercio</span>
-          </div>
-          <button
-            onClick={() => setComercioSeleccionado(null)}
-            style={{ padding: '6px 14px', borderRadius: '8px', background: '#334155', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
-          >
-            ✕ Volver
-          </button>
-        </header>
-
-        {/* BOTÓN OFICIAL TOMAR PEDIDO ARRIBA DE TODO */}
-        <div style={{ padding: "0 16px", marginTop: "14px" }}>
-          <button
-            type="button"
-            onClick={() => setTomandoPedido(true)}
-            style={{
-              width: "100%",
-              backgroundColor: "#2563eb",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "14px",
-              padding: "16px",
-              fontSize: "16px",
-              fontWeight: "800",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "10px",
-              boxShadow: "0 6px 16px rgba(37,99,235,0.35)"
-            }}
-          >
-            <span style={{ fontSize: "20px" }}>📦</span> Tomar Pedido / Reedición
-          </button>
-        </div>
-
-
-        {/* BLOQUE CHECK-IN DE VISITA EN CALLE */}
-        <div style={{ margin: '14px 16px', padding: '14px', background: '#131b2e', borderRadius: '12px', border: '1px solid #2563eb' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '16px' }}>📍</span>
-              <span style={{ fontSize: '13px', fontWeight: '700', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Auditoría de Visita</span>
-            </div>
-            <span style={{ fontSize: '11px', background: '#1e293b', padding: '3px 8px', borderRadius: '6px', color: '#38bdf8', fontWeight: '600' }}>
-              GPS {posicionActual ? '± 4m' : 'Auto'}
-            </span>
-          </div>
-
-          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>Resultado de la visita:</div>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-            {[
-              { id: 'Tomó Pedido', icono: '📦', label: 'Tomó Pedido' },
-              { id: 'Tiene Stock', icono: '⏸️', label: 'Tiene Stock' },
-              { id: 'Local Cerrado', icono: '🚪', label: 'Local Cerrado' },
-              { id: 'Volver Tarde', icono: '🕒', label: 'Volver Tarde' }
-            ].map(m => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setResultadoVisita(m.id)}
-                style={{
-                  padding: '10px 8px',
-                  borderRadius: '8px',
-                  border: resultadoVisita === m.id ? '2px solid #3b82f6' : '1px solid #334155',
-                  background: resultadoVisita === m.id ? '#1d4ed8' : '#1e293b',
-                  color: '#fff',
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <span>{m.icono}</span>
-                <span>{m.label}</span>
-              </button>
-            ))}
-          </div>
-
-          <input
-            type="text"
-            placeholder="Nota u observación de visita (opcional)..."
-            value={observacionVisita}
-            onChange={(e) => setObservacionVisita(e.target.value)}
-            style={{
-              width: '100%',
-              boxSizing: 'border-box',
-              padding: '9px 12px',
-              borderRadius: '8px',
-              background: '#090d16',
-              border: '1px solid #334155',
-              color: '#fff',
-              fontSize: '12px',
-              marginBottom: '10px'
-            }}
-          />
-
-          <button
-            type="button"
-            onClick={() => registrarVisitaCheckIn(comercioSeleccionado)}
-            disabled={guardandoVisita}
-            style={{
-              width: '100%',
-              padding: '12px',
-              borderRadius: '10px',
-              background: visitaRegistradaHoy ? '#16a34a' : 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-              color: '#fff',
-              fontSize: '14px',
-              fontWeight: '800',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              boxShadow: '0 4px 12px rgba(37,99,235,0.3)'
-            }}
-          >
-            {guardandoVisita ? 'Guardando visita...' : (visitaRegistradaHoy ? '✅ Visita Asentada Hoy' : '✅ Marcar como Visitado')}
-          </button>
-        </div>
-
-
-        <div style={{ padding: '16px', maxWidth: '500px', margin: '0 auto' }}>
-          {comercioSeleccionado.foto_url && (
-            <div style={{ marginBottom: '16px', borderRadius: '12px', overflow: 'hidden', border: '1px solid #1e293b' }}>
-              <img
-                src={comercioSeleccionado.foto_url}
-                alt="Fachada"
-                style={{ width: '100%', height: '200px', objectFit: 'cover', display: 'block' }}
-              />
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
-            <label style={{ flex: 1, padding: '12px', background: '#2563eb', color: '#fff', borderRadius: '10px', textAlign: 'center', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
-              📷 {comercioSeleccionado.foto_url ? 'Cambiar Foto' : 'Tomar Foto'}
-              <input type="file" accept="image/*" capture="environment" onChange={subirFotoFachada} style={{ display: 'none' }} />
-            </label>
-            {comercioSeleccionado.telefono && (
-              <button
-                onClick={enviarWhatsApp}
-                style={{ flex: 1, padding: '12px', background: '#16a34a', color: '#fff', borderRadius: '10px', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
-              >
-                💬 WhatsApp
-              </button>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setEditandoUbicacion(true)}
-            style={{ width: '100%', padding: '12px', marginBottom: '20px', background: '#1e293b', color: '#38bdf8', borderRadius: '10px', border: '1px solid #334155', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
-          >
-            📍 Ajustar Ubicación en Mapa
-          </button>
-
-          
-        
-
-        <form onSubmit={guardarEdicion} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Nombre</label>
-              <input
-                type="text"
-                value={comercioSeleccionado.nombre || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, nombre: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-                placeholder="Nombre del comercio"
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Rubro</label>
-              <input
-                type="text"
-                value={comercioSeleccionado.rubro || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, rubro: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-                placeholder="Rubro (Kiosco, Almacén, etc.)"
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Dirección</label>
-              <input
-                type="text"
-                value={comercioSeleccionado.direccion || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, direccion: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-                placeholder="Dirección aproximada"
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Teléfono (WhatsApp)</label>
-              <input
-                type="text"
-                value={comercioSeleccionado.telefono || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, telefono: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-                placeholder="Ej: 1123456789"
-              />
-            </div>
-
-            {/* DATOS FISCALES Y FACTURACIÓN */}
-            <div style={{ marginTop: '8px', padding: '12px', background: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
-              <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#38bdf8', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span>📑</span> Datos Fiscales & Facturación
-              </div>
-              
-              <div style={{ marginBottom: '8px' }}>
-                <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '3px', textTransform: 'uppercase' }}>CUIT / CUIL</label>
-                <input
-                  type="text"
-                  placeholder="Ej: 20-34882910-3"
-                  value={comercioSeleccionado.cuit || ''}
-                  onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, cuit: e.target.value })}
-                  style={{ width: '100%', padding: '8px', background: '#1e293b', border: '1px solid #475569', borderRadius: '6px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div style={{ marginBottom: '8px' }}>
-                <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '3px', textTransform: 'uppercase' }}>Condición Fiscal</label>
-                <select
-                  value={comercioSeleccionado.condicion_fiscal || 'Consumidor Final'}
-                  onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, condicion_fiscal: e.target.value })}
-                  style={{ width: '100%', padding: '8px', background: '#1e293b', border: '1px solid #475569', borderRadius: '6px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }}
-                >
-                  <option value="Consumidor Final">Consumidor Final</option>
-                  <option value="Responsable Inscripto">Responsable Inscripto</option>
-                  <option value="Monotributo">Monotributo</option>
-                  <option value="Exento">Exento</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '10px', color: '#94a3b8', marginBottom: '3px', textTransform: 'uppercase' }}>Domicilio Fiscal / Facturación</label>
-                <input
-                  type="text"
-                  placeholder="Calle, número, localidad..."
-                  value={comercioSeleccionado.domicilio_fiscal || ''}
-                  onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, domicilio_fiscal: e.target.value })}
-                  style={{ width: '100%', padding: '8px', background: '#1e293b', border: '1px solid #475569', borderRadius: '6px', color: '#fff', fontSize: '13px', boxSizing: 'border-box' }}
-                />
-              </div>
-            </div>
-
-
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Notas</label>
-              <div style={{ marginBottom: "14px" }}>
-            <label style={{ display: "block", fontSize: "12px", color: "#64748b", fontWeight: "bold", marginBottom: "4px" }}>🗓️ Día de Visita Asignado</label>
-            <select
-              value={comercioSeleccionado.dia_visita || "Lunes"}
-              onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, dia_visita: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc", fontSize: "14px", fontWeight: "600", color: "#0f172a" }}
-            >
-              {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(d => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-          </div>
-          <textarea
-                value={comercioSeleccionado.notas || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, notas: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box', minHeight: '80px' }}
-                placeholder="Comentarios, listas de precios solicitadas, etc."
-              />
-            </div>
-
-            
-        {/* GRABADORA DE NOTAS DE VOZ INTERACTIVA */}
-        <div style={{
-          background: "#0f172a",
-          border: "1px solid #334155",
-          borderRadius: "10px",
-          padding: "12px",
-          marginTop: "6px",
-          marginBottom: "12px"
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "bold", color: "#38bdf8", display: "flex", alignItems: "center", gap: "6px" }}>
-              🎙️ NOTAS DE VOZ DEL COMERCIO
-            </span>
-            {grabandoAudio && (
-              <span style={{ fontSize: "11px", color: "#ef4444", fontWeight: "bold" }}>
-                ● Grabando {tiempoGrabacion}s
-              </span>
-            )}
-          </div>
-
-          {!grabandoAudio ? (
-            <button
-              type="button"
-              onClick={iniciarGrabacionVoz}
-              style={{
-                width: "100%",
-                background: "#dc2626",
-                color: "#fff",
-                border: "none",
-                borderRadius: "8px",
-                padding: "12px",
-                fontSize: "14px",
-                fontWeight: "bold",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                cursor: "pointer",
-                boxShadow: "0 2px 10px rgba(220,38,38,0.3)"
-              }}
-            >
-              🎤 Grabar Nota de Voz
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={detenerGrabacionVoz}
-              style={{
-                width: "100%",
-                background: "#16a34a",
-                color: "#fff",
-                border: "none",
-                borderRadius: "8px",
-                padding: "12px",
-                fontSize: "14px",
-                fontWeight: "bold",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                cursor: "pointer",
-                boxShadow: "0 2px 10px rgba(22,163,74,0.3)"
-              }}
-            >
-              ⏹️ Detener y Guardar Nota ({tiempoGrabacion}s)
-            </button>
-          )}
-
-          {/* Listado de audios grabados en este comercio */}
-          {Array.isArray(comercioSeleccionado.notas_audio) && comercioSeleccionado.notas_audio.length > 0 && (
-            <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
-              {comercioSeleccionado.notas_audio.map((nota) => (
-                <div
-                  key={nota.id}
-                  style={{
-                    background: "#1e293b",
-                    padding: "8px",
-                    borderRadius: "8px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px"
-                  }}
-                >
-                  <span style={{ fontSize: "11px", color: "#94a3b8", minWidth: "45px" }}>🕒 {nota.fecha}</span>
-                  <audio controls src={nota.audio} style={{ height: "32px", flex: 1, outline: "none" }} />
-                  <button
-                    type="button"
-                    onClick={() => borrarNotaAudio(nota.id)}
-                    style={{ background: "none", border: "none", color: "#ef4444", fontSize: "16px", cursor: "pointer", padding: "4px" }}
-                    title="Eliminar audio"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <button
-              type="submit"
-              style={{ width: '100%', padding: '14px', marginTop: '12px', background: '#2563eb', color: '#fff', borderRadius: '10px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' }}
-            >
-              💾 Guardar Cambios
-            </button>
-
-            <button
-              type="button"
-              onClick={() => eliminarComercio(comercioSeleccionado.id)}
-              style={{ width: '100%', padding: '14px', marginTop: '4px', background: '#dc2626', color: '#fff', borderRadius: '10px', border: 'none', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
-            >
-              🗑️ Eliminar Comercio
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
-      <header style={{ padding: "14px 16px", backgroundColor: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155", position: "sticky", top: 0, zIndex: 10 }}>
+        <header style={{ padding: "12px 16px", backgroundColor: "#0f172a", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #1e293b", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <img src="/logo.png" alt="RutaComercio" style={{ width: '32px', height: '32px', objectFit: 'contain', borderRadius: '6px', background: '#fff', padding: '2px', boxShadow: '0 2px 5px rgba(0,0,0,0.15)' }} onError={(e) => { e.target.style.display = 'none'; }} />
+            <div style={{ width: "36px", height: "36px", backgroundColor: "#ffffff", borderRadius: "10px", padding: "2px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)", flexShrink: 0 }}>
+              <img src="/logo.png" alt="RutaComercio" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            </div>
             <div>
-              <div style={{ fontSize: "16px", fontWeight: "800", color: "#fff", letterSpacing: "0.5px" }}>RutaComercio</div>
-              <div style={{ fontSize: "12px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "6px" }}>
-                <span>👤 {(typeof perfil !== "undefined" && perfil && perfil.nombre) ? perfil.nombre : "Walter"}</span>
-                <span>·</span>
-                <span style={{ color: "#38bdf8", fontWeight: "600" }}>{(typeof perfil !== "undefined" && perfil && perfil.empresa) ? perfil.empresa : "Elifiant"}</span>
+              <div style={{ fontSize: "17px", fontWeight: "900", color: "#ffffff", letterSpacing: "-0.3px", textShadow: "0 1px 2px rgba(0,0,0,0.4)" }}>RutaComercio</div>
+              <div style={{ fontSize: "12px", color: "#cbd5e1", display: "flex", alignItems: "center", gap: "6px", marginTop: "1px" }}>
+                <span style={{ fontWeight: "600", color: "#f8fafc" }}>👤 {(typeof perfil !== "undefined" && perfil && perfil.nombre) ? perfil.nombre : "Walter"}</span>
+                <span style={{ color: "#64748b" }}>·</span>
+                <span style={{ color: "#38bdf8", fontWeight: "700" }}>{(typeof perfil !== "undefined" && perfil && perfil.empresa) ? perfil.empresa : "Elifiant"}</span>
               </div>
             </div>
           </div>
@@ -1592,4 +1205,5 @@ export default function App() {
       </button>
     </div>
   );
+}
 }
