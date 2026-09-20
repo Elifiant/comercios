@@ -781,19 +781,28 @@ export default function Supervisor() {
                 {(() => {
                   const targetNom = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
                   
+                  // Busca el perfil del preventista
                   const pVivo = (perfiles || []).find(p => {
                     const n = String(p.nombre || p.email || "").toLowerCase().trim();
                     return targetNom && (n === targetNom || n.includes(targetNom) || targetNom.includes(n));
                   });
 
+                  // 1. Prioridad absoluta: Coordenadas del GPS real transmitido por el celular
                   let latA = parseFloat(pVivo?.latitud);
                   let lngA = parseFloat(pVivo?.longitud);
 
-                  // FALLBACK: si el perfil aun no emitio GPS directo hoy, toma la coordenada del ultimo comercio cargado hoy
-                  if ((!latA || !lngA || isNaN(latA) || isNaN(lngA)) && comerciosVisibles && comerciosVisibles.length > 0) {
-                    const ultCom = comerciosVisibles[comerciosVisibles.length - 1];
-                    latA = parseFloat(ultCom.ubicacion_exacta_latitud || ultCom.latitud);
-                    lngA = parseFloat(ultCom.ubicacion_exacta_longitud || ultCom.longitud);
+                  // 2. Si aún no hay GPS en perfil, busca el comercio con la FECHA/HORA más reciente (NUNCA por orden de ruta)
+                  if ((!latA || !lngA || isNaN(latA) || isNaN(lngA)) && comercios && comercios.length > 0) {
+                    const comerciosPrev = comercios.filter(c => {
+                      const asig = String(c.preventista || "").toLowerCase().trim();
+                      return targetNom && (asig === targetNom || asig.includes(targetNom) || targetNom.includes(asig));
+                    });
+                    if (comerciosPrev.length > 0) {
+                      const ordenadosPorFecha = [...comerciosPrev].sort((a, b) => new Date(b.fecha || b.created_at || 0) - new Date(a.fecha || a.created_at || 0));
+                      const masReciente = ordenadosPorFecha[0];
+                      latA = parseFloat(masReciente?.ubicacion_exacta_latitud || masReciente?.latitud);
+                      lngA = parseFloat(masReciente?.ubicacion_exacta_longitud || masReciente?.longitud);
+                    }
                   }
 
                   if (!latA || !lngA || isNaN(latA) || isNaN(lngA)) return null;
@@ -807,7 +816,7 @@ export default function Supervisor() {
                           <strong style={{ color: "#2563eb", fontSize: "14px" }}>🚗 {etiquetaNombre}</strong>
                           <div style={{ color: "#16a34a", fontWeight: "bold", marginTop: "3px" }}>● En ruta en tiempo real</div>
                           <div style={{ color: "#64748b", fontSize: "11px", marginTop: "3px" }}>
-                            Última actividad: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Hoy en ruta"}
+                            Última señal GPS: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Hoy en ruta"}
                           </div>
                         </div>
                       </Popup>
