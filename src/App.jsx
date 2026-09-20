@@ -57,28 +57,7 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 
 export default function App() {
 
-  // 💡 SCREEN WAKE LOCK: Mantiene la pantalla encendida en Modo Manejo
-  useEffect(() => {
-    let wakeLock = null;
-    const activarWakeLock = async () => {
-      try {
-        if ('wakeLock' in navigator && modoManejo) {
-          wakeLock = await navigator.wakeLock.request('screen');
-        }
-      } catch (err) {}
-    };
-
-    if (modoManejo) {
-      activarWakeLock();
-    } else if (wakeLock) {
-      wakeLock.release().catch(() => {});
-      wakeLock = null;
-    }
-
-    return () => {
-      if (wakeLock) wakeLock.release().catch(() => {});
-    };
-  }, [modoManejo]);
+  
 
   // 📡 EMISIÓN DE GPS EN VIVO DEL PREVENTISTA AL PERFIL
   useEffect(() => {
@@ -434,6 +413,29 @@ export default function App() {
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [tomandoPedido, setTomandoPedido] = useState(false);
   const [modoManejo, setModoManejo] = useState(false);
+
+  // 💡 SCREEN WAKE LOCK: Mantiene la pantalla encendida en Modo Manejo
+  useEffect(() => {
+    let wakeLock = null;
+    const activarWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator && modoManejo) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (err) {}
+    };
+
+    if (modoManejo) {
+      activarWakeLock();
+    } else if (wakeLock) {
+      wakeLock.release().catch(() => {});
+      wakeLock = null;
+    }
+
+    return () => {
+      if (wakeLock) wakeLock.release().catch(() => {});
+    };
+  }, [modoManejo]);
    useEffect(() => {
  supabase.auth.getSession().then(({ data: { session } }) => {
  setSesion(session); cargarPerfil(session);
