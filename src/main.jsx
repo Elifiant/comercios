@@ -72,7 +72,7 @@ function EnrutadorSeguro() {
  return (
  <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0f172a", color: "#94a3b8", fontFamily: "system-ui, sans-serif" }}>
  <div style={{ textAlign: "center" }}>
- <div style={{ fontSize: "36px", marginBottom: "10px" }}>📍</div>
+ <img src="/logo.svg" alt="RutaComercio" style={{ width: "90px", height: "90px", objectFit: "contain", marginBottom: "12px" }} />
  <div style={{ fontSize: "18px", fontWeight: "bold", color: "#f8fafc" }}>RutaComercio</div>
  <div style={{ fontSize: "13px", marginTop: "6px", color: "#64748b" }}>Verificando credenciales y permisos...</div>
  </div>
@@ -85,7 +85,7 @@ function EnrutadorSeguro() {
  <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", fontFamily: "system-ui, sans-serif", padding: "16px" }}>
  <div style={{ width: "100%", maxWidth: "380px", background: "#ffffff", borderRadius: "16px", padding: "32px 28px", boxShadow: "0 20px 40px rgba(0,0,0,0.3)" }}>
  <div style={{ textAlign: "center", marginBottom: "24px" }}>
- <div style={{ width: "56px", height: "56px", borderRadius: "14px", background: "#eff6ff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "28px", marginBottom: "12px" }}>📍</div>
+<img src="/logo.svg" alt="RutaComercio" style={{ width: "200px", height: "200px", objectFit: "contain", marginBottom: "12px" }} />
  <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>RutaComercio</h1>
  <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>Puerta de Entrada Única</p>
  </div>

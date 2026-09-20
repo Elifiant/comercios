@@ -385,32 +385,18 @@ export default function Supervisor() {
       {/* CABECERA PRINCIPAL */}
       <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "32px", height: "32px", backgroundColor: "#2563eb", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: "bold", fontSize: "16px" }}>
-            📍
-          </div>
+          <img src="/logo.svg" alt="RutaComercio" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <h1 style={{ margin: 0, fontSize: "17px", fontWeight: "800", letterSpacing: "-0.5px" }}>RutaComercio Web</h1>
+              <h1 style={{ margin: 0, fontSize: "17px", fontWeight: "800", letterSpacing: "-0.5px", color: "#0f172a" }}>RutaComercio Web</h1>
               <span style={{ backgroundColor: "#dcfce7", color: "#15803d", fontSize: "11px", fontWeight: "700", padding: "1px 6px", borderRadius: "10px" }}>
                 ● En Vivo
               </span>
             </div>
-            <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>Panel de Supervisión • Rutas • Planificador</p>
+            <p style={{ margin: 0, fontSize: "12px", color: "#64748b" }}>
+              Panel de Control y Supervisión Territorial
+            </p>
           </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-          
-          <a href="/pagos" style={{ display: "inline-flex", alignItems: "center", gap: "6px", backgroundColor: "#1e293b", color: "#ffffff", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", textDecoration: "none", fontWeight: "700" }}>
-            💳 Pagos
-          </a>
-          <button
-            type="button"
-            onClick={async () => { try { await supabase.auth.signOut(); } catch(e){} try { localStorage.clear(); sessionStorage.clear(); } catch(e){} window.location.href = "/"; }}
-            style={{ padding: "6px 12px", backgroundColor: "#ef4444", color: "#ffffff", borderRadius: "6px", fontSize: "12px", fontWeight: "700", border: "none", cursor: "pointer" }}
-          >
-            ✕ Salir
-          </button>
         </div>
       </header>
 
