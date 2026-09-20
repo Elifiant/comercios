@@ -57,6 +57,48 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
 
 export default function App() {
 
+  // 💡 SCREEN WAKE LOCK: Mantiene la pantalla encendida en Modo Manejo
+  useEffect(() => {
+    let wakeLock = null;
+    const activarWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator && modoManejo) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (err) {}
+    };
+
+    if (modoManejo) {
+      activarWakeLock();
+    } else if (wakeLock) {
+      wakeLock.release().catch(() => {});
+      wakeLock = null;
+    }
+
+    return () => {
+      if (wakeLock) wakeLock.release().catch(() => {});
+    };
+  }, [modoManejo]);
+
+  // 📡 EMISIÓN DE GPS EN VIVO DEL PREVENTISTA AL PERFIL
+  useEffect(() => {
+    if (!sesion?.user?.id || !posicionActual) return;
+    const emitirGPS = async () => {
+      try {
+        await supabase
+          .from('perfiles')
+          .update({
+            latitud: posicionActual[0],
+            longitud: posicionActual[1],
+            ultima_posicion_at: new Date().toISOString()
+          })
+          .eq('id', sesion.user.id);
+      } catch(e) {}
+    };
+    emitirGPS();
+  }, [posicionActual, sesion]);
+
+
   // Jornada activa durante 9 horas seguidas (32400000 ms)
   const NUEVE_HORAS_MS = 9 * 60 * 60 * 1000;
   const iniciarJornadaNueveHoras = () => {
