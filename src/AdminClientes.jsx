@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
 export default function AdminClientes() {
+  const [empresaFicha360, setEmpresaFicha360] = useState(null);
+  const [mostrarModal360, setMostrarModal360] = useState(false);
   const [empresas, setEmpresas] = useState([]);
   const [perfiles, setPerfiles] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -344,7 +346,73 @@ export default function AdminClientes() {
             </div>
           </div>
         )}
-      </main>
+      
+      {/* MODAL FICHA 360° INTEGRAL */}
+      {mostrarModal360 && empresaFicha360 && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", borderRadius: "16px", padding: "24px", maxWidth: "650px", width: "100%", border: "1px solid #334155", color: "#fff", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 30px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "12px" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "18px", color: "#60a5fa" }}>👁️ Ficha Integral 360° • {typeof empresaFicha360 === "object" ? empresaFicha360.nombre : empresaFicha360}</h3>
+                <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#94a3b8" }}>Supervisores, preventistas y estado de la cuenta</p>
+              </div>
+              <button onClick={() => setMostrarModal360(false)} style={{ backgroundColor: "transparent", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer", fontWeight: "bold" }}>✕</button>
+            </div>
+
+            {/* SUPERVISOR ASIGNADO */}
+            <div style={{ backgroundColor: "#0f172a", borderRadius: "10px", padding: "14px", border: "1px solid #334155", marginBottom: "16px" }}>
+              <div style={{ fontSize: "13px", fontWeight: "bold", color: "#38bdf8", marginBottom: "8px" }}>👔 Supervisor a Cargo</div>
+              {(() => {
+                const nomEmp = typeof empresaFicha360 === "object" ? empresaFicha360.nombre : empresaFicha360;
+                const sup = (perfiles || []).find(p => (p.empresa || "").toLowerCase() === String(nomEmp || "").toLowerCase() && (p.rol || "").toLowerCase() === "supervisor");
+                if (sup) {
+                  return (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
+                      <div>
+                        <span style={{ fontWeight: "bold", color: "#fff" }}>{sup.nombre}</span>
+                        <span style={{ color: "#94a3b8", marginLeft: "8px" }}>({sup.email})</span>
+                      </div>
+                      <span style={{ backgroundColor: "#10b981", color: "#fff", padding: "2px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold" }}>Activo</span>
+                    </div>
+                  );
+                }
+                return <div style={{ fontSize: "13px", color: "#94a3b8" }}>Sin supervisor asignado en esta empresa aún.</div>;
+              })()}
+            </div>
+
+            {/* PREVENTISTAS ASIGNADOS */}
+            <div style={{ backgroundColor: "#0f172a", borderRadius: "10px", padding: "14px", border: "1px solid #334155" }}>
+              <div style={{ fontSize: "13px", fontWeight: "bold", color: "#38bdf8", marginBottom: "8px" }}>👥 Preventistas Activos en Calle</div>
+              {(() => {
+                const nomEmp = typeof empresaFicha360 === "object" ? empresaFicha360.nombre : empresaFicha360;
+                const prevs = (perfiles || []).filter(p => (p.empresa || "").toLowerCase() === String(nomEmp || "").toLowerCase() && (p.rol || "").toLowerCase() === "preventista");
+                if (prevs.length > 0) {
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      {prevs.map(pr => (
+                        <div key={pr.id || pr.email} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#1e293b", padding: "8px 12px", borderRadius: "8px", fontSize: "13px" }}>
+                          <div>
+                            <span style={{ fontWeight: "bold", color: "#fff" }}>👤 {pr.nombre}</span>
+                            <span style={{ color: "#94a3b8", marginLeft: "8px" }}>{pr.email}</span>
+                          </div>
+                          <span style={{ backgroundColor: "rgba(37,99,235,0.2)", color: "#60a5fa", padding: "2px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "bold" }}>En calle</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                return <div style={{ fontSize: "13px", color: "#94a3b8" }}>No hay preventistas registrados bajo esta empresa aún.</div>;
+              })()}
+            </div>
+
+            <div style={{ marginTop: "20px", textAlign: "right" }}>
+              <button onClick={() => setMostrarModal360(false)} style={{ backgroundColor: "#334155", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 16px", cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </main>
     </div>
   );
 }

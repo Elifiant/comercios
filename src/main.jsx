@@ -1,3 +1,4 @@
+import PortalPagos from "./PortalPagos";
 import React, { StrictMode, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
@@ -124,21 +125,27 @@ function EnrutadorSeguro() {
   }
 
   // Con sesión activa: derivamos según rol y ruta
+  // Rutas directas accesibles
+  if (ruta.startsWith("/admin")) return <AdminClientes />;
+  if (ruta.startsWith("/promotores")) return <AdminPromotores />;
+  if (ruta.startsWith("/pedidos")) return <MonitorPedidos />;
+  if (ruta.startsWith("/pagos")) {
+    if (typeof PortalPagos !== "undefined") return <PortalPagos />;
+    window.location.replace("/supervisor");
+    return null;
+  }
+
   const rol = (perfil?.rol || "").toLowerCase();
 
   if (rol === "superadmin") {
-    if (ruta.startsWith("/promotores")) return <AdminPromotores />;
     if (ruta.startsWith("/supervisor")) return <Supervisor />;
-    if (ruta.startsWith("/pedidos")) return <MonitorPedidos />;
     return <AdminClientes />;
   }
 
   if (rol === "supervisor") {
-    if (ruta.startsWith("/pedidos")) return <MonitorPedidos />;
     return <Supervisor />;
   }
 
-  // Preventistas
   return <App />;
 }
 
