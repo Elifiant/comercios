@@ -128,9 +128,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
   const totalDescuentos = itemsPedido.reduce((acc, it) => acc + ((it.precioLista * it.cant) * (it.bonif / 100)), 0);
   const totalFinal = subtotalBruto - totalDescuentos;
 
-  const confirmarPedido = async () => {
-
-    // Timestamp internacional AAMMDD-HHMMSS (disponible para Supabase, histórico y WhatsApp)
+        const confirmarPedido = async () => {
     const ahoraPed = new Date();
     const padPed = (n) => String(n).padStart(2, '0');
     const codPedido = `${String(ahoraPed.getFullYear()).slice(-2)}${padPed(ahoraPed.getMonth() + 1)}${padPed(ahoraPed.getDate())}-${padPed(ahoraPed.getHours())}${padPed(ahoraPed.getMinutes())}${padPed(ahoraPed.getSeconds())}`;
@@ -141,63 +139,57 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
     }
     setGuardando(true);
     try {
+      const resumenItems = itemsPedido.map(it => `${it.cant}x ${it.nombre || it.codigo || 'Art'}`).join(', ');
+      
       const pedidoPayload = {
-        comercio_id: comercio?.id || Date.now(),
-        comercio_nombre: comercio?.nombre || 'Almacén Los Amigos',
-        comercio_direccion: comercio?.direccion || 'Av. Mitre 4820, Avellaneda',
-        preventista: usuario?.nombre || 'Alex Preventista',
-        empresa: usuario?.empresa || "",
-        subtotal: subtotalBruto,
-        descuentos: totalDescuentos,
-        total: totalFinal,
-        medio_pago: medioPago,
-        observaciones: observaciones,
-        items: itemsPedido,
-        es_anexo: !!esAnexoOPrevio,
-        estado: 'Confirmado / Listo para Reparto',
-        fecha: new Date().toISOString()
+        fecha: ahoraPed.toISOString(),
+        comercio_id: String(comercio?.id || '1'),
+        comercio_nombre: comercio?.nombre || ('Comercio #' + (comercio?.id || '')),
+        preventista: usuario?.nombre || perfil?.nombre || 'demo01',
+        empresa: usuario?.empresa || perfil?.empresa || comercio?.empresa || 'DEMO S.A.',
+        items_count: itemsPedido.reduce((acc, it) => acc + (Number(it.cant) || 1), 0),
+        total: Number(totalFinal || 0),
+        estado: 'Confirmado',
+        notas: (observaciones ? observaciones + ' | ' : '') + 'Comanda #' + codPedido + ' | Items: ' + resumenItems
       };
 
-      // Guardar en Supabase si la tabla existe, con respaldo en localStorage
+      const { data: resPed, error: errPed } = await supabase.from('pedidos').insert([pedidoPayload]).select();
+      if (errPed) {
+        console.error('Error al insertar en pedidos:', errPed);
+        alert('Fallo de Supabase al guardar pedido: ' + (errPed.message || JSON.stringify(errPed)));
+      } else {
+        console.log('✅ Pedido insertado en Supabase con éxito:', resPed);
+      }
+
       try {
-        await supabase.from('pedidos').insert([pedidoPayload]);
-      } catch (e) {
-        console.warn('Registro local de pedido:', e);
-      }
+        const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
+        historico.unshift(pedidoPayload);
+        localStorage.setItem('pedidos_guardados', JSON.stringify(historico));
+      } catch (e) {}
 
-      // Guardado local de contingencia
-      const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
-      historico.unshift(pedidoPayload);
-      localStorage.setItem('pedidos_guardados', JSON.stringify(historico));
+      const telDestino = (comercio?.telefono || '').replace(/[^0-9]/g, '');
+      const telFinal = telDestino.length >= 8 ? telDestino : '1122501680';
+      const telLimpio = telFinal.startsWith('11') ? telFinal : ('11' + telFinal);
 
-      // WhatsApp si está tildado
-      if (enviarWsp) {
-        const telLimpio = (comercio?.telefono || '1166646806').replace(/\D/g, '');
-        const msj = encodeURIComponent(
-          
-      // Código de pedido internacional con Timestamp: AAMMDD-HHMMSS
-      
-
-          `*📦 PEDIDO #${codPedido} - ${comercio?.nombre || 'Comercio'}*\n` +
-          `Preventista: ${usuario?.nombre || 'Alex'}\n` +
-          `Medio de Pago: ${medioPago}\n` +
-          `--------------------------\n` +
-          itemsPedido.map(it => `• ${it.cant}x ${it.nombre} (${it.bonif > 0 ? it.bonif + '% OFF' : 'Neto'}): $${((it.precioLista * it.cant) * (1 - it.bonif / 100)).toLocaleString()}`).join('\n') +
-          `\n--------------------------\n` +
-          `*IMPORTE del PEDIDO: $${totalFinal.toLocaleString()} ARS*\n` +
-          (observaciones ? `Notas: ${observaciones}\n` : '') +
-          `📋 *${(comercio?.empresa || "").toUpperCase()} · Comanda Oficial de Preventa*`
-        );
-        window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
-      }
+      const msj = encodeURIComponent(
+        `*📦 PEDIDO #${codPedido}*` +
+        `\n*Comercio:* ${comercio?.nombre || 'Comercio'}` +
+        `\n*Preventista:* ${usuario?.nombre || perfil?.nombre || 'demo01'}` +
+        `\n--------------------------\n` +
+        itemsPedido.map(it => `• ${it.cant}x ${it.nombre} (${it.bonif > 0 ? it.bonif + '% OFF' : 'Neto'}): $${((it.precioLista * it.cant) * (1 - it.bonif / 100)).toLocaleString()}`).join('\n') +
+        `\n--------------------------\n` +
+        `*IMPORTE del PEDIDO: $${totalFinal.toLocaleString()} ARS*\n` +
+        (observaciones ? `Notas: ${observaciones}\n` : '') +
+        `📋 *${(comercio?.empresa || 'DEMO S.A.').toUpperCase()} · Comanda Oficial de Preventa*`
+      );
+      window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
 
       setExitoGuardado(true);
       setTimeout(() => {
         if (onVolver) onVolver();
       }, 1500);
-
     } catch (err) {
-      alert('Error al procesar comanda: ' + err.message);
+      alert('Error en el proceso de pedido: ' + err.message);
     } finally {
       setGuardando(false);
     }

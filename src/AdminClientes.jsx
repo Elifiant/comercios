@@ -10,6 +10,7 @@ export default function AdminClientes() {
 
   // Modales
   const [mostrarModalEditar, setMostrarModalEditar] = useState(false);
+  const [modal360, setModal360] = useState(null);
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
   const [empresaSeleccionada, setEmpresaSeleccionada] = useState(null);
 
@@ -59,28 +60,69 @@ export default function AdminClientes() {
   };
 
   // Guardar edición directamente en Supabase
+    // Guardar edición directamente en Supabase con persistencia real
+    // Guardar edición directamente en Supabase con persistencia real
+    // Guardar edición directamente en Supabase con reporte de error explícito
+    // Guardar edición directamente en Supabase con día de cobro numérico entero
   const guardarEdicion = async (e) => {
     e.preventDefault();
     if (!empresaSeleccionada) return;
+    const nomEmpresa = typeof empresaSeleccionada === 'object' ? (empresaSeleccionada.nombre || '') : String(empresaSeleccionada);
+    const idEmpresa = typeof empresaSeleccionada === 'object' ? empresaSeleccionada.id : null;
+
+    // Extraer únicamente el número entero limpio para dia_cobro (ej: "Día 23 c/mes" -> 23)
+    const numeroDiaLimpio = parseInt(String(diaCobroEditado || "05").replace(/\D/g, ""), 10) || 5;
 
     const payload = {
       tarifa_pactada: Number(tarifaEditada) || 0,
       cupo_preventistas: Number(cupoEditado) || 0,
-      dia_cobro: "Día " + String(diaCobroEditado).padStart(2, "0") + " c/mes",
-      moneda: monedaEditada,
-      pais: paisEditado
+      dia_cobro: numeroDiaLimpio,
+      moneda: monedaEditada || "ARS",
+      pais: paisEditado || "Argentina"
     };
 
     try {
-      if (empresaSeleccionada.id) {
-        await supabase.from("empresas").update(payload).eq("id", empresaSeleccionada.id);
+      let res;
+      if (idEmpresa) {
+        res = await supabase.from("empresas").update(payload).eq("id", idEmpresa);
       } else {
-        await supabase.from("empresas").update(payload).eq("nombre", empresaSeleccionada.nombre);
+        res = await supabase.from("empresas").update(payload).ilike("nombre", nomEmpresa.trim());
       }
-      setEmpresas(prev => prev.map(item => item.nombre === empresaSeleccionada.nombre ? { ...item, ...payload } : item));
+
+      if (res && res.error) {
+        console.error("Fallo update empresas:", res.error);
+        alert("Fallo de Supabase: " + res.error.message);
+        return;
+      }
+
+      // Actualizar estado en pantalla formateado para visualización
+      const payloadVisual = {
+        ...payload,
+        dia_cobro: "Día " + String(numeroDiaLimpio).padStart(2, "0") + " c/mes"
+      };
+
+      setEmpresas(prev => prev.map(item => {
+        const n = typeof item === 'object' ? item.nombre : item;
+        return (n || '').trim().toLowerCase() === nomEmpresa.trim().toLowerCase()
+          ? { ...(typeof item === 'object' ? item : { nombre: item }), ...payloadVisual }
+          : item;
+      }));
+
+      if (typeof setModal360 === 'function') {
+        setModal360(prev => prev ? { ...(typeof prev === 'object' ? prev : { nombre: prev }), ...payloadVisual } : null);
+      }
+
+      // Guardar respaldo local
+      try {
+        const guardadas = JSON.parse(localStorage.getItem("rutacomercio_tarifas_v1") || "{}");
+        guardadas[nomEmpresa] = { ...payloadVisual };
+        localStorage.setItem("rutacomercio_tarifas_v1", JSON.stringify(guardadas));
+      } catch(e) {}
+
+      alert("✓ Guardado con éxito en Supabase");
       setMostrarModalEditar(false);
     } catch (err) {
-      alert("Error al actualizar empresa: " + err.message);
+      alert("Error al guardar: " + (err.message || "Error desconocido"));
     }
   };
 
@@ -261,6 +303,7 @@ export default function AdminClientes() {
                         </td>
                         <td style={{ padding: "14px 16px", textAlign: "right" }}>
                           <div style={{ display: "inline-flex", gap: "6px" }}>
+                            <button onClick={() => setModal360(emp)} style={{ backgroundColor: "#3b82f6", border: "1px solid #2563eb", color: "#ffffff", padding: "6px 10px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>👁️ Ficha 360°</button>
                             <button onClick={() => abrirCobro(emp)} style={{ backgroundColor: "#f1f5f9", border: "1px solid #cbd5e1", padding: "6px 10px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>💳 Cobro</button>
                             <button onClick={() => abrirEdicion(emp)} style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", color: "#1d4ed8", padding: "6px 10px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>✏️ Editar</button>
                             <button onClick={() => eliminarEmpresa(emp)} style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", padding: "6px 8px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>🗑️</button>
@@ -407,6 +450,99 @@ export default function AdminClientes() {
 
             <div style={{ marginTop: "20px", textAlign: "right" }}>
               <button onClick={() => setMostrarModal360(false)} style={{ backgroundColor: "#334155", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 16px", cursor: "pointer", fontWeight: "bold", fontSize: "13px" }}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    
+      {/* MODAL FICHA 360° DE EMPRESA */}
+      {modal360 && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15, 23, 42, 0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: "16px" }}>
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "12px", width: "100%", maxWidth: "600px", maxHeight: "90vh", overflowY: "auto", padding: "24px", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>
+                  🏢 Ficha 360° · {typeof modal360 === 'object' ? modal360.nombre : modal360}
+                </h3>
+                <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>
+                  {typeof modal360 === 'object' && modal360.pais ? modal360.pais : "Argentina"} · Moneda: {typeof modal360 === 'object' && modal360.moneda ? modal360.moneda : "ARS"}
+                </p>
+              </div>
+              <button onClick={() => setModal360(null)} style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer", color: "#94a3b8" }}>✕</button>
+            </div>
+
+            {/* CONDICIONES COMERCIALES */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", backgroundColor: "#f8fafc", padding: "12px", borderRadius: "8px", marginBottom: "16px" }}>
+              <div>
+                <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600", textTransform: "uppercase" }}>Tarifa Pactada</span>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                  0
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600", textTransform: "uppercase" }}>Cupo Máximo</span>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                  {typeof modal360 === 'object' && modal360.cupo_preventistas ? modal360.cupo_preventistas : "Sin límite"}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600", textTransform: "uppercase" }}>Día de Corte</span>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                  {typeof modal360 === 'object' && modal360.dia_cobro ? modal360.dia_cobro : "Día 05 c/mes"}
+                </div>
+              </div>
+            </div>
+
+            {/* SUPERVISORES Y PREVENTISTAS ASOCIADOS */}
+            <h4 style={{ margin: "0 0 8px", fontSize: "14px", fontWeight: "700", color: "#334155" }}>
+              👥 Equipo Registrado en Supabase
+            </h4>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", marginBottom: "20px" }}>
+              {(() => {
+                const nomEmp = typeof modal360 === 'object' ? modal360.nombre : modal360;
+                const equipo = (perfiles || []).filter(p => (p.empresa || '').trim().toLowerCase() === (nomEmp || '').trim().toLowerCase());
+                if (equipo.length === 0) {
+                  return <div style={{ padding: "16px", textAlign: "center", fontSize: "13px", color: "#94a3b8" }}>No hay preventistas ni supervisores asignados a esta empresa aún.</div>;
+                }
+                return (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                    <thead>
+                      <tr style={{ backgroundColor: "#f1f5f9", textAlign: "left", color: "#475569" }}>
+                        <th style={{ padding: "8px 12px" }}>Nombre</th>
+                        <th style={{ padding: "8px 12px" }}>Email</th>
+                        <th style={{ padding: "8px 12px" }}>Rol</th>
+                        <th style={{ padding: "8px 12px" }}>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {equipo.map((usr, i) => (
+                        <tr key={usr.id || i} style={{ borderTop: "1px solid #e2e8f0" }}>
+                          <td style={{ padding: "8px 12px", fontWeight: "600", color: "#0f172a" }}>{usr.nombre || "Sin nombre"}</td>
+                          <td style={{ padding: "8px 12px", color: "#64748b" }}>{usr.email || "-"}</td>
+                          <td style={{ padding: "8px 12px" }}>
+                            <span style={{ backgroundColor: usr.rol === 'supervisor' ? '#e0f2fe' : '#f0fdf4', color: usr.rol === 'supervisor' ? '#0369a1' : '#15803d', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '700' }}>
+                              {usr.rol || 'preventista'}
+                            </span>
+                          </td>
+                          <td style={{ padding: "8px 12px", color: usr.activo !== false ? '#16a34a' : '#dc2626', fontWeight: '600' }}>
+                            {usr.activo !== false ? '● Activo' : '○ Inactivo'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              <button onClick={() => { const emp = modal360; setModal360(null); abrirEdicion(emp); }} style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", color: "#1d4ed8", padding: "8px 16px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
+                ✏️ Modificar Condiciones
+              </button>
+              <button onClick={() => setModal360(null)} style={{ backgroundColor: "#0f172a", border: "none", color: "#ffffff", padding: "8px 16px", borderRadius: "6px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
+                Cerrar
+              </button>
             </div>
           </div>
         </div>

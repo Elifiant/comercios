@@ -71,8 +71,6 @@ export default function Supervisor() {
   };
 
   const [comercios, setComercios] = useState([]);
-  const [pedidosReal, setPedidosReal] = useState([]);
-  const [cargandoPedidosReal, setCargandoPedidosReal] = useState(false);
   const [pedidosSupervisor, setPedidosSupervisor] = useState([]);
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
   const [cargando, setCargando] = useState(true);
@@ -1025,91 +1023,6 @@ export default function Supervisor() {
                 </div>
               </div>
             </div>
-          </div>
-        )}
-              {seccionActiva === "pedidos" && (
-          <div style={{ padding: "16px", maxWidth: "1200px", margin: "0 auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>📦 Monitor de Comandas y Pedidos en Vivo</h2>
-                <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>Control de ventas levantadas en la calle en tiempo real</p>
-              </div>
-              <button
-                onClick={() => cargarPedidosSupabase()}
-                style={{ backgroundColor: "#2563eb", color: "#ffffff", border: "none", padding: "8px 14px", borderRadius: "8px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
-              >
-                <span>🔄</span> Actualizar Comandas
-              </button>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-              <div style={{ backgroundColor: "#ffffff", padding: "14px", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-                <div style={{ fontSize: "11px", fontWeight: "bold", color: "#64748b", textTransform: "uppercase" }}>Total Facturado Real</div>
-                <div style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a", marginTop: "4px" }}>
-                  $ {pedidosReal.reduce((acc, p) => acc + Number(p.total || 0), 0).toLocaleString()}
-                </div>
-              </div>
-              <div style={{ backgroundColor: "#ffffff", padding: "14px", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-                <div style={{ fontSize: "11px", fontWeight: "bold", color: "#64748b", textTransform: "uppercase" }}>Comandas Reales Emitidas</div>
-                <div style={{ fontSize: "20px", fontWeight: "800", color: "#2563eb", marginTop: "4px" }}>
-                  {pedidosReal.length} pedidos
-                </div>
-              </div>
-            </div>
-
-            {cargandoPedidosReal ? (
-              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", fontSize: "14px" }}>⏳ Consultando pedidos en Supabase...</div>
-            ) : pedidosReal.length === 0 ? (
-              <div style={{ backgroundColor: "#ffffff", padding: "40px", textAlign: "center", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
-                <div style={{ fontSize: "36px", marginBottom: "8px" }}>📭</div>
-                <div style={{ fontWeight: "bold", color: "#334155", fontSize: "15px" }}>No hay pedidos registrados todavía</div>
-                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>Las comandas que envíen los preventistas desde el celular aparecerán acá al instante.</div>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {pedidosReal.map((ped, idx) => (
-                  <div
-                    key={ped.id || idx}
-                    style={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <div style={{ width: "38px", height: "38px", borderRadius: "8px", backgroundColor: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "16px" }}>
-                        📦
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: "800", fontSize: "14px", color: "#0f172a" }}>
-                          {ped.comercio_nombre || ("Comercio #" + (ped.comercio_id || "S/N"))}
-                        </div>
-                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
-                          👤 Preventista: <strong style={{ color: "#334155" }}>{ped.preventista || "Sin asignar"}</strong> · 🕒 {ped.fecha ? new Date(ped.fecha).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : (ped.created_at ? new Date(ped.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-")}
-                        </div>
-                        {ped.notas && (
-                          <div style={{ fontSize: "11px", color: "#475569", marginTop: "4px", backgroundColor: "#f8fafc", padding: "3px 8px", borderRadius: "4px", display: "inline-block" }}>
-                            💬 {ped.notas}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: "17px", fontWeight: "800", color: "#16a34a" }}>
-                        $ {Number(ped.total || 0).toLocaleString()}
-                      </div>
-                      {Number(ped.decuento_porcentaje || 0) > 0 && (
-                        <div style={{ fontSize: "11px", color: "#ea580c" }}>
-                          Desc: {ped.decuento_porcentaje}% (Subt: ${Number(ped.subtotal || 0).toLocaleString()})
-                        </div>
-                      )}
-                      <div style={{ marginTop: "4px" }}>
-                        <span style={{ fontSize: "11px", fontWeight: "bold", padding: "2px 8px", borderRadius: "10px", backgroundColor: ped.estado === "Entregado" ? "#dcfce7" : "#fef9c3", color: ped.estado === "Entregado" ? "#15803d" : "#a16207" }}>
-                          ● {ped.estado || "Pendiente"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </main>
