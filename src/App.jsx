@@ -56,7 +56,7 @@ function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
   return Math.round(R * cDist);
 }
 
-export default function App() {
+export default function App({ sesion: sesionProp, perfil: perfilProp }) {
   const [sesion, setSesion] = useState(null);
 
   const [posicionActual, setPosicionActual] = useState(null);
@@ -66,22 +66,13 @@ export default function App() {
 
   // 📡 EMISIÓN DE GPS EN VIVO DEL PREVENTISTA AL PERFIL
   useEffect(() => {
-    /* safety-unblock-auth */
-    const tSafe = setTimeout(() => { setCargandoAuth(false); }, 300);
-    if (!sesion?.user?.id || !posicionActual) return;
-    const emitirGPS = async () => {
-      try {
-        await supabase
-          .from('perfiles')
-          .update({
-            latitud: posicionActual[0],
-            longitud: posicionActual[1],
-            ultima_posicion_at: new Date().toISOString()
-          })
-          .eq('id', sesion.user.id);
-      } catch(e) {}
-    };
-    emitirGPS();
+    if (Boolean(sesion) && Boolean(sesion.user) && Boolean(posicionActual)) {
+      supabase.from("perfiles").update({
+        latitud: posicionActual[0],
+        longitud: posicionActual[1],
+        ultima_posicion_at: new Date().toISOString()
+      }).eq("id", sesion.user.id).then(() => {}).catch(() => {});
+    }
   }, [posicionActual, sesion]);
 
 
@@ -339,6 +330,39 @@ export default function App() {
 
 
    const [perfil, setPerfil] = useState(null);
+  const cargarComercios = async (perfilOverride) => {
+    try {
+      setCargando(true);
+      const pActivo = perfilOverride || perfil || perfilProp;
+      const empFiltro = pActivo?.empresa || "DEMO S.A.";
+      const nomFiltro = pActivo?.nombre || (sesion?.user?.email ? sesion.user.email.split("@")[0] : "");
+
+      let query = supabase.from("comercios").select("*");
+      if (empFiltro) {
+        query = query.ilike("empresa", empFiltro.trim());
+      }
+      if (nomFiltro) {
+        query = query.ilike("preventista", nomFiltro.trim());
+      }
+
+      const { data, error } = await query.order("id", { ascending: false });
+      if (error) throw error;
+      setComercios(data || []);
+    } catch (err) {
+      console.error("Error al cargar comercios:", err);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    if (sesionProp) setSesion(sesionProp);
+    if (perfilProp) {
+      setPerfil(perfilProp);
+      cargarComercios(perfilProp);
+    }
+  }, [sesionProp, perfilProp]);
+
 
   const cargarPerfil = async (session) => {
     if (!session?.user) {
@@ -346,13 +370,14 @@ export default function App() {
       return;
     }
     try {
-      const { data } = await supabase
-        .from("perfiles")
-        .select("*")
-        .eq("id", session.user.id)
-        .maybeSingle();
+      let { data } = await supabase.from("perfiles").select("*").eq("id", session.user.id).maybeSingle();
+      if (!data && session?.user?.email) {
+        const r = await supabase.from("perfiles").select("*").ilike("email", session.user.email).maybeSingle();
+        data = r.data;
+      }
       if (data) {
         setPerfil(data);
+        cargarComercios(data);
       } else {
         setPerfil({
           nombre: session.user.email?.split("@")[0] || "Usuario",
@@ -381,7 +406,7 @@ export default function App() {
     try {
       const ahora = new Date().toISOString();
       const prevNombre = (typeof perfil !== 'undefined' && perfil?.nombre) ? perfil.nombre : 'Alex';
-      const empNombre = (typeof perfil !== 'undefined' && perfil?.empresa) ? perfil.empresa : 'Elifiant';
+      const empNombre = (typeof perfil !== "undefined" && perfil?.empresa) ? perfil.empresa : "";
 
       if (!jornadaActiva) {
         setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
@@ -419,21 +444,90 @@ export default function App() {
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
   const [jornadaActiva, setJornadaActiva] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
+
+  // Lista filtrada de comercios por búsqueda y orden
+  
+  // Función para agregar comercio inmediato capturando GPS actual
+  const agregarComercioInmediato = async () => {
+    try {
+      const lat = posicionActual ? posicionActual[0] : -34.719;
+      const lng = posicionActual ? posicionActual[1] : -58.264;
+      const miEmpresa = (typeof perfil !== "undefined" && perfil?.empresa) ? perfil.empresa : "DEMO S.A.";
+      const miNombre = (typeof perfil !== "undefined" && perfil?.nombre) ? perfil.nombre : (sesion?.user?.email ? sesion.user.email.split("@")[0] : "Preventista");
+
+      const nuevo = {
+        nombre: "Comercio #" + Math.floor(1000 + Math.random() * 9000),
+        latitud: lat,
+        longitud: lng,
+        ubicacion_exacta_latitud: lat,
+        ubicacion_exacta_longitud: lng,
+        fecha: new Date().toISOString(),
+        empresa: miEmpresa,
+        preventista: miNombre,
+        direccion: "Ubicación en ruta",
+        rubro: "General"
+      };
+
+      const { data, error } = await supabase.from("comercios").insert([nuevo]).select();
+      if (error) {
+        console.error("Error al registrar comercio inmediato:", error.message);
+        alert("Error al agregar comercio: " + error.message);
+      } else {
+        if (data && data[0]) {
+          setComercios(prev => [data[0], ...prev]);
+        }
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.2, ctx.currentTime);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.15);
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.error("Error inesperado en agregarComercioInmediato:", err);
+    }
+  };
+
+  const listaFiltrada = (comercios || []).filter(c => {
+    if (!busqueda || busqueda.trim() === "") return true;
+    const q = busqueda.toLowerCase().trim();
+    const nom = String(c.nombre || "").toLowerCase();
+    const dir = String(c.direccion || "").toLowerCase();
+    const rub = String(c.rubro || "").toLowerCase();
+    const idStr = String(c.id || "");
+    return nom.includes(q) || dir.includes(q) || rub.includes(q) || idStr.includes(q);
+  });
+
   const [tomandoPedido, setTomandoPedido] = useState(false);
   const [modoManejo, setModoManejo] = useState(false);
 
   // 💡 SCREEN WAKE LOCK: Mantiene la pantalla encendida en Modo Manejo
   useEffect(() => {
-    let wakeLock = null;
-    const activarWakeLock = async () => {
+    let wl = null;
+    const pedirLock = async () => {
       try {
-        if ('wakeLock' in navigator && modoManejo) {
-          wakeLock = await navigator.wakeLock.request('screen');
+        if ("wakeLock" in navigator && Boolean(modoManejo)) {
+          wl = await navigator.wakeLock.request("screen");
         }
-      } catch (err) {}
+      } catch (e) {}
     };
+    if (Boolean(modoManejo)) {
+      pedirLock();
+    }
+    return () => {
+      if (wl) {
+        wl.release().catch(() => {});
+      }
+    };
+  }, [modoManejo]);
 
-    if (modoManejo) {
+  if (modoManejo) {
     const latManejo = Number(posicionActual ? posicionActual[0] : -34.719);
     const lngManejo = Number(posicionActual ? posicionActual[1] : -58.264);
 
@@ -670,11 +764,118 @@ export default function App() {
     return (
       <TomaPedidos
         comercio={comercioSeleccionado}
-        usuario={typeof perfil !== "undefined" && perfil ? perfil : { nombre: "Alex Preventista", empresa: "Elifiant" }}
+        usuario={typeof perfil !== "undefined" && perfil ? perfil : { nombre: "", empresa: "" }}
         onVolver={() => setTomandoPedido(false)}
       />
     );
   }
+
+  
+  // 📸 SUBIR FOTO DE FACHADA A SUPABASE STORAGE
+  
+  // 💬 ENVIAR MENSAJE O CATÁLOGO POR WHATSAPP AL COMERCIO
+  
+  // 💾 GUARDAR EDICIÓN DEL COMERCIO EN SUPABASE Y ESTADO LOCAL
+  const guardarEdicion = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    try {
+      if (!comercioSeleccionado) return;
+
+      const payload = {
+        nombre: comercioSeleccionado.nombre || "Comercio #" + comercioSeleccionado.id,
+        direccion: comercioSeleccionado.direccion || "",
+        rubro: comercioSeleccionado.rubro || "Almacén / Kiosco",
+        telefono: comercioSeleccionado.telefono || comercioSeleccionado.contacto_telefono || "",
+        cuit: comercioSeleccionado.cuit || "",
+        condicion_fiscal: comercioSeleccionado.condicion_fiscal || "Consumidor Final",
+        notas: comercioSeleccionado.notas || "",
+        dia_visita: comercioSeleccionado.dia_visita || "Sábado"
+      };
+
+      if (comercioSeleccionado.ubicacion_exacta_latitud) {
+        payload.ubicacion_exacta_latitud = comercioSeleccionado.ubicacion_exacta_latitud;
+        payload.ubicacion_exacta_longitud = comercioSeleccionado.ubicacion_exacta_longitud;
+      }
+
+      const { error } = await supabase
+        .from("comercios")
+        .update(payload)
+        .eq("id", comercioSeleccionado.id);
+
+      if (error) throw error;
+
+      // Actualizamos la lista local de comercios
+      setComercios(prev => prev.map(item => item.id === comercioSeleccionado.id ? { ...item, ...payload } : item));
+      alert("✓ Cambios del comercio guardados exitosamente");
+    } catch (err) {
+      console.error("Error al guardar edición:", err);
+      alert("Error al guardar: " + (err.message || "Verifique conexión"));
+    }
+  };
+
+  const enviarWhatsApp = () => {
+    try {
+      if (!comercioSeleccionado) return;
+      const tel = comercioSeleccionado.telefono || comercioSeleccionado.contacto_telefono || "";
+      const numLimpio = String(tel).replace(/[^0-9]/g, "");
+
+      if (!numLimpio) {
+        alert("Este comercio no tiene un número de teléfono válido registrado para WhatsApp.");
+        return;
+      }
+
+      const nomComercio = comercioSeleccionado.nombre || "estimado cliente";
+      const texto = encodeURIComponent("¡Hola " + nomComercio + "! Me comunico de RutaComercio para coordinar su pedido y visita.");
+      const url = "https://wa.me/" + numLimpio + "?text=" + texto;
+      window.open(url, "_blank");
+    } catch (err) {
+      console.error("Error al abrir WhatsApp:", err);
+    }
+  };
+
+  const subirFotoFachada = async (e) => {
+    try {
+      const file = e.target.files && e.target.files[0];
+      if (!file || !comercioSeleccionado) return;
+
+      setCargandoFoto(true);
+      const nombreLimpio = comercioSeleccionado.nombre || "Comercio #" + comercioSeleccionado.id;
+      const fileExt = file.name ? file.name.split(".").pop() : "jpg";
+      const fileName = `${comercioSeleccionado.id}_${Date.now()}.${fileExt}`;
+      const filePath = `fotos/${fileName}`;
+
+      // Subida al bucket fotos_comercios
+      const { error: uploadError } = await supabase.storage
+        .from("fotos_comercios")
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from("fotos_comercios")
+        .getPublicUrl(filePath);
+
+      const nuevaFotoUrl = urlData?.publicUrl || "";
+
+      // Actualizamos en la tabla comercios
+      const { error: dbError } = await supabase
+        .from("comercios")
+        .update({ foto_url: nuevaFotoUrl })
+        .eq("id", comercioSeleccionado.id);
+
+      if (dbError) throw dbError;
+
+      // Actualizamos estados locales
+      setComercioSeleccionado(prev => ({ ...prev, foto_url: nuevaFotoUrl }));
+      setComercios(prev => prev.map(item => item.id === comercioSeleccionado.id ? { ...item, foto_url: nuevaFotoUrl } : item));
+      alert("✓ Foto de fachada guardada exitosamente");
+    } catch (err) {
+      console.error("Error al subir foto:", err);
+      alert("Error al subir foto: " + (err.message || "Verifique conexión"));
+    } finally {
+      setCargandoFoto(false);
+    }
+  };
 
   if (comercioSeleccionado) {
     return (
@@ -814,6 +1015,7 @@ export default function App() {
               style={{ width: "100%", padding: "10px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "14px", boxSizing: "border-box", marginBottom: "12px" }}
             >
               <option value="TODOS">Todos los días (Flexible)</option>
+              <option value="Domingo">Domingo</option>
               <option value="Lunes">Lunes</option>
               <option value="Martes">Martes</option>
               <option value="Miércoles">Miércoles</option>
@@ -956,9 +1158,9 @@ export default function App() {
             <div>
               <div style={{ fontSize: "17px", fontWeight: "900", color: "#ffffff", letterSpacing: "-0.3px", textShadow: "0 1px 2px rgba(0,0,0,0.4)" }}>RutaComercio</div>
               <div style={{ fontSize: "12px", color: "#cbd5e1", display: "flex", alignItems: "center", gap: "6px", marginTop: "1px" }}>
-                <span style={{ fontWeight: "600", color: "#f8fafc" }}>👤 {(typeof perfil !== "undefined" && perfil && perfil.nombre) ? perfil.nombre : "Walter"}</span>
+                <span style={{ fontWeight: "600", color: "#f8fafc" }}>👤 {perfil?.nombre || perfilProp?.nombre || (sesion?.user?.email ? sesion.user.email.split("@")[0] : "demo04")}</span>
                 <span style={{ color: "#64748b" }}>·</span>
-                <span style={{ color: "#38bdf8", fontWeight: "700" }}>{(typeof perfil !== "undefined" && perfil && perfil.empresa) ? perfil.empresa : "Elifiant"}</span>
+                <span style={{ color: "#38bdf8", fontWeight: "700" }}>{perfil?.empresa || perfilProp?.empresa || "DEMO S.A."}</span>
               </div>
             </div>
           </div>
@@ -1114,6 +1316,4 @@ export default function App() {
       </button>
     </div>
   );
-}
-);
 }

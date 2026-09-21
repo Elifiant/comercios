@@ -146,7 +146,7 @@ function EnrutadorSeguro() {
     return <Supervisor />;
   }
 
-  return <App />;
+  return <App sesion={sesion} perfil={perfil} />;
 }
 
 createRoot(document.getElementById("root")).render(

@@ -417,6 +417,8 @@ export default function App() {
 
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
+  const [editandoUbicacion, setEditandoUbicacion] = useState(false);
+  const [jornadaActiva, setJornadaActiva] = useState(false);
   const [tomandoPedido, setTomandoPedido] = useState(false);
   const [modoManejo, setModoManejo] = useState(false);
 
@@ -432,409 +434,87 @@ export default function App() {
     };
 
     if (modoManejo) {
-      activarWakeLock();
-    } else if (wakeLock) {
-      wakeLock.release().catch(() => {});
-      wakeLock = null;
-    }
+    const latManejo = Number(posicionActual ? posicionActual[0] : -34.719);
+    const lngManejo = Number(posicionActual ? posicionActual[1] : -58.264);
 
-    return () => {
-      if (wakeLock) wakeLock.release().catch(() => {});
-    };
-  }, [modoManejo]);
-   useEffect(() => {
- supabase.auth.getSession().then(({ data: { session } }) => {
- setSesion(session); cargarPerfil(session);
- setCargandoAuth(false);
- });
- const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
- setSesion(session); cargarPerfil(session);
- setCargandoAuth(false);
- });
- return () => subscription.unsubscribe();
- }, []);
-
- const handleLogin = async (e) => {
- e.preventDefault();
- setErrorLogin(null);
- const { error } = await supabase.auth.signInWithPassword({ email: emailLogin, password: passwordLogin });
- if (error) setErrorLogin('Credenciales incorrectas o usuario no registrado.');
- };
-
-        const handleCerrarSesion = async () => {
-    try {
-      if (typeof supabase !== "undefined" && supabase.auth) {
-        await supabase.auth.signOut();
-      }
-    } catch (e) {}
-    try {
-      localStorage.clear();
-      sessionStorage.clear();
-      // Limpiamos cookies residuales por si el navegador guardó alguna
-      document.cookie.split(";").forEach((cookie) => {
-        const eqPos = cookie.indexOf("=");
-        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
-        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-      });
-    } catch (e) {}
-    window.location.href = "/";
-  };
- const [posicionBotonManejo, setPosicionBotonManejo] = useState(() => {
-    try {
-      const guardada = localStorage.getItem("rutacomercio_pos_boton_manejo");
-      return guardada ? JSON.parse(guardada) : { x: 16, y: window.innerHeight - 170 };
-    } catch(e) {
-      return { x: 16, y: 500 };
-    }
-  });
-  const [arrastrandoBoton, setArrastrandoBoton] = useState(false);
-  const dragRef = React.useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0, moved: false });
-  const [textoBotonAgregar, setTextoBotonAgregar] = useState('➕ AGREGAR COMERCIO');
-  const [editandoUbicacion, setEditandoUbicacion] = useState(false);
-  const [nuevaPosicion, setNuevaPosicion] = useState(null);
-  const [busqueda, setBusqueda] = useState('');
-  const [jornadaActiva, setJornadaActiva] = useState(() => localStorage.getItem("rutacomercio_jornada_activa") === "true");
-  const [horaInicioJornada, setHoraInicioJornada] = useState(() => localStorage.getItem('hora_inicio_jornada') || '');
-  const [tiempoTranscurrido, setTiempoTranscurrido] = useState('0m');
-  // Cronometro de jornada en vivo
-  useEffect(() => {
-    let timer;
-    const actualizar = () => {
-      const inicioTimestamp = localStorage.getItem('timestamp_inicio_jornada');
-      if (jornadaActiva && inicioTimestamp) {
-        const diffMs = Date.now() - parseInt(inicioTimestamp, 10);
-        const minsTotal = Math.floor(diffMs / 60000);
-        const horas = Math.floor(minsTotal / 60);
-        const mins = minsTotal % 60;
-        setTiempoTranscurrido(horas > 0 ? `${horas}h ${mins}m` : `${mins}m`);
-      }
-    };
-    if (jornadaActiva) {
-      actualizar();
-      timer = setInterval(actualizar, 30000); // actualiza cada 30s
-    }
-    return () => clearInterval(timer);
-  }, [jornadaActiva]);
-  
-  const [comercioCercano, setComercioCercano] = useState(null);
-  const [distanciaCercano, setDistanciaCercano] = useState(null);
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-    const wId = navigator.geolocation.watchPosition(
-      (pos) => {
-        setPosicionActual([pos.coords.latitude, pos.coords.longitude]);
-      },
-      (err) => console.log("GPS status:", err.message),
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
-    );
-//     if (typeof window !== 'undefined' && window.location.pathname.includes('supervisor')) {
-//     return <Supervisor />;
-
-  return () => navigator.geolocation.clearWatch(wId);
-  }, []);
-
-  const cargarComercios = async (perfilActivo) => {
-    setCargando(true);
-    const p = perfilActivo || perfil;
-    let query = supabase.from("comercios").select("*");
-    
-    if (p && p.empresa) {
-      query = query.eq("empresa", p.empresa);
-    }
-    if (p && p.rol === "preventista" && p.nombre) {
-      query = query.eq("preventista", p.nombre);
-    }
-    
-    const { data, error } = await query.order("id", { ascending: false });
-    if (!error && data) setComercios(data);
-    setCargando(false);
-  };
-
-  useEffect(() => {
-    if (perfil && perfil.empresa) {
-      cargarComercios(perfil);
-    }
-  }, [perfil]);
-
-  const reproducirAlerta = () => {
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) {
-        const ctx = new AC();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, ctx.currentTime);
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.4);
-      }
-    } catch (e) {}
-  };
-
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        if (modoManejo && comercios.length > 0) {
-          let masCercano = null;
-          let menorDistancia = Infinity;
-          comercios.forEach((c) => {
-            const lat = c.ubicacion_exacta_latitud || c.latitud;
-            const lng = c.ubicacion_exacta_longitud || c.longitud;
-            if (lat && lng) {
-              const d = Math.hypot(coords.lat - lat, coords.lng - lng) * 111320;
-              if (d < menorDistancia) {
-                menorDistancia = d;
-                masCercano = { ...c, distancia: Math.round(d) };
-              }
-            }
-          });
-          if (masCercano && masCercano.distancia <= 50) {
-            if (!comercioCercano || comercioCercano.id !== masCercano.id) {
-              setComercioCercano(masCercano);
-              reproducirAlerta();
-            }
-          } else {
-            setComercioCercano(null);
-          }
-        }
-      },
-      (err) => console.log(err),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
-    );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [modoManejo, comercios, comercioCercano]);
-
-  
-  const iniciarJornada = () => {
-    const timestampInicio = Date.now().toString();
-    localStorage.setItem("rutacomercio_jornada_activa", "true");
-    localStorage.setItem("rutacomercio_inicio_jornada", timestampInicio);
-    if (typeof setInicioTimestamp === "function") setInicioTimestamp(timestampInicio);
-    setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
-    setHoraInicioJornada(h);
-    setTiempoTranscurrido('0m');
-    try {
-      localStorage.setItem('jornada_activa', 'true');
-      localStorage.setItem('hora_inicio_jornada', h);
-      localStorage.setItem('timestamp_inicio_jornada', ahora.getTime().toString());
-    } catch(e) {}
-  };
-
-  const cerrarJornada = () => {
-    const inicioTimestamp = localStorage.getItem('timestamp_inicio_jornada');
-    let resumen = '0m';
-    if (inicioTimestamp) {
-      const diffMs = Date.now() - parseInt(inicioTimestamp, 10);
-      const minsTotal = Math.floor(diffMs / 60000);
-      const horas = Math.floor(minsTotal / 60);
-      const mins = minsTotal % 60;
-      resumen = horas > 0 ? (horas + 'h ' + mins + 'm') : (mins + 'm');
-    }
-    alert('🏁 Jornada cerrada. Tiempo total de trabajo: ' + resumen);
-    setJornadaActiva(false); emitirActividadEnVivo();
-    setHoraInicioJornada('');
-    setTiempoTranscurrido('0m');
-    try {
-      localStorage.removeItem('jornada_activa');
-      localStorage.removeItem('hora_inicio_jornada');
-      localStorage.removeItem('timestamp_inicio_jornada');
-    } catch(e) {}
-  };
-
-   
-  const activarJornadaSiEstaInactiva = () => {
-    try {
-      const activa = localStorage.getItem("jornada_activa") === "true";
-      if (!activa) {
-        const ahora = Date.now().toString();
-        setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
-        setInicioJornada(ahora);
-        localStorage.setItem("jornada_activa", "true");
-        localStorage.setItem("inicio_jornada", ahora);
-      }
-    } catch(e) {}
-  };
-
-  const agregarComercioInmediato = async () => {
-    registrarActividadEnVivo();
-    activarJornadaSiEstaInactiva();
-    const lat = (posicionActual && posicionActual[0]) ? posicionActual[0] : -34.719;
-    const lng = (posicionActual && posicionActual[1]) ? posicionActual[1] : -58.265;
-    const cod = Math.floor(1000 + Math.random() * 9000);
-
-    iniciarJornadaNueveHoras();
-    const nuevo = {
-      nombre: "Comercio #" + cod,
-                  latitud: lat,
-      longitud: lng,
-      ubicacion_exacta_latitud: lat,
-      ubicacion_exacta_longitud: lng,
-      fecha: new Date().toISOString(),
-      notas: "Registrado con un toque",
-      empresa: (typeof perfil !== "undefined" && perfil?.empresa) ? perfil.empresa : "Elifiant",
-      preventista: (typeof perfil !== "undefined" && perfil?.nombre) ? perfil.nombre : "Walter"
-    };
-
-    try {
-      const { data, error } = await supabase.from("comercios").insert([nuevo]).select();
-      if (!error && data && data.length > 0) {
-        setComercios((prev) => [data[0], ...prev]);
-        try { if (typeof reproducirAlerta === "function") reproducirAlerta(); } catch(e){}
-        if (typeof setTextoBotonAgregar === "function") {
-          setTextoBotonAgregar("✅ ¡GUARDADO! #" + cod);
-          setTimeout(() => setTextoBotonAgregar("➕ AGREGAR COMERCIO"), 2500);
-        }
-      } else {
-        console.error("Error Supabase:", error);
-      }
-    } catch (err) {
-      console.error("Excepción:", err);
-    }
-  };
-
-  const listaFiltrada = (comercios || [])
-    .map((c) => {
-      const cLat = c.ubicacion_exacta_latitud || c.latitud;
-      const cLng = c.ubicacion_exacta_longitud || c.longitud;
-      let dist = null;
-      if (posicionActual && posicionActual[0] && posicionActual[1] && cLat && cLng) {
-        dist = calcularMetrosGPS(posicionActual[0], posicionActual[1], cLat, cLng);
-      }
-      return { ...c, _distanciaMetros: dist };
-    })
-    .filter((c) => {
-      const q = (busqueda || '').toLowerCase().trim();
-      const txt = `${c.nombre || ''} ${c.direccion || ''} ${c.rubro || ''} ${c.id || ''}`.toLowerCase();
-      const cumpleBusqueda = !q || txt.includes(q);
-      const cumplePreventista = !perfil || !perfil.nombre || perfil.rol === 'superadmin' || c.preventista === perfil.nombre;
-      return cumpleBusqueda && cumplePreventista;
-    })
-    .sort((a, b) => {
-      if (a._distanciaMetros !== null && b._distanciaMetros !== null) {
-        return a._distanciaMetros - b._distanciaMetros;
-      }
-      if (a._distanciaMetros !== null) return -1;
-      if (b._distanciaMetros !== null) return 1;
-      return (b.id || 0) - (a.id || 0);
-    });
-
-
-    
-  // 1. Subir Foto de Fachada a Storage
-  const subirFotoFachada = async (e) => {
-    activarJornadaSiEstaInactiva();
-    const file = e.target.files?.[0];
-    if (!file || !comercioSeleccionado) return;
-    try {
-      const ext = file.name.split(".").pop() || "jpg";
-      const fileName = "foto_" + comercioSeleccionado.id + "_" + Date.now() + "." + ext;
-      const { data, error } = await supabase.storage.from("fotos_comercios").upload(fileName, file);
-      if (error) throw error;
-      const { data: publicData } = supabase.storage.from("fotos_comercios").getPublicUrl(fileName);
-      const url = publicData.publicUrl;
-      const { error: dbError } = await supabase.from("comercios").update({ foto_url: url }).eq("id", comercioSeleccionado.id);
-      if (dbError) throw dbError;
-      setComercioSeleccionado(prev => ({ ...prev, foto_url: url }));
-      setComercios(prev => prev.map(item => item.id === comercioSeleccionado.id ? { ...item, foto_url: url } : item));
-      alert("✅ Foto subida exitosamente");
-    } catch (err) {
-      console.error("Error subiendo foto:", err);
-      alert("Error subiendo foto: " + (err.message || "desconocido"));
-    }
-  };
-
-  // 2. Guardar Edición en Supabase
-  const guardarEdicion = async (e) => {
-    activarJornadaSiEstaInactiva();
-    if (e && e.preventDefault) e.preventDefault();
-    if (!comercioSeleccionado) return;
-    try {
-      const actualizacion = {
-        nombre: (comercioSeleccionado.nombre && comercioSeleccionado.nombre.trim()) ? comercioSeleccionado.nombre.trim() : ("Comercio #" + comercioSeleccionado.id),
-        direccion: comercioSeleccionado.direccion || "",
-        rubro: comercioSeleccionado.rubro || "General",
-        dia_visita: comercioSeleccionado.dia_visita || "Lunes",
-        telefono: comercioSeleccionado.telefono || "",
-
-          
-
-        notas: comercioSeleccionado.notas || ""
-      ,
-        cuit: comercioSeleccionado.cuit || '',
-        condicion_fiscal: comercioSeleccionado.condicion_fiscal || 'Consumidor Final',
-        domicilio_fiscal: comercioSeleccionado.domicilio_fiscal || ''
-      };
-      const { error } = await supabase.from("comercios").update(actualizacion).eq("id", comercioSeleccionado.id);
-      if (error) throw error;
-      setComercios(prev => prev.map(item => item.id === comercioSeleccionado.id ? { ...item, ...actualizacion } : item));
-      alert("✅ Comercio guardado exitosamente");
-    } catch (err) {
-      console.error("Error al guardar edición:", err);
-      alert("Error al guardar: " + (err.message || "desconocido"));
-    }
-  };
-
-  // 3. Eliminar Comercio
-  const eliminarComercio = async (id) => {
-    if (!confirm("¿Seguro que deseas eliminar este comercio?")) return;
-    try {
-      const { error } = await supabase.from("comercios").delete().eq("id", id);
-      if (error) throw error;
-      setComercios(prev => prev.filter(c => c.id !== id));
-      setComercioSeleccionado(null);
-      alert("🗑️ Comercio eliminado correctamente");
-    } catch (err) {
-      console.error("Error eliminando comercio:", err);
-      alert("Error al eliminar: " + (err.message || "desconocido"));
-    }
-  };
-
-
-  
-  // Función para contactar al comercio por WhatsApp
-  const enviarWhatsApp = (telefono) => {
-    if (!telefono) {
-      alert("Este comercio no tiene un teléfono registrado.");
-      return;
-    }
-    const numLimpio = String(telefono).replace(/[^0-9]/g, "");
-    if (!numLimpio) {
-      alert("El número de teléfono registrado no es válido.");
-      return;
-    }
-    const url = "https://wa.me/" + numLimpio + "?text=" + encodeURIComponent("Hola, me comunico de RutaComercio.");
-    window.open(url, "_blank");
-  };
-
-
-  
-    // Vista de mapas y navegación
-  if (modoManejo) {
     return (
-      <div style={{ position: "relative", minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", display: "flex", flexDirection: "column" }}>
-        {/* Cabecera Modo Manejo */}
-        <div style={{ padding: "12px 16px", backgroundColor: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155" }}>
+      <div style={{ position: "relative", height: "100vh", width: "100vw", backgroundColor: "#0f172a", color: "#fff", display: "flex", flexDirection: "column", overflow: "hidden", fontFamily: "sans-serif" }}>
+        {/* CABECERA MODO MANEJO */}
+        <header style={{ padding: "10px 16px", backgroundColor: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155", zIndex: 1000 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontSize: "20px" }}>🚗</span>
-            <span style={{ fontWeight: "bold", fontSize: "15px" }}>Modo Manejo Activo</span>
+            <span style={{ fontWeight: "bold", fontSize: "15px", color: "#38bdf8" }}>Modo Manejo Activo</span>
           </div>
           <button
+            type="button"
             onClick={() => setModoManejo(false)}
             style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 14px", fontWeight: "bold", cursor: "pointer", fontSize: "13px" }}
           >
             ✕ Salir
           </button>
+        </header>
+
+        {/* CONTENEDOR DEL MAPA EN VIVO */}
+        <div style={{ flex: 1, position: "relative", width: "100%" }}>
+          <MapContainer
+            center={[latManejo, lngManejo]}
+            zoom={16}
+            style={{ height: "100%", width: "100%" }}
+            zoomControl={false}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <AutoCentradoMapa puntos={posicionActual ? [posicionActual] : []} puntoActivo={posicionActual} />
+            
+            {/* PIN DE TU UBICACIÓN EN VIVO */}
+            {posicionActual && (
+              <Marker position={posicionActual} icon={L.divIcon({ className: 'custom-icon', html: '<div style="background:#2563eb;color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 0 12px rgba(37,99,235,0.8);font-size:14px;">📍</div>' })}>
+                <Popup><b>Estás acá (En vivo)</b></Popup>
+              </Marker>
+            )}
+
+            {/* PINES DE LOS COMERCIOS */}
+            {comercios.map((com) => {
+              const latC = Number(com.ubicacion_exacta_latitud || com.latitud);
+              const lngC = Number(com.ubicacion_exacta_longitud || com.longitud);
+              if (!latC || !lngC) return null;
+              return (
+                <Marker key={com.id} position={[latC, lngC]} icon={L.divIcon({ className: 'custom-icon', html: '<div style="background:#10b981;color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;font-size:11px;font-weight:bold;">🏪</div>' })}>
+                  <Popup>
+                    <div style={{ color: "#0f172a" }}>
+                      <b>{com.nombre || ('Comercio #' + com.id)}</b><br/>
+                      <small>{com.direccion || 'Sin dirección'}</small>
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MapContainer>
+
+          {/* TARJETA FLOTANTE COMERCIO MÁS CERCANO */}
+          {comercioCercano && (
+            <div style={{ position: "absolute", top: "12px", left: "12px", right: "12px", backgroundColor: "rgba(15,23,42,0.92)", backdropFilter: "blur(6px)", border: "1px solid #38bdf8", borderRadius: "12px", padding: "10px 14px", zIndex: 1500, display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 4px 16px rgba(0,0,0,0.5)" }}>
+              <div>
+                <div style={{ fontSize: "11px", color: "#38bdf8", fontWeight: "bold", textTransform: "uppercase" }}>📍 Comercio Más Cercano</div>
+                <div style={{ fontSize: "14px", fontWeight: "bold", color: "#fff" }}>{comercioCercano.nombre || ('Comercio #' + comercioCercano.id)}</div>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>Aprox. {distanciaCercano || 0} metros</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setComercioSeleccionado(comercioCercano); setModoManejo(false); }}
+                style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 12px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}
+              >
+                Ver Ficha
+              </button>
+            </div>
+          )}
         </div>
+
         {/* 3. BOTÓN GIGANTE ARRASTRABLE LIBRE */}
-        <div style={{ position: "fixed", 
-            left: posicionBotonManejo.x + "px", 
-            top: posicionBotonManejo.y + "px", 
+        <div
+          style={{
+            position: "fixed",
+            left: posicionBotonManejo.x + "px",
+            top: posicionBotonManejo.y + "px",
             width: "calc(100% - 32px)",
             maxWidth: "380px",
             zIndex: 2000,
@@ -873,21 +553,21 @@ export default function App() {
             }
           }}
         >
-          <button 
+          <button
             type="button"
-            style={{ 
-              width: "100%", 
-              minHeight: "70px", 
-              padding: "16px", 
-              backgroundColor: arrastrandoBoton ? "#2563eb" : "#1d4ed8", 
-              color: "#ffffff", 
-              border: "3px solid #93c5fd", 
-              borderRadius: "18px", 
-              fontSize: "18px", 
-              fontWeight: "900", 
-              cursor: "grab", 
-              letterSpacing: "1px", 
-              boxShadow: arrastrandoBoton ? "0 12px 30px rgba(37,99,235,0.7)" : "0 8px 25px rgba(0,0,0,0.65)", 
+            style={{
+              width: "100%",
+              minHeight: "70px",
+              padding: "16px",
+              backgroundColor: arrastrandoBoton ? "#2563eb" : "#1d4ed8",
+              color: "#ffffff",
+              border: "3px solid #93c5fd",
+              borderRadius: "18px",
+              fontSize: "18px",
+              fontWeight: "900",
+              cursor: "grab",
+              letterSpacing: "1px",
+              boxShadow: arrastrandoBoton ? "0 12px 30px rgba(37,99,235,0.7)" : "0 8px 25px rgba(0,0,0,0.65)",
               textTransform: "uppercase",
               display: "flex",
               alignItems: "center",
@@ -902,9 +582,8 @@ export default function App() {
         </div>
       </div>
     );
-  } 
-
- if (editandoUbicacion && comercioSeleccionado) {
+  }
+  if (editandoUbicacion && comercioSeleccionado) {
     const latInicial = Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719);
     const lngInicial = Number(comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.264);
 
@@ -1021,6 +700,68 @@ export default function App() {
           >
             <span>📦</span> Tomar Pedido / Reedición
           </button>
+
+          
+          {/* BOTONERA DE ESTADO RÁPIDO DE VISITA */}
+          <div style={{ marginBottom: "16px", backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px", padding: "12px" }}>
+            <div style={{ fontSize: "11px", fontWeight: "bold", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>
+              📋 Registrar Resultado de Visita
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof registrarVisita === "function") {
+                    registrarVisita("Visitado");
+                  } else {
+                    alert("Visita marcada: Visitado ✓");
+                  }
+                }}
+                style={{ padding: "10px 8px", backgroundColor: "#065f46", color: "#6ee7b7", border: "1px solid #059669", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+              >
+                <span>✓</span> Visitado
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof registrarVisita === "function") {
+                    registrarVisita("Cerrado");
+                  } else {
+                    alert("Visita marcada: Local Cerrado 🚪");
+                  }
+                }}
+                style={{ padding: "10px 8px", backgroundColor: "#7f1d1d", color: "#fca5a5", border: "1px solid #dc2626", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+              >
+                <span>🚪</span> Cerrado
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof registrarVisita === "function") {
+                    registrarVisita("Tiene Stock / No Compró");
+                  } else {
+                    alert("Visita marcada: Tiene Stock ⏸️");
+                  }
+                }}
+                style={{ padding: "10px 8px", backgroundColor: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: "8px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+              >
+                <span>⏸️</span> Tiene Stock
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof registrarVisita === "function") {
+                    registrarVisita("Volver Más Tarde");
+                  } else {
+                    alert("Visita marcada: Volver Más Tarde ⏳");
+                  }
+                }}
+                style={{ padding: "10px 8px", backgroundColor: "#78350f", color: "#fde68a", border: "1px solid #d97706", borderRadius: "8px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+              >
+                <span>⏳</span> Volver Tarde
+              </button>
+            </div>
+          </div>
 
           {/* FOTO DE FACHADA */}
           <div style={{ marginBottom: "16px", borderRadius: "12px", overflow: "hidden", backgroundColor: "#0f172a", border: "1px solid #1e293b", textAlign: "center" }}>
@@ -1221,7 +962,7 @@ export default function App() {
               </div>
             </div>
           </div>
-         <button onClick={handleCerrarSesion} style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+         <button onClick={async () => { try { await supabase.auth.signOut(); localStorage.clear(); sessionStorage.clear(); } catch(e){} window.location.replace("/"); }} style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
           >
             ✕ Salir
           </button> 
@@ -1230,41 +971,41 @@ export default function App() {
         {/* TABLERO JORNADA Y MODO MANEJO */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
           {/* Tarjeta Jornada */}
-          <div style={{ backgroundColor: "#1e293b", padding: "10px", borderRadius: "10px", border: "1px solid #334155" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", textTransform: "uppercase" }}>Jornada</span>
-              <span style={{ fontSize: "10px", color: jornadaActiva ? "#4ade80" : "#94a3b8", fontWeight: "bold" }}>
-                {verificarJornadaActiva() || jornadaActiva ? "● En vivo (En ruta)" : "○ Inactiva"}
+          <div style={{ backgroundColor: "#1e293b", padding: "12px", borderRadius: "10px", border: "1px solid #334155", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", textTransform: "uppercase" }}>Jornada Laboral</span>
+              <span style={{ fontSize: "11px", color: jornadaActiva ? "#4ade80" : "#94a3b8", fontWeight: "bold" }}>
+                {jornadaActiva ? "● En ruta" : "○ En espera"}
               </span>
             </div>
-            <div style={{ fontSize: "16px", fontWeight: "800", color: "#fff" }}>
-              {jornadaActiva ? tiempoTranscurrido : "0m"}
+            <div style={{ fontSize: "14px", fontWeight: "700", color: jornadaActiva ? "#f8fafc" : "#64748b", margin: "6px 0" }}>
+              {jornadaActiva ? "Jornada Activa" : "Fuera de Ruta"}
             </div>
             <button
               onClick={() => {
                 if (jornadaActiva) {
-                    setJornadaActiva(false); emitirActividadEnVivo();
-                    localStorage.removeItem("rutacomercio_jornada_activa");
-                    localStorage.removeItem("rutacomercio_inicio_jornada");
-                    if (typeof setInicioTimestamp === "function") setInicioTimestamp(null);
-                  } else {
-                    const timestampInicio = Date.now().toString();
-                    setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
-                    localStorage.setItem("rutacomercio_jornada_activa", "true");
-                    localStorage.setItem("rutacomercio_inicio_jornada", timestampInicio);
-                    if (typeof setInicioTimestamp === "function") setInicioTimestamp(timestampInicio);
-                  const ahora = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                  localStorage.setItem("jornada_activa", "true");
-                  localStorage.setItem("timestamp_inicio_jornada", Date.now().toString());
-                  localStorage.setItem("hora_inicio_jornada", ahora);
-                  setHoraInicioJornada(ahora);
+                  setJornadaActiva(false);
+                  if (typeof emitirActividadEnVivo === "function") emitirActividadEnVivo();
+                  localStorage.removeItem("rutacomercio_jornada_activa");
+                  localStorage.removeItem("jornada_activa");
                 }
               }}
-              style={{ width: "100%", marginTop: "6px", padding: "6px 0", backgroundColor: jornadaActiva ? "#dc2626" : "#1e293b", color: jornadaActiva ? "#fff" : "#94a3b8", border: jornadaActiva ? "none" : "1px solid #334155", borderRadius: "6px", fontSize: "10px", fontWeight: "700", cursor: jornadaActiva ? "pointer" : "default" }}
-                disabled={!jornadaActiva}
-              >
-                {jornadaActiva ? "🛑 Finalizar Jornada" : "⏳ En ruta"}
-              </button>
+              disabled={!jornadaActiva}
+              style={{
+                width: "100%",
+                padding: "8px 0",
+                backgroundColor: jornadaActiva ? "#dc2626" : "#1e293b",
+                color: jornadaActiva ? "#ffffff" : "#64748b",
+                border: jornadaActiva ? "none" : "1px solid #334155",
+                borderRadius: "6px",
+                fontSize: "11px",
+                fontWeight: "700",
+                cursor: jornadaActiva ? "pointer" : "default",
+                transition: "all 0.2s"
+              }}
+            >
+              {jornadaActiva ? "🛑 Finalizar Jornada" : "En Espera (Inicia al visitar)"}
+            </button>
           </div>
 
           {/* Tarjeta Modo Manejo */}
@@ -1373,4 +1114,6 @@ export default function App() {
       </button>
     </div>
   );
+}
+);
 }
