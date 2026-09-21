@@ -1243,41 +1243,41 @@ return (
         {/* TABLERO JORNADA Y MODO MANEJO */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
           {/* Tarjeta Jornada */}
-          <div style={{ backgroundColor: "#1e293b", padding: "10px", borderRadius: "10px", border: "1px solid #334155" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", textTransform: "uppercase" }}>Jornada</span>
-              <span style={{ fontSize: "10px", color: jornadaActiva ? "#4ade80" : "#94a3b8", fontWeight: "bold" }}>
-                {verificarJornadaActiva() || jornadaActiva ? "● En vivo (En ruta)" : "○ Inactiva"}
+          <div style={{ backgroundColor: "#1e293b", padding: "12px", borderRadius: "10px", border: "1px solid #334155", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700", textTransform: "uppercase" }}>Jornada Laboral</span>
+              <span style={{ fontSize: "11px", color: jornadaActiva ? "#4ade80" : "#94a3b8", fontWeight: "bold" }}>
+                {jornadaActiva ? "● En ruta" : "○ En espera"}
               </span>
             </div>
-            <div style={{ fontSize: "16px", fontWeight: "800", color: "#fff" }}>
-              {jornadaActiva ? tiempoTranscurrido : "0m"}
+            <div style={{ fontSize: "14px", fontWeight: "700", color: jornadaActiva ? "#f8fafc" : "#64748b", margin: "6px 0" }}>
+              {jornadaActiva ? "Jornada Activa" : "Fuera de Ruta"}
             </div>
             <button
               onClick={() => {
                 if (jornadaActiva) {
-                    setJornadaActiva(false); emitirActividadEnVivo();
-                    localStorage.removeItem("rutacomercio_jornada_activa");
-                    localStorage.removeItem("rutacomercio_inicio_jornada");
-                    if (typeof setInicioTimestamp === "function") setInicioTimestamp(null);
-                  } else {
-                    const timestampInicio = Date.now().toString();
-                    setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
-                    localStorage.setItem("rutacomercio_jornada_activa", "true");
-                    localStorage.setItem("rutacomercio_inicio_jornada", timestampInicio);
-                    if (typeof setInicioTimestamp === "function") setInicioTimestamp(timestampInicio);
-                  const ahora = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                  localStorage.setItem("jornada_activa", "true");
-                  localStorage.setItem("timestamp_inicio_jornada", Date.now().toString());
-                  localStorage.setItem("hora_inicio_jornada", ahora);
-                  setHoraInicioJornada(ahora);
+                  setJornadaActiva(false);
+                  if (typeof emitirActividadEnVivo === "function") emitirActividadEnVivo();
+                  localStorage.removeItem("rutacomercio_jornada_activa");
+                  localStorage.removeItem("jornada_activa");
                 }
               }}
-              style={{ width: "100%", marginTop: "6px", padding: "6px 0", backgroundColor: jornadaActiva ? "#dc2626" : "#1e293b", color: jornadaActiva ? "#fff" : "#94a3b8", border: jornadaActiva ? "none" : "1px solid #334155", borderRadius: "6px", fontSize: "10px", fontWeight: "700", cursor: jornadaActiva ? "pointer" : "default" }}
-                disabled={!jornadaActiva}
-              >
-                {jornadaActiva ? "🛑 Finalizar Jornada" : "⏳ En ruta"}
-              </button>
+              disabled={!jornadaActiva}
+              style={{
+                width: "100%",
+                padding: "8px 0",
+                backgroundColor: jornadaActiva ? "#dc2626" : "#1e293b",
+                color: jornadaActiva ? "#ffffff" : "#64748b",
+                border: jornadaActiva ? "none" : "1px solid #334155",
+                borderRadius: "6px",
+                fontSize: "11px",
+                fontWeight: "700",
+                cursor: jornadaActiva ? "pointer" : "default",
+                transition: "all 0.2s"
+              }}
+            >
+              {jornadaActiva ? "🛑 Finalizar Jornada" : "En Espera (Inicia al visitar)"}
+            </button>
           </div>
 
           {/* Tarjeta Modo Manejo */}
