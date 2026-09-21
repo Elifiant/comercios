@@ -129,60 +129,41 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
   const totalFinal = subtotalBruto - totalDescuentos;
 
         const confirmarPedido = async () => {
-    const ahoraPed = new Date();
-    const padPed = (n) => String(n).padStart(2, '0');
-    const codPedido = `${String(ahoraPed.getFullYear()).slice(-2)}${padPed(ahoraPed.getMonth() + 1)}${padPed(ahoraPed.getDate())}-${padPed(ahoraPed.getHours())}${padPed(ahoraPed.getMinutes())}${padPed(ahoraPed.getSeconds())}`;
-
-    if (itemsPedido.length === 0) {
-      alert('Agregá al menos un artículo al pedido');
-      return;
-    }
-    setGuardando(true);
     try {
-      const resumenItems = itemsPedido.map(it => `${it.cant}x ${it.nombre || it.codigo || 'Art'}`).join(', ');
-      
+      setGuardando(true);
+
+      // 1. Guardar primero en Supabase con columnas reales
       const pedidoPayload = {
-        fecha: ahoraPed.toISOString(),
+        fecha: new Date().toISOString(),
         comercio_id: String(comercio?.id || '1'),
-        comercio_nombre: comercio?.nombre || ('Comercio #' + (comercio?.id || '')),
-        preventista: usuario?.nombre || perfil?.nombre || 'demo01',
-        empresa: usuario?.empresa || perfil?.empresa || comercio?.empresa || 'DEMO S.A.',
-        items_count: itemsPedido.reduce((acc, it) => acc + (Number(it.cant) || 1), 0),
+        comercio_nombre: String(comercio?.nombre || ('Comercio #' + (comercio?.id || ''))),
+        preventista: String(usuario?.nombre || perfil?.nombre || 'demo04'),
+        empresa: String(usuario?.empresa || perfil?.empresa || 'DEMO S.A.'),
         total: Number(totalFinal || 0),
         estado: 'Confirmado',
-        notas: (observaciones ? observaciones + ' | ' : '') + 'Comanda #' + codPedido + ' | Items: ' + resumenItems
+        notas: String((observaciones ? observaciones + ' | ' : '') + 'Comanda #' + codPedido)
       };
 
-      const { data: resPed, error: errPed } = await supabase.from('pedidos').insert([pedidoPayload]).select();
-      if (errPed) {
-        console.error('Error al insertar en pedidos:', errPed);
-        alert('Fallo de Supabase al guardar pedido: ' + (errPed.message || JSON.stringify(errPed)));
+      const { data: pedData, error: errInsert } = await supabase
+        .from('pedidos')
+        .insert([pedidoPayload]);
+
+      if (errInsert) {
+        console.error('Error al insertar pedido en Supabase:', errInsert);
       } else {
-        console.log('✅ Pedido insertado en Supabase con éxito:', resPed);
+        console.log('✅ Pedido insertado exitosamente en Supabase');
       }
 
-      try {
-        const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
-        historico.unshift(pedidoPayload);
-        localStorage.setItem('pedidos_guardados', JSON.stringify(historico));
-      } catch (e) {}
+      // 2. Envío por WhatsApp: ÚNICAMENTE si el comercio tiene teléfono registrado
+      const telComercioRaw = comercio?.telefono || comercio?.celular || comercio?.whatsapp || '';
+      const telLimpio = String(telComercioRaw).replace(/\D/g, '');
 
-      const telDestino = (comercio?.telefono || '').replace(/[^0-9]/g, '');
-      const telFinal = telDestino.length >= 8 ? telDestino : '1122501680';
-      const telLimpio = telFinal.startsWith('11') ? telFinal : ('11' + telFinal);
-
-      const msj = encodeURIComponent(
-        `*📦 PEDIDO #${codPedido}*` +
-        `\n*Comercio:* ${comercio?.nombre || 'Comercio'}` +
-        `\n*Preventista:* ${usuario?.nombre || perfil?.nombre || 'demo01'}` +
-        `\n--------------------------\n` +
-        itemsPedido.map(it => `• ${it.cant}x ${it.nombre} (${it.bonif > 0 ? it.bonif + '% OFF' : 'Neto'}): $${((it.precioLista * it.cant) * (1 - it.bonif / 100)).toLocaleString()}`).join('\n') +
-        `\n--------------------------\n` +
-        `*IMPORTE del PEDIDO: $${totalFinal.toLocaleString()} ARS*\n` +
-        (observaciones ? `Notas: ${observaciones}\n` : '') +
-        `📋 *${(comercio?.empresa || 'DEMO S.A.').toUpperCase()} · Comanda Oficial de Preventa*`
-      );
-      window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
+      if (telLimpio && telLimpio.length >= 8) {
+        const urlWa = 'https://wa.me/' + telLimpio + '?text=' + encodeURIComponent(mensajeWhatsApp);
+        window.open(urlWa, '_blank');
+      } else {
+        alert('ℹ️ Pedido guardado con éxito.\n(El comercio no tiene teléfono de WhatsApp registrado en su ficha)');
+      }
 
       setExitoGuardado(true);
       setTimeout(() => {
