@@ -418,6 +418,7 @@ export default function App() {
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
+  const [jornadaActiva, setJornadaActiva] = useState(false);
   const [tomandoPedido, setTomandoPedido] = useState(false);
   const [modoManejo, setModoManejo] = useState(false);
 
