@@ -132,16 +132,26 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
     try {
       setGuardando(true);
 
+      // Generación estricta del código de comanda timestamp: #AAMMDD-HHMMSS
+      const ahora = new Date();
+      const aa = String(ahora.getFullYear()).slice(-2);
+      const mm = String(ahora.getMonth() + 1).padStart(2, '0');
+      const dd = String(ahora.getDate()).padStart(2, '0');
+      const hh = String(ahora.getHours()).padStart(2, '0');
+      const min = String(ahora.getMinutes()).padStart(2, '0');
+      const ss = String(ahora.getSeconds()).padStart(2, '0');
+      const codPedido = '#' + aa + mm + dd + '-' + hh + min + ss;
+
       // 1. Guardar primero en Supabase con columnas reales
       const pedidoPayload = {
-        fecha: new Date().toISOString(),
+        fecha: ahora.toISOString(),
         comercio_id: String(comercio?.id || '1'),
         comercio_nombre: String(comercio?.nombre || ('Comercio #' + (comercio?.id || ''))),
         preventista: String(usuario?.nombre || perfil?.nombre || 'demo04'),
         empresa: String(usuario?.empresa || perfil?.empresa || 'DEMO S.A.'),
         total: Number(totalFinal || 0),
         estado: 'Confirmado',
-        notas: String((observaciones ? observaciones + ' | ' : '') + 'Comanda #' + codPedido)
+        notas: String((observaciones ? observaciones + ' | ' : '') + 'Comanda ' + codPedido)
       };
 
       const { data: pedData, error: errInsert } = await supabase
@@ -151,7 +161,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
       if (errInsert) {
         console.error('Error al insertar pedido en Supabase:', errInsert);
       } else {
-        console.log('✅ Pedido insertado exitosamente en Supabase');
+        console.log('✅ Pedido insertado exitosamente en Supabase:', codPedido);
       }
 
       // 2. Envío por WhatsApp: ÚNICAMENTE si el comercio tiene teléfono registrado
@@ -159,10 +169,11 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
       const telLimpio = String(telComercioRaw).replace(/\D/g, '');
 
       if (telLimpio && telLimpio.length >= 8) {
-        const urlWa = 'https://wa.me/' + telLimpio + '?text=' + encodeURIComponent(mensajeWhatsApp);
+        const mensajeWa = '*PEDIDO ' + codPedido + '* - Comercio: ' + (comercio?.nombre || '') + ' - Total: $' + Number(totalFinal || 0).toLocaleString() + ' ARS';
+        const urlWa = 'https://wa.me/' + telLimpio + '?text=' + encodeURIComponent(mensajeWa);
         window.open(urlWa, '_blank');
       } else {
-        alert('ℹ️ Pedido guardado con éxito.\n(El comercio no tiene teléfono de WhatsApp registrado en su ficha)');
+        alert('ℹ️ Pedido ' + codPedido + ' guardado con éxito.\n(El comercio no tiene teléfono de WhatsApp registrado en su ficha)');
       }
 
       setExitoGuardado(true);
