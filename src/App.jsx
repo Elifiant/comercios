@@ -711,6 +711,57 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
               }}
             />
           </MapContainer>
+          {/* Barra fija inferior con botón grande de confirmación */}
+          <div style={{
+            position: "absolute",
+            bottom: "20px",
+            left: "16px",
+            right: "16px",
+            zIndex: 1000,
+            display: "flex",
+            gap: "10px"
+          }}>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const latG = comercioSeleccionado.ubicacion_exacta_latitud || latInicial;
+                  const lngG = comercioSeleccionado.ubicacion_exacta_longitud || lngInicial;
+                  await supabase
+                    .from("comercios")
+                    .update({
+                      ubicacion_exacta_latitud: latG,
+                      ubicacion_exacta_longitud: lngG,
+                      latitud: latG,
+                      longitud: lngG
+                    })
+                    .eq("id", comercioSeleccionado.id);
+                  alert("✅ Ubicación guardada exitosamente");
+                  setEditandoUbicacion(false);
+                } catch (err) {
+                  alert("Error al guardar: " + (err.message || "Verifique conexión"));
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: "14px",
+                background: "#16a34a",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "12px",
+                fontSize: "15px",
+                fontWeight: "700",
+                cursor: "pointer",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px"
+              }}
+            >
+              ✓ Guardar Ubicación Exacta
+            </button>
+          </div>
         </div>
       </div>
     );
