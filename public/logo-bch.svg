@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1010 321" width="1010" height="321">
+  <rect width="1010" height="321" fill="#000000"/>
+  <path d="M-60 160 A220 220 0 0 1 280 160 A220 220 0 0 1 -60 160" fill="none" stroke="#0ac18e" stroke-width="45"/>
+  <g transform="translate(45, 60) scale(1.15)">
+    <circle cx="50" cy="85" r="75" fill="#0ac18e"/>
+    <text x="50" y="118" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="95" fill="#000000" text-anchor="middle">₿</text>
+  </g>
+  <text x="58" y="275" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="28" fill="#f59e0b">Bitcoin<tspan fill="#ffffff">.com</tspan></text>
+  <text x="345" y="125" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="62" fill="#0ac18e" letter-spacing="4">ACEPTAMOS</text>
+  <text x="345" y="235" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="98" fill="#ffffff" letter-spacing="-1">Bitcoin Cash</text>
+</svg>
