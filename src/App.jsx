@@ -1035,6 +1035,68 @@ return (
             <span>📦</span> Tomar Pedido / Reedición
           </button>
 
+          
+          {/* BOTONERA DE ESTADO RÁPIDO DE VISITA */}
+          <div style={{ marginBottom: "16px", backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px", padding: "12px" }}>
+            <div style={{ fontSize: "11px", fontWeight: "bold", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>
+              📋 Registrar Resultado de Visita
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof registrarVisita === "function") {
+                    registrarVisita("Visitado");
+                  } else {
+                    alert("Visita marcada: Visitado ✓");
+                  }
+                }}
+                style={{ padding: "10px 8px", backgroundColor: "#065f46", color: "#6ee7b7", border: "1px solid #059669", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+              >
+                <span>✓</span> Visitado
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof registrarVisita === "function") {
+                    registrarVisita("Cerrado");
+                  } else {
+                    alert("Visita marcada: Local Cerrado 🚪");
+                  }
+                }}
+                style={{ padding: "10px 8px", backgroundColor: "#7f1d1d", color: "#fca5a5", border: "1px solid #dc2626", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+              >
+                <span>🚪</span> Cerrado
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof registrarVisita === "function") {
+                    registrarVisita("Tiene Stock / No Compró");
+                  } else {
+                    alert("Visita marcada: Tiene Stock ⏸️");
+                  }
+                }}
+                style={{ padding: "10px 8px", backgroundColor: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: "8px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+              >
+                <span>⏸️</span> Tiene Stock
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (typeof registrarVisita === "function") {
+                    registrarVisita("Volver Más Tarde");
+                  } else {
+                    alert("Visita marcada: Volver Más Tarde ⏳");
+                  }
+                }}
+                style={{ padding: "10px 8px", backgroundColor: "#78350f", color: "#fde68a", border: "1px solid #d97706", borderRadius: "8px", fontSize: "12px", fontWeight: "bold", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+              >
+                <span>⏳</span> Volver Tarde
+              </button>
+            </div>
+          </div>
+
           {/* FOTO DE FACHADA */}
           <div style={{ marginBottom: "16px", borderRadius: "12px", overflow: "hidden", backgroundColor: "#0f172a", border: "1px solid #1e293b", textAlign: "center" }}>
             {comercioSeleccionado.foto_url ? (
