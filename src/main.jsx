@@ -97,7 +97,7 @@ function EnrutadorSeguro() {
     return (
       <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif" }}>
         <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#1e293b", borderRadius: "16px", padding: "32px 24px", textAlign: "center", border: "1px solid #334155", boxShadow: "0 10px 25px rgba(0,0,0,0.5)" }}>
-          <img src="/logo.png" alt="RutaComercio" style={{ width: "160px", margin: "0 auto 16px auto", display: "block" }} />
+          <img src="/logo.svg" alt="RutaComercio" style={{ width: "160px", margin: "0 auto 16px auto", display: "block" }} />
           <h2 style={{ color: "#fff", fontSize: "20px", margin: "0 0 6px 0", fontWeight: "bold" }}>Acceso Seguro</h2>
           <p style={{ color: "#94a3b8", fontSize: "13px", margin: "0 0 20px 0" }}>Ingresá tu correo y contraseña</p>
           <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "12px", textAlign: "left" }}>
