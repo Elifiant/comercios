@@ -1197,22 +1197,48 @@ useEffect(() => {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setDestinoMapa(null)}
-            style={{
-              padding: "9px 12px",
-              border: "1px solid #64748b",
-              borderRadius: "9px",
-              backgroundColor: "#1e293b",
-              color: "#fff",
-              fontWeight: "800",
-              cursor: "pointer",
-              flexShrink: 0,
-            }}
-          >
-            ← VOLVER
-          </button>
+          <div style={{ display: "flex", gap: "7px", flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (!Number.isFinite(latDestino) || !Number.isFinite(lngDestino)) {
+                  alert("Este comercio no tiene una ubicación válida para navegar.");
+                  return;
+                }
+
+                const destino = `${latDestino},${lngDestino}`;
+                const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destino)}&travelmode=driving`;
+                window.open(url, "_blank");
+              }}
+              style={{
+                padding: "9px 11px",
+                border: "1px solid #60a5fa",
+                borderRadius: "9px",
+                backgroundColor: "#2563eb",
+                color: "#fff",
+                fontWeight: "900",
+                cursor: "pointer",
+              }}
+            >
+              🧭 NAVEGAR
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDestinoMapa(null)}
+              style={{
+                padding: "9px 11px",
+                border: "1px solid #64748b",
+                borderRadius: "9px",
+                backgroundColor: "#1e293b",
+                color: "#fff",
+                fontWeight: "800",
+                cursor: "pointer",
+              }}
+            >
+              ← VOLVER
+            </button>
+          </div>
         </div>
 
         <div style={{ flex: 1, minHeight: 0 }}>
@@ -2038,7 +2064,7 @@ onChange={(e) =>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <img src="/logo.svg" alt="RutaComercio" style={{ width: "36px", height: "36px", objectFit: "contain" }} />
             <div>
-              <div style={{ fontSize: "15px", fontWeight: "800", color: "#ffffff", letterSpacing: "-0.3px" }}>RutaComercio</div>
+              <div style={{ fontSize: "14px", fontWeight: "800", color: "#ffffff", letterSpacing: "-0.3px" }}>RutaComercio</div>
               <div style={{ fontSize: "11px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
                 <span>👤 {perfil?.nombre || "Preventista"}</span>
                 <span>·</span>
@@ -2073,28 +2099,25 @@ onChange={(e) =>
 </button>
         {/* FRANJA DE MÉTRICAS DIARIAS DEL PREVENTISTA */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginTop: "10px" }}>
-          <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Visitas</div>
-            <div style={{ fontSize: "15px", fontWeight: "800", color: "#38bdf8", marginTop: "2px" }}>
-              {`${visitasRealizadasHoy} / ${visitasProgramadasHoy}`}
+          <div style={{ backgroundColor: "#1e293b", padding: "5px 4px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "9px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Visitas</div>
+            <div style={{ fontSize: "14px", fontWeight: "800", color: "#38bdf8", marginTop: "2px" }}>
+              {`${visitasRealizadasHoy} de ${visitasProgramadasHoy}`}
             </div>
-            <div style={{ fontSize: "9px", color: "#64748b" }}>{"Realizadas / programadas"}</div>
           </div>
 
-          <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Venta Hoy</div>
-            <div style={{ fontSize: "15px", fontWeight: "800", color: "#4ade80", marginTop: "2px" }}>
+          <div style={{ backgroundColor: "#1e293b", padding: "5px 4px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "9px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Venta Hoy</div>
+            <div style={{ fontSize: "14px", fontWeight: "800", color: "#4ade80", marginTop: "2px" }}>
               {jornadaActiva ? "$ 148.5K" : "$ 0"}
             </div>
-            <div style={{ fontSize: "9px", color: "#64748b" }}>Acumulado</div>
           </div>
 
-          <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Efectividad</div>
+          <div style={{ backgroundColor: "#1e293b", padding: "5px 4px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "9px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Efectividad</div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: "#facc15", marginTop: "2px" }}>
               {jornadaActiva ? "44%" : "0%"}
             </div>
-            <div style={{ fontSize: "9px", color: "#64748b" }}>Ruta diaria</div>
           </div>
         </div>
 
@@ -2153,125 +2176,130 @@ onChange={(e) =>
 </div>
       {/* PRÓXIMO DESTINO SEGÚN RUTA SUGERIDA */}
       {vistaComercios === "HOY" && (
-        <div style={{ padding: "12px 16px 0" }}>
+        <div style={{ padding: "7px 16px 0" }}>
           <div
-            onClick={() => {
-              if (!proximoDestino) return;
-              setComercioSeleccionado(proximoDestino);
-            }}
-            title={proximoDestino ? "Tocá para abrir la ficha del próximo destino" : ""}
             style={{
               background: proximoDestino ? "#172554" : "#14532d",
               border: proximoDestino ? "1px solid #2563eb" : "1px solid #22c55e",
-              borderRadius: "12px",
-              padding: "13px 14px",
+              borderRadius: "10px",
+              padding: "8px 10px",
               boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
-              cursor: proximoDestino ? "pointer" : "default",
             }}
           >
-            <div
-              style={{
-                fontSize: "11px",
-                fontWeight: "900",
-                color: proximoDestino ? "#93c5fd" : "#bbf7d0",
-                letterSpacing: "0.7px",
-                marginBottom: "5px",
-              }}
-            >
-              🧭 PRÓXIMO DESTINO
-            </div>
-
             {proximoDestino ? (
               <>
-                <div style={{ fontSize: "17px", fontWeight: "900", color: "#fff" }}>
-                  {proximoDestino.nombre || `Comercio #${proximoDestino.id}`}
-                </div>
-
-                <div style={{ fontSize: "12px", color: "#cbd5e1", marginTop: "4px" }}>
-                  📍 {proximoDestino.direccion || "Sin dirección cargada"}
-                </div>
-
                 <div
                   style={{
                     display: "flex",
+                    alignItems: "center",
                     justifyContent: "space-between",
-                    gap: "10px",
-                    flexWrap: "wrap",
-                    marginTop: "8px",
-                    fontSize: "12px",
-                    fontWeight: "800",
+                    gap: "8px",
+                    marginBottom: "4px",
                   }}
                 >
-                  <span style={{ color: "#f8fafc" }}>
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      color: "#93c5fd",
+                      letterSpacing: "0.5px",
+                    }}
+                  >
+                    🧭 PRÓXIMO DESTINO · Parada {indiceProximoDestino + 1} de {rutaSugeridaHoy.length}
+                  </div>
+                  <div style={{ fontSize: "12px", fontWeight: "900", color: "#f8fafc", flexShrink: 0 }}>
                     {distanciaProximoDestino === null
-                      ? "Distancia no disponible"
+                      ? "—"
                       : distanciaProximoDestino < 1000
                         ? `🚗 ${distanciaProximoDestino} m`
                         : `🚗 ${(distanciaProximoDestino / 1000).toFixed(1)} km`}
-                  </span>
-
-                  <span style={{ color: "#bfdbfe" }}>
-                    Parada {indiceProximoDestino + 1} de {rutaSugeridaHoy.length}
-                  </span>
+                  </div>
                 </div>
 
                 <div
                   style={{
                     display: "flex",
+                    alignItems: "center",
                     justifyContent: "space-between",
                     gap: "8px",
-                    alignItems: "center",
-                    marginTop: "7px",
-                    fontSize: "10px",
-                    color: "#94a3b8",
                   }}
                 >
-                  <span>Según ruta sugerida</span>
-                  <span style={{ color: "#bfdbfe", fontWeight: "800" }}>
-                    TOCAR PARA ABRIR →
-                  </span>
-                </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: "900",
+                        color: "#fff",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {proximoDestino.nombre || `Comercio #${proximoDestino.id}`}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "10px",
+                        color: "#cbd5e1",
+                        marginTop: "1px",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      📍 {proximoDestino.direccion || "Sin dirección cargada"}
+                    </div>
+                  </div>
 
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDestinoMapa(proximoDestino);
-                  }}
-                  style={{
-                    width: "100%",
-                    marginTop: "10px",
-                    padding: "10px 12px",
-                    backgroundColor: "#2563eb",
-                    color: "#fff",
-                    border: "1px solid #60a5fa",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    fontWeight: "900",
-                    cursor: "pointer",
-                  }}
-                >
-                  🗺️ VER EN MAPA
-                </button>
+                  <div style={{ display: "flex", gap: "5px", flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setObservacionVisita("");
+                        setResultadoVisita("Visitado");
+                        setComercioSeleccionado(proximoDestino);
+                      }}
+                      style={{
+                        padding: "7px 9px",
+                        backgroundColor: "#334155",
+                        color: "#fff",
+                        border: "1px solid #64748b",
+                        borderRadius: "7px",
+                        fontSize: "10px",
+                        fontWeight: "900",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ABRIR
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDestinoMapa(proximoDestino)}
+                      style={{
+                        padding: "7px 9px",
+                        backgroundColor: "#2563eb",
+                        color: "#fff",
+                        border: "1px solid #60a5fa",
+                        borderRadius: "7px",
+                        fontSize: "10px",
+                        fontWeight: "900",
+                        cursor: "pointer",
+                      }}
+                    >
+                      🗺️ MAPA
+                    </button>
+                  </div>
+                </div>
               </>
             ) : rutaSugeridaHoy.length > 0 ? (
-              <>
-                <div style={{ fontSize: "16px", fontWeight: "900", color: "#fff" }}>
-                  ✓ Ruta del día completada
-                </div>
-                <div style={{ fontSize: "11px", color: "#bbf7d0", marginTop: "4px" }}>
-                  No quedan paradas pendientes en la ruta sugerida.
-                </div>
-              </>
+              <div style={{ fontSize: "13px", fontWeight: "900", color: "#fff" }}>
+                ✓ Ruta del día completada
+              </div>
             ) : (
-              <>
-                <div style={{ fontSize: "15px", fontWeight: "800", color: "#fff" }}>
-                  Sin ruta sugerida para hoy
-                </div>
-                <div style={{ fontSize: "11px", color: "#bbf7d0", marginTop: "4px" }}>
-                  El listado de comercios sigue disponible por cercanía.
-                </div>
-              </>
+              <div style={{ fontSize: "13px", fontWeight: "800", color: "#fff" }}>
+                Sin ruta sugerida para hoy
+              </div>
             )}
           </div>
         </div>
@@ -2294,77 +2322,162 @@ onChange={(e) =>
           <div style={{ textAlign: "center", padding: "40px 0", color: "#94a3b8", fontSize: "14px" }}>No se encontraron comercios</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {listaFiltrada.map((c) => (
-              <div
-                key={c.id}
-                onClick={() => {
-  setObservacionVisita('');
-  setResultadoVisita('Visitado');
-  setComercioSeleccionado(c);
-}}
-                style={{ backgroundColor: "#1e293b", padding: "12px 14px", borderRadius: "10px", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "transform 0.1s" }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  {c.foto_url ? (
-                    <img src={c.foto_url} alt="Local" style={{ width: "42px", height: "42px", borderRadius: "8px", objectFit: "cover", border: "1px solid #475569" }} />
-                  ) : (
-                    <div style={{ width: "42px", height: "42px", borderRadius: "8px", backgroundColor: "#0b1329", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}>
-                      🏪
+            {(() => {
+              const visitadoHoy = (c) =>
+                (visitasMapa || []).some(
+                  (v) =>
+                    String(v.comercio_id) === String(c.id) &&
+                    v?.fecha &&
+                    new Date(v.fecha) >= inicioHoyMetricas
+                );
+
+              const pendientes = listaFiltrada.filter((c) => !visitadoHoy(c));
+              const visitados = listaFiltrada.filter((c) => visitadoHoy(c));
+
+              const renderComercio = (c) => {
+              const visitaDeHoy = (visitasMapa || []).find(
+                (v) =>
+                  String(v.comercio_id) === String(c.id) &&
+                  v?.fecha &&
+                  new Date(v.fecha) >= inicioHoyMetricas
+              );
+              const yaVisitadoHoy = Boolean(visitaDeHoy);
+              const resultadoHoy = String(visitaDeHoy?.resultado || "Visitado").toUpperCase();
+
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => {
+                    setObservacionVisita('');
+                    setResultadoVisita('Visitado');
+                    setComercioSeleccionado(c);
+                  }}
+                  style={{
+                    backgroundColor: yaVisitadoHoy ? "#172033" : "#1e293b",
+                    padding: "12px 14px",
+                    borderRadius: "10px",
+                    border: yaVisitadoHoy ? "1px solid #475569" : "1px solid #334155",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    cursor: "pointer",
+                    transition: "transform 0.1s",
+                    opacity: yaVisitadoHoy ? 0.72 : 1,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                    {c.foto_url ? (
+                      <img src={c.foto_url} alt="Local" style={{ width: "42px", height: "42px", borderRadius: "8px", objectFit: "cover", border: "1px solid #475569" }} />
+                    ) : (
+                      <div style={{ width: "42px", height: "42px", borderRadius: "8px", backgroundColor: "#0b1329", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
+                        🏪
+                      </div>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: "700", fontSize: "14px", color: "#f8fafc" }}>
+                        {c.nombre || "Comercio #" + c.id}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
+                        {c.rubro || "General"} {c.direccion ? "· " + c.direccion : ""}
+                      </div>
+
+                      {yaVisitadoHoy && (
+                        <div
+                          style={{
+                            display: "inline-block",
+                            marginTop: "5px",
+                            padding: "3px 7px",
+                            borderRadius: "999px",
+                            backgroundColor: "#334155",
+                            color: "#e2e8f0",
+                            fontSize: "10px",
+                            fontWeight: "900",
+                            letterSpacing: "0.3px",
+                          }}
+                        >
+                          ✓ {resultadoHoy}
+                        </div>
+                      )}
+
+                      {c.distancia_actual !== null && (
+                        <div
+                          style={{
+                            fontSize: yaVisitadoHoy ? "17px" : "24px",
+                            color: yaVisitadoHoy ? "#94a3b8" : "#60a5fa",
+                            marginTop: "6px",
+                            fontWeight: "700",
+                          }}
+                        >
+                          📍 {c.distancia_actual < 1000
+                            ? `${c.distancia_actual} m`
+                            : `${(c.distancia_actual / 1000).toFixed(1)} km`}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: "18px", color: "#64748b", paddingLeft: "8px" }}>›</span>
+                </div>
+              );
+
+              };
+
+              return (
+                <>
+                  {pendientes.map(renderComercio)}
+
+                  {visitados.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: pendientes.length > 0 ? "8px" : "0",
+                        padding: "9px 4px 3px",
+                        borderTop: "1px solid #334155",
+                        fontSize: "11px",
+                        fontWeight: "900",
+                        color: "#94a3b8",
+                        letterSpacing: "0.5px",
+                      }}
+                    >
+                      ✓ VISITADOS HOY ({visitados.length})
                     </div>
                   )}
-                  <div>
-                    <div style={{ fontWeight: "700", fontSize: "14px", color: "#f8fafc" }}>
-                      {c.nombre || "Comercio #" + c.id}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
-                      {c.rubro || "General"} {c.direccion ? "· " + c.direccion : ""}
-                    </div>
-                    {c.distancia_actual !== null && (
-  <div
-    style={{
-      fontSize: "24px",
-      color: "#60a5fa",
-      marginTop: "6px",
-      fontWeight: "700",
-    }}
-  >
-    📍 {c.distancia_actual < 1000
-      ? `${c.distancia_actual} m`
-      : `${(c.distancia_actual / 1000).toFixed(1)} km`}
-  </div>
-)}
-                  </div>
-                </div>
-                <span style={{ fontSize: "18px", color: "#64748b", paddingLeft: "8px" }}>›</span>
-              </div>
-            ))}
+
+                  {visitados.map(renderComercio)}
+                </>
+              );
+            })()}
           </div>
         )}
       </main>
 
-      {/* BOTÓN FLOTANTE REGISTRAR COMERCIO */}
+      {/* BOTÓN FLOTANTE REGISTRAR COMERCIO - compacto fuera de Modo Manejo */}
       <button
-            type="button"
-            onClick={agregarComercioInmediato}
-            style={{
-              width: "100%",
-              minHeight: "76px",
-              padding: "20px 16px",
-              backgroundColor: "#2563eb",
-              color: "#ffffff",
-              border: "3px solid #60a5fa",
-              borderRadius: "18px",
-              fontSize: "20px",
-              fontWeight: "900",
-              letterSpacing: "0.5px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "12px",
-              boxShadow: "0 8px 24px rgba(37, 99, 235, 0.5)",
-              touchAction: "manipulation"
-            }}>
+        type="button"
+        onClick={agregarComercioInmediato}
+        title="Registrar comercio"
+        aria-label="Registrar comercio"
+        style={{
+          position: "fixed",
+          right: "18px",
+          bottom: "18px",
+          width: "56px",
+          height: "56px",
+          padding: 0,
+          backgroundColor: "#2563eb",
+          color: "#ffffff",
+          border: "2px solid #60a5fa",
+          borderRadius: "50%",
+          fontSize: "30px",
+          lineHeight: 1,
+          fontWeight: "700",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 8px 24px rgba(37, 99, 235, 0.5)",
+          touchAction: "manipulation",
+          zIndex: 1000,
+        }}
+      >
         +
       </button>
     </div>
