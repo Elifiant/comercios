@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+ import React, { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import DisenadorRutas from "./DisenadorRutas";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
@@ -41,16 +42,6 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
 }
 
 
-function iconoPreventistaVivo(nombre) {
-  return L.divIcon({
-    className: "custom-marker-preventista",
-    html: '<div style="background:#2563eb; color:#fff; border:2px solid #fff; box-shadow:0 0 12px rgba(37,99,235,0.8); border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:16px; position:relative;"><span style="position:absolute; width:100%; height:100%; border-radius:50%; border:2px solid #38bdf8; animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></span>🚗</div><div style="background:#0f172a; color:#fff; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; margin-top:2px; white-space:nowrap; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.4);">' + (nombre || "Preventista") + '</div>',
-    iconSize: [34, 50],
-    iconAnchor: [17, 25]
-  });
-}
-
-
 function iconoAutoGPS(nombre) {
   return L.divIcon({
     className: "pin-auto-gps",
@@ -69,7 +60,135 @@ export default function Supervisor() {
     } catch(e) {}
     window.location.href = "/";
   };
+  const aprobarNoVisitar = async (solicitud) => {
+  const confirmar = window.confirm(
+    `⚫ ¿Aprobar NO VISITAR MÁS para "${solicitud.comercio_nombre}"?`
+  );
 
+  if (!confirmar) return;
+
+  try {
+    // 1️⃣ Marcar el comercio como NO VISITAR MÁS
+    const { error: errorComercio } = await supabase
+      .from("comercios")
+      .update({ no_visitar: true })
+      .eq("id", solicitud.comercio_id)
+      .eq("empresa_id", solicitud.empresa_id);
+
+    if (errorComercio) throw errorComercio;
+
+    // 2️⃣ Marcar la solicitud como aprobada
+    const { data: solicitudActualizada, error: errorSolicitud } = await supabase
+  .from("solicitudes_no_visitar")
+  .update({ estado: "aprobada" })
+  .eq("id", solicitud.id)
+  .eq("empresa_id", solicitud.empresa_id)
+  .select("id")
+  .maybeSingle();
+
+if (errorSolicitud) throw errorSolicitud;
+
+if (!solicitudActualizada) {
+  throw new Error("La solicitud no fue actualizada en Supabase.");
+}
+
+    // 3️⃣ Sacarla de pendientes en pantalla
+    setSolicitudesNoVisitar((prev) =>
+      prev.filter((s) => s.id !== solicitud.id)
+    );
+
+    // 4️⃣ Actualizar también el comercio en Supervisor
+    setComercios((prev) =>
+      prev.map((c) =>
+        c.id === solicitud.comercio_id
+          ? { ...c, no_visitar: true }
+          : c
+      )
+    );
+
+    alert("⚫ Solicitud aprobada. Comercio marcado como NO VISITAR MÁS.");
+  } catch (error) {
+    console.error("Error aprobando solicitud:", error);
+    alert("❌ No se pudo aprobar la solicitud.");
+  }
+};
+const rechazarNoVisitar = async (solicitud) => {
+  const confirmar = window.confirm(
+    `❌ ¿Rechazar la solicitud de NO VISITAR MÁS para "${solicitud.comercio_nombre}"?`
+  );
+
+  if (!confirmar) return;
+
+  try {
+    const { data: solicitudActualizada, error } = await supabase
+  .from("solicitudes_no_visitar")
+  .update({ estado: "rechazada" })
+  .eq("id", solicitud.id)
+  .eq("empresa_id", solicitud.empresa_id)
+  .select("id")
+  .maybeSingle();
+
+if (error) throw error;
+
+if (!solicitudActualizada) {
+  throw new Error("La solicitud no fue actualizada en Supabase.");
+}
+
+    setSolicitudesNoVisitar((prev) =>
+      prev.filter((s) => s.id !== solicitud.id)
+    );
+
+    alert("❌ Solicitud rechazada. El comercio continúa activo.");
+  } catch (error) {
+    console.error("Error rechazando solicitud:", error);
+    alert("❌ No se pudo rechazar la solicitud.");
+  }
+};
+
+const reactivarComercio = async (comercio) => {
+  if (!comercio) return;
+
+  const confirmar = window.confirm(
+    `♻️ ¿Reactivar "${comercio.nombre || "este comercio"}"?\n\nVolverá a estar disponible para los preventistas.`
+  );
+
+  if (!confirmar) return;
+
+  try {
+    const { data: comercioActualizado, error } = await supabase
+      .from("comercios")
+      .update({ no_visitar: false })
+      .eq("id", comercio.id)
+      .eq("empresa_id", comercio.empresa_id)
+      .select("id, no_visitar")
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!comercioActualizado) {
+      throw new Error("El comercio no fue actualizado en Supabase.");
+    }
+
+    setComercios((prev) =>
+      prev.map((c) =>
+        c.id === comercio.id
+          ? { ...c, no_visitar: false }
+          : c
+      )
+    );
+    
+    setComercioDetalleModal((prev) =>
+      prev
+        ? { ...prev, no_visitar: false }
+        : prev
+    );
+
+    alert("♻️ Comercio reactivado correctamente.");
+  } catch (error) {
+    console.error("Error reactivando comercio:", error);
+    alert("❌ No se pudo reactivar el comercio.");
+  }
+};
   const [comercios, setComercios] = useState([]);
   const [pedidosReal, setPedidosReal] = useState([]);
   const [cargandoPedidosReal, setCargandoPedidosReal] = useState(false);
@@ -78,6 +197,7 @@ export default function Supervisor() {
   const [cargando, setCargando] = useState(true);
   const [perfiles, setPerfiles] = useState([]);
   const [perfilSupervisor, setPerfilSupervisor] = useState(null);
+  const [solicitudesNoVisitar, setSolicitudesNoVisitar] = useState([]);
   const [sesionSupervisor, setSesionSupervisor] = useState(null);
   const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
   const diaSemana = filtroDiaMapa || "TODOS";
@@ -94,59 +214,153 @@ export default function Supervisor() {
   const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
   const [reproduciendoAudio, setReproduciendoAudio] = useState(false);
   const [audioActivoObj, setAudioActivoObj] = useState(null);
+  const [datosAbono, setDatosAbono] = useState(null);
 
   // Inicialización de supervisor y datos
   useEffect(() => {
     async function inicializarSupervisor() {
-    let empSupervisor = "DEMO S.A.";
       try {
         setCargando(true);
+
         const { data: authData } = await supabase.auth.getSession();
-        if (authData && authData.session) {
-          setSesionSupervisor(authData.session);
-          const { data: pData } = await supabase
-            .from("perfiles")
-            .select("*")
-            .eq("id", authData.session.user.id)
-            .maybeSingle();
-          if (pData) {
-            setPerfilSupervisor(pData);
-          }
+        const sesion = authData?.session;
+
+        if (!sesion) return;
+
+        setSesionSupervisor(sesion);
+
+        // 1) Averiguar a qué empresa pertenece EL supervisor que inició sesión
+        const { data: pData, error: errorPerfil } = await supabase
+          .from("perfiles")
+          .select("empresa, empresa_id")
+          .eq("id", sesion.user.id)
+          .maybeSingle();
+
+        if (errorPerfil) throw errorPerfil;
+        if (!pData?.empresa_id) {
+          throw new Error("El supervisor no tiene empresa_id asignado.");
         }
 
-        const { data: perfilesData } = await supabase.from("perfiles").select("id, nombre, email, empresa, rol, latitud, longitud, ultima_posicion_at");
-        if (perfilesData) setPerfiles(perfilesData);
+        setPerfilSupervisor(pData);
 
-        let queryComercios = supabase.from("comercios").select("*");
-      const empActual = (perfilSupervisor?.empresa || (typeof empSupervisor !== "undefined" ? empSupervisor : "DEMO S.A.")).trim();
-      if (empActual && empActual !== "TODAS") {
-        queryComercios = queryComercios.ilike("empresa", "%DEMO S.A.%");
-      }
-      queryComercios = queryComercios.order("id", { ascending: false });
-        const { data: comerciosData, error: errCom } = await queryComercios;
-        if (comerciosData) {
-          setComercios(comerciosData);
-          console.log("Comercios cargados con éxito:", comerciosData.length);
-        }
+        // 2) Cargar solamente los perfiles de SU empresa
+        const { data: perfilesData, error: errorPerfiles } = await supabase
+          .from("perfiles")
+          .select("id, nombre, email, empresa, rol, latitud, longitud, ultima_posicion_at")
+          .eq("empresa_id", pData.empresa_id);
+
+        if (errorPerfiles) throw errorPerfiles;
+        setPerfiles(perfilesData || []);
+
+        // 3) Cargar solamente los comercios de SU empresa
+        const { data: comerciosData, error: errorComercios } = await supabase
+          .from("comercios")
+          .select("*")
+          .eq("empresa_id", pData.empresa_id)
+          .order("id", { ascending: false });
+
+        if (errorComercios) throw errorComercios;
+
+        setComercios(comerciosData || []);
+        console.log("Comercios cargados con éxito:", (comerciosData || []).length);
       } catch (err) {
         console.error("Fallo al inicializar supervisor:", err);
       } finally {
         setCargando(false);
       }
     }
+
     inicializarSupervisor();
   }, []);
 
-  // Empresa del supervisor logueado
-  const miEmpresa = (perfilSupervisor && (perfilSupervisor.empresa || perfilSupervisor.nombre_empresa)) || "";
+  // 🚫 Cargar solicitudes pendientes de NO VISITAR MÁS
+useEffect(() => {
+  if (!perfilSupervisor?.empresa_id) return;
 
-  // Lista única de preventistas aislada por empresa
+  const cargarSolicitudesNoVisitar = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("solicitudes_no_visitar")
+        .select("id, created_at, comercio_id, comercio_nombre, preventista, empresa_id, motivo, estado")
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .eq("estado", "pendiente")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      setSolicitudesNoVisitar(data || []);
+
+    } catch (error) {
+      console.error(
+        "Error cargando solicitudes de no visitar:",
+        error
+      );
+    }
+  };
+
+  cargarSolicitudesNoVisitar();
+}, [perfilSupervisor]);
+
+  // 💳 Cargar vigencia real del abono de la empresa
+  useEffect(() => {
+    if (!perfilSupervisor?.empresa_id) return;
+
+    const cargarDatosAbono = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("empresas")
+          .select("nombre, abonado_hasta")
+          .eq("id", perfilSupervisor.empresa_id)
+          .maybeSingle();
+
+        if (error) throw error;
+        setDatosAbono(data || null);
+      } catch (error) {
+        console.error("Error cargando vigencia del abono:", error);
+        setDatosAbono(null);
+      }
+    };
+
+    cargarDatosAbono();
+  }, [perfilSupervisor?.empresa_id]);
+
+  const estadoAbono = (() => {
+    const nombreEmpresa = String(datosAbono?.nombre || perfilSupervisor?.empresa || "").trim().toUpperCase();
+
+    if (nombreEmpresa === "DEMO S.A." || nombreEmpresa === "DEMO SA") {
+      return { texto: "Cuenta DEMO", color: "#2563eb", icono: "🧪" };
+    }
+
+    if (!datosAbono?.abonado_hasta) {
+      return { texto: "Vencimiento no informado", color: "#64748b", icono: "🗓️" };
+    }
+
+    const partes = String(datosAbono.abonado_hasta).split("-").map(Number);
+    const vencimiento = new Date(partes[0], partes[1] - 1, partes[2]);
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    vencimiento.setHours(0, 0, 0, 0);
+
+    const dias = Math.ceil((vencimiento - hoy) / 86400000);
+
+    if (dias < 0) return { texto: "Abono vencido", color: "#dc2626", icono: "🔴" };
+    if (dias === 0) return { texto: "Vence hoy", color: "#dc2626", icono: "🔴" };
+    if (dias <= 5) return { texto: `${dias} día${dias === 1 ? "" : "s"} restante${dias === 1 ? "" : "s"}`, color: "#d97706", icono: "⚠️" };
+
+    return { texto: `${dias} días restantes`, color: "#16a34a", icono: "🗓️" };
+  })();
+
+  // Empresa del supervisor logueado
+  const miEmpresa = (perfilSupervisor && perfilSupervisor.empresa) || "";
+
+  // Lista única de preventistas.
+  // Los perfiles y comercios ya llegan aislados por empresa_id desde Supabase.
   const listaPreventistas = Array.from(new Set([
     ...(perfiles || [])
-      .filter(p => p.rol === "preventista" && (!miEmpresa || miEmpresa === "TODAS" || miEmpresa === "SuperAdmin" || p.empresa === miEmpresa))
-      .map(p => p.nombre),
+      .filter(p => p.rol === "preventista")
+      .map(p => p.nombre || p.email)
+      .filter(Boolean),
     ...(comercios || [])
-      .filter(co => !miEmpresa || miEmpresa === "TODAS" || miEmpresa === "SuperAdmin" || co.empresa === miEmpresa)
       .map(co => co.preventista)
       .filter(Boolean)
   ])).filter(Boolean);
@@ -178,7 +392,14 @@ export default function Supervisor() {
   // Comercios asignados al preventista
   const comerciosPreventista = (comercios || []).filter(item => { const target = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim(); if (!target || target === "todos") return true; const asignado = String(item.preventista || "").toLowerCase().trim(); return asignado === target || asignado.includes(target) || target.includes(asignado); });
 
-  const diaActivo = seccionActiva === "planificador" ? diaSemana : filtroDiaMapa;
+  const diaActivo =
+  seccionActiva === "planificador"
+    ? diaSemana
+    : new Date()
+        .toLocaleDateString("es-AR", { weekday: "long" })
+        .toUpperCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
 
   const comerciosFiltradosPorDia = comerciosPreventista.filter(com => {
     if (diaActivo === "TODOS" || !diaActivo) return true;
@@ -380,16 +601,7 @@ export default function Supervisor() {
 
   const nombrePrevActivo = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado?.nombre : (preventistaSeleccionado || "");
   
-  // Auto-actualización periódica en segundo plano cada 12 segundos
-  useEffect(() => {
-    const intervalo = setInterval(() => {
-      if (typeof cargarDatos === "function") {
-        cargarDatos();
-      }
-    }, 12000);
-    return () => clearInterval(intervalo);
-  }, [preventistaSeleccionado, filtroDiaMapa]);
-
+  
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -426,8 +638,10 @@ export default function Supervisor() {
             fontWeight: "700",
             color: "#334155"
           }}>
-            <span>🗓️</span>
-            <span>Abono: <strong style={{ color: "#16a34a" }}>18 días restantes</strong></span>
+            <span>{estadoAbono.icono}</span>
+            <span>
+              Abono: <strong style={{ color: estadoAbono.color }}>{estadoAbono.texto}</strong>
+            </span>
           </div>
 
           <a
@@ -495,6 +709,96 @@ export default function Supervisor() {
       </div>
 
       <main style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
+        {seccionActiva === "planificador" ? (
+          <DisenadorRutas
+            perfilSupervisor={perfilSupervisor}
+            perfiles={perfiles}
+          />
+        ) : (
+          <>
+        {/* 🚫 SOLICITUDES DE NO VISITAR MÁS */}
+{solicitudesNoVisitar.length > 0 && (
+  <div
+    style={{
+      backgroundColor: "#fff7ed",
+      border: "1px solid #fdba74",
+      borderRadius: "10px",
+      padding: "14px 16px",
+      marginBottom: "16px",
+    }}
+  >
+    <div
+      style={{
+        fontSize: "14px",
+        fontWeight: "800",
+        color: "#9a3412",
+        marginBottom: "10px",
+      }}
+    >
+      🚫 Solicitudes pendientes de NO VISITAR MÁS ({solicitudesNoVisitar.length})
+    </div>
+
+    {solicitudesNoVisitar.map((solicitud) => (
+      <div
+        key={solicitud.id}
+        style={{
+          backgroundColor: "#ffffff",
+          border: "1px solid #fed7aa",
+          borderRadius: "8px",
+          padding: "10px 12px",
+          marginTop: "8px",
+        }}
+      >
+        <div style={{ fontWeight: "800", fontSize: "13px" }}>
+          🏪 {solicitud.comercio_nombre}
+        </div>
+
+        <div style={{ fontSize: "12px", marginTop: "4px", color: "#475569" }}>
+          👤 Preventista: <strong>{solicitud.preventista}</strong>
+        </div>
+        <button
+  type="button"
+  onClick={() => aprobarNoVisitar(solicitud)}
+  style={{
+    marginTop: "10px",
+    padding: "7px 12px",
+    backgroundColor: "#16a34a",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: "800",
+    cursor: "pointer",
+  }}
+>
+  ✅ APROBAR
+</button>
+<button
+  type="button"
+  onClick={() => rechazarNoVisitar(solicitud)}
+  style={{
+    marginTop: "10px",
+    marginLeft: "8px",
+    padding: "7px 12px",
+    backgroundColor: "#dc2626",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: "800",
+    cursor: "pointer",
+  }}
+>
+  ❌ RECHAZAR
+</button>
+
+        <div style={{ fontSize: "12px", marginTop: "4px", color: "#475569" }}>
+          💬 Motivo: <strong>{solicitud.motivo}</strong>
+        </div>
+      </div>
+    ))}
+  </div>
+)}
         {/* KPI CARDS */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "16px" }}>
           <div style={{ backgroundColor: "#ffffff", padding: "12px 16px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
@@ -568,7 +872,7 @@ export default function Supervisor() {
         <div style={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", padding: "8px 14px", marginBottom: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontSize: "12px", fontWeight: "bold", color: "#334155" }}>🗓️ Día:</span>
-            {["TODOS", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(d => {
+            {["TODOS", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map(d => {
               const activo = diaActivo === d;
               return (
                 <button
@@ -765,78 +1069,6 @@ export default function Supervisor() {
                   );
                 })}
               
-                {/* MARCADOR DEL PREVENTISTA EN VIVO */}
-                {(() => {
-                  const targetPrev = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
-                  const pVivo = (perfiles || []).find(p => {
-                    const n = String(p.nombre || p.email || "").toLowerCase().trim();
-                    return targetPrev && (n === targetPrev || n.includes(targetPrev) || targetPrev.includes(n));
-                  });
-                  const latP = parseFloat(pVivo?.latitud);
-                  const lngP = parseFloat(pVivo?.longitud);
-                  if (!latP || !lngP || isNaN(latP) || isNaN(lngP)) return null;
-                  return (
-                    <Marker position={[latP, lngP]} icon={iconoPreventistaVivo(pVivo?.nombre || targetPrev)}>
-                      <Popup>
-                        <div style={{ fontSize: "12px", textAlign: "center" }}>
-                          <strong style={{ color: "#2563eb", fontSize: "13px" }}>📡 {pVivo?.nombre || "Preventista"} (En vivo)</strong>
-                          <div style={{ color: "#64748b", marginTop: "4px" }}>Última señal: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Reciente"}</div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  );
-                })()}
-
-                
-                {/* MARCADOR DEL PREVENTISTA EN TIEMPO REAL */}
-                {(() => {
-                  const target = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
-                  const pVivo = (perfiles || []).find(p => {
-                    const n = String(p.nombre || p.email || "").toLowerCase().trim();
-                    return target && (n === target || n.includes(target) || target.includes(n));
-                  });
-                  const latP = parseFloat(pVivo?.latitud);
-                  const lngP = parseFloat(pVivo?.longitud);
-                  if (!latP || !lngP || isNaN(latP) || isNaN(lngP)) return null;
-                  return (
-                    <Marker position={[latP, lngP]} icon={iconoPreventistaVivo(pVivo?.nombre || target)}>
-                      <Popup>
-                        <div style={{ textAlign: "center", fontSize: "12px" }}>
-                          <strong style={{ color: "#2563eb", fontSize: "13px" }}>🚗 {pVivo?.nombre || "Preventista"} (En vivo)</strong>
-                          <div style={{ color: "#64748b", marginTop: "3px" }}>Última señal: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Reciente"}</div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  );
-                })()}
-
-                
-                {/* AUTO PREVENTISTA EN TIEMPO REAL */}
-                {(() => {
-                  const target = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
-                  const pVivo = (perfiles || []).find(p => {
-                    const n = String(p.nombre || p.email || "").toLowerCase().trim();
-                    return target && (n === target || n.includes(target) || target.includes(n));
-                  });
-                  // Si no encontró por nombre, toma el primer perfil con coordenadas
-                  const perfilConGPS = pVivo || (perfiles || []).find(p => p.latitud && p.longitud);
-                  const latA = parseFloat(perfilConGPS?.latitud);
-                  const lngA = parseFloat(perfilConGPS?.longitud);
-                  if (!latA || !lngA || isNaN(latA) || isNaN(lngA)) return null;
-                  return (
-                    <Marker position={[latA, lngA]} icon={iconoAutoGPS(perfilConGPS?.nombre || target)}>
-                      <Popup>
-                        <div style={{ textAlign: "center", fontSize: "12px", padding: "4px" }}>
-                          <strong style={{ color: "#2563eb", fontSize: "13px" }}>🚗 {perfilConGPS?.nombre || "Preventista"}</strong>
-                          <div style={{ color: "#16a34a", fontWeight: "bold", marginTop: "2px" }}>● En ruta en tiempo real</div>
-                          <div style={{ color: "#64748b", fontSize: "11px", marginTop: "2px" }}>Última señal: {perfilConGPS?.ultima_posicion_at ? new Date(perfilConGPS.ultima_posicion_at).toLocaleTimeString() : "Ahora"}</div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  );
-                })()}
-
-                
                 {/* 🚗 AUTITO PREVENTISTA EN VIVO EN EL MAPA */}
                 {(() => {
                   const targetNom = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
@@ -903,6 +1135,45 @@ export default function Supervisor() {
               </div>
 
               <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                {comercioDetalleModal.no_visitar === true && (
+  <div
+    style={{
+      background: "#f3f4f6",
+      border: "2px solid #111827",
+      borderRadius: "8px",
+      padding: "10px",
+    }}
+  >
+    <div
+      style={{
+        fontSize: "11px",
+        fontWeight: "800",
+        color: "#111827",
+        marginBottom: "8px",
+      }}
+    >
+      ⚫ ESTE COMERCIO ESTÁ MARCADO COMO NO VISITAR MÁS
+    </div>
+
+    <button
+      type="button"
+      onClick={() => reactivarComercio(comercioDetalleModal)}
+      style={{
+        width: "100%",
+        padding: "10px",
+        backgroundColor: "#16a34a",
+        color: "#ffffff",
+        border: "none",
+        borderRadius: "6px",
+        fontSize: "12px",
+        fontWeight: "800",
+        cursor: "pointer",
+      }}
+    >
+      ♻️ REACTIVAR COMERCIO
+    </button>
+  </div>
+)}
                 {/* DATOS FISCALES */}
                 <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
                   <div style={{ fontSize: "11px", fontWeight: "bold", color: "#1e293b", marginBottom: "6px" }}>🏢 DATOS FISCALES</div>
@@ -983,7 +1254,7 @@ export default function Supervisor() {
                       style={{ width: "100%", padding: "6px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", background: "#fff", color: "#0f172a", fontWeight: "600" }}
                     >
                       <option value="">(Sin asignar)</option>
-                      {["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO"].map(d => (
+                      {["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"].map(d => (
                         <option key={d} value={d}>{d}</option>
                       ))}
                     </select>
@@ -1111,6 +1382,8 @@ export default function Supervisor() {
               </div>
             )}
           </div>
+        )}
+          </>
         )}
       </main>
     </div>

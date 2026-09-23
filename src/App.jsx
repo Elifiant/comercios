@@ -3,7 +3,7 @@ import TomaPedidos from "./TomaPedidos";
 const obtenerDiaActual = () => {
   const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
   const d = dias[new Date().getDay()];
-  return d === "Domingo" ? "Lunes" : d;
+  return d;
 };
 
 import Supervisor from './Supervisor';
@@ -20,7 +20,102 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
+const iconoAuto = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      font-size: 30px;
+      line-height: 30px;
+      filter: drop-shadow(0 2px 3px rgba(0,0,0,0.7));
+    ">
+      🚗
+    </div>
+  `,
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
+});
+const iconoAzul = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #2563eb;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
 
+const iconoVerde = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #16a34a;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
+
+const iconoAmarillo = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #facc15;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
+const iconoRojo = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #dc2626;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
+const iconoNegro = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #111111;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.7);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
 function MarcadorArrastrable({ posicion, setPosicion }) {
   useMapEvents({
     click(e) {
@@ -76,7 +171,7 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
 }
 
 export default function App({ sesion: sesionProp, perfil: perfilProp }) {
-
+console.log("🚗 APP SE ESTÁ RENDERIZANDO");
   // 💾 Guardar edición de datos del comercio en Supabase
   const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
@@ -92,6 +187,7 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
         rubro: comercioSeleccionado.rubro || 'General',
         cuit: comercioSeleccionado.cuit || '',
         telefono: comercioSeleccionado.telefono || '',
+        codigo_pais: comercioSeleccionado.codigo_pais || '+54',
         notas: comercioSeleccionado.notas || '',
         dia_visita: comercioSeleccionado.dia_visita || 'Lunes'
       };
@@ -192,14 +288,35 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
   
   const [comercioCercano, setComercioCercano] = useState(null);
   const [distanciaCercano, setDistanciaCercano] = useState(null);
-    const [textoBotonAgregar, setTextoBotonAgregar] = useState("➕ AGREGAR COMERCIO");
+  const [textoBotonAgregar, setTextoBotonAgregar] = useState("➕ AGREGAR COMERCIO");
   const [posicionActual, setPosicionActual] = useState(null);
+  const [visitasMapa, setVisitasMapa] = useState([]);
+  // 📍 OBTENER UBICACIÓN UNA VEZ AL ABRIR LA APP
+useEffect(() => {
+  if (!navigator.geolocation) return;
 
-
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      setPosicionActual([
+        position.coords.latitude,
+        position.coords.longitude,
+      ]);
+    },
+    (error) => {
+      console.log("No se pudo obtener la ubicación inicial:", error);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 60000,
+    }
+  );
+}, []);
   
 
   // 📡 EMISIÓN DE GPS EN VIVO DEL PREVENTISTA AL PERFIL
   useEffect(() => {
+    
     if (Boolean(sesion) && Boolean(sesion.user) && Boolean(posicionActual)) {
       supabase.from("perfiles").update({
         latitud: posicionActual[0],
@@ -280,8 +397,8 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
       await supabase.from("perfiles").update({ 
         ultima_conexion: new Date().toISOString(),
         activo_hoy: true,
-        latitud: pos?.coords?.latitude || null,
-        longitud: pos?.coords?.longitude || null,
+        latitud: posicionActual?.[0] || null,
+        longitud: posicionActual?.[1] || null,
         ultima_posicion_at: new Date().toISOString() 
       }).eq("email", email);
 
@@ -308,8 +425,8 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
         .update({ 
           ultima_conexion: new Date().toISOString(),
         activo_hoy: true,
-        latitud: pos?.coords?.latitude || null,
-        longitud: pos?.coords?.longitude || null,
+        latitud: posicionActual?.[0] || null,
+        longitud: posicionActual?.[1] || null,
         ultima_posicion_at: new Date().toISOString() 
         })
         .eq("email", emailUsuario);
@@ -468,12 +585,15 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
     try {
       setCargando(true);
       const pActivo = perfilOverride || perfil || perfilProp;
+      const empresaIdFiltro = pActivo?.empresa_id || null;
       const empFiltro = pActivo?.empresa || "DEMO S.A.";
       const nomFiltro = pActivo?.nombre || (sesion?.user?.email ? sesion.user.email.split("@")[0] : "");
 
       let query = supabase.from("comercios").select("*");
-      if (empFiltro) {
-        query = query.ilike("empresa", empFiltro.trim());
+      if (empresaIdFiltro) {
+      query = query.eq("empresa_id", empresaIdFiltro);
+      } else if (empFiltro) {
+      query = query.ilike("empresa", empFiltro.trim());
       }
       if (nomFiltro) {
         query = query.ilike("preventista", nomFiltro.trim());
@@ -543,7 +663,7 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
 
       if (!jornadaActiva) {
         setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
-        setHoraInicioJornada(ahora);
+        // setHoraInicioJornada(ahora);
         localStorage.setItem('jornada_activa', 'true');
         localStorage.setItem('hora_inicio_jornada', ahora);
       }
@@ -553,6 +673,7 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
         comercio_nombre: comercio.nombre || ('Comercio #' + comercio.id),
         preventista: prevNombre,
         empresa: empNombre,
+        empresa_id: perfil?.empresa_id || null,
         resultado: resultadoVisita,
         observacion: observacionVisita || 'Visita registrada en campo',
         latitud: posicionActual ? posicionActual[0] : (comercio.latitud || null),
@@ -572,69 +693,205 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
       setGuardandoVisita(false);
     }
   };
+    const marcarNoVisitar = async (comercio) => {
+  if (!comercio) return;
 
+  const confirmar = window.confirm(
+    `⚫ ¿Marcar "${comercio.nombre || "este comercio"}" como NO VISITAR MÁS?\n\nSeguirá marcado aunque cambie la jornada.`
+  );
+
+  if (!confirmar) return;
+
+  try {
+    const { error } = await supabase
+      .from("comercios")
+      .update({ no_visitar: true })
+      .eq("id", comercio.id);
+
+    if (error) throw error;
+
+    setComercioSeleccionado({
+      ...comercio,
+      no_visitar: true,
+    });
+
+    setComercios((prev) =>
+      prev.map((c) =>
+        c.id === comercio.id
+          ? { ...c, no_visitar: true }
+          : c
+      )
+    );
+
+    alert("⚫ Comercio marcado como NO VISITAR MÁS");
+  } catch (error) {
+    console.error("Error marcando comercio como no visitar:", error);
+    alert("❌ No se pudo guardar el cambio.");
+  }
+};
+const solicitarNoVisitar = async (comercio) => {
+  if (!comercio) return;
+
+  const motivo = window.prompt(
+    `🚫 ¿Por qué solicitás NO VISITAR MÁS a "${comercio.nombre || "este comercio"}"?`
+  );
+
+  if (motivo === null) return;
+
+  if (!motivo.trim()) {
+    alert("⚠️ Escribí un motivo para enviar la solicitud.");
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from("solicitudes_no_visitar")
+      .insert([
+        {
+          comercio_id: comercio.id,
+          comercio_nombre: comercio.nombre || "Comercio",
+          preventista: perfil?.nombre || "",
+          empresa: perfil?.empresa || "",
+          empresa_id: perfil?.empresa_id || null,
+          motivo: motivo.trim(),
+          estado: "pendiente",
+        },
+      ]);
+
+    if (error) throw error;
+
+    alert("✅ Solicitud enviada al supervisor.");
+  } catch (error) {
+    console.error("Error enviando solicitud de no visitar:", error);
+    alert("❌ No se pudo enviar la solicitud.");
+  }
+};
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
   const [jornadaActiva, setJornadaActiva] = useState(false);
   const [busqueda, setBusqueda] = useState("");
+  const [vistaComercios, setVistaComercios] = useState("HOY");
 
   // Lista filtrada de comercios por búsqueda y orden
   
   // Función para agregar comercio inmediato capturando GPS actual
-  const agregarComercioInmediato = async () => {
-    try {
-      const lat = posicionActual ? posicionActual[0] : -34.719;
-      const lng = posicionActual ? posicionActual[1] : -58.264;
-      const miEmpresa = (typeof perfil !== "undefined" && perfil?.empresa) ? perfil.empresa : "DEMO S.A.";
-      const miNombre = (typeof perfil !== "undefined" && perfil?.nombre) ? perfil.nombre : (sesion?.user?.email ? sesion.user.email.split("@")[0] : "Preventista");
-
-      const nuevo = {
-        nombre: "Comercio #" + Math.floor(1000 + Math.random() * 9000),
-        latitud: lat,
-        longitud: lng,
-        ubicacion_exacta_latitud: lat,
-        ubicacion_exacta_longitud: lng,
-        fecha: new Date().toISOString(),
-        empresa: miEmpresa,
-        preventista: miNombre,
-        direccion: "Ubicación en ruta",
-        rubro: "General"
-      };
-
-      const { data, error } = await supabase.from("comercios").insert([nuevo]).select();
-      if (error) {
-        console.error("Error al registrar comercio inmediato:", error.message);
-        alert("Error al agregar comercio: " + error.message);
-      } else {
-        if (data && data[0]) {
-          setComercios(prev => [data[0], ...prev]);
-        }
-        try {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.frequency.setValueAtTime(880, ctx.currentTime);
-          gain.gain.setValueAtTime(0.2, ctx.currentTime);
-          osc.start();
-          osc.stop(ctx.currentTime + 0.15);
-        } catch (e) {}
+  const agregarComercioInmediato = () => {
+    setTextoBotonAgregar("⏳ Capturando GPS...");
+    
+    const guardarConCoords = async (lat, lng) => {
+      try {
+        const idTemp = Date.now();
+        const nuevo = {
+          nombre: "Comercio #" + String(idTemp).slice(-4),
+          latitud: lat,
+          longitud: lng,
+          ubicacion_exacta_latitud: lat,
+          ubicacion_exacta_longitud: lng,
+          fecha: new Date().toISOString(),
+          notas: "Registrado en Modo Manejo",
+          empresa: perfil?.empresa || "DEMO S.A.",
+          empresa_id: perfil?.empresa_id || null,
+          preventista: perfil?.nombre || "demo02"
+        };
+        
+        setComercios(prev => [nuevo, ...prev]);
+        setTextoBotonAgregar("✓ ¡REGISTRADO!");
+        try { if (typeof reproducirAlerta === "function") reproducirAlerta(); } catch(e){}
+        
+        await supabase.from("comercios").insert([nuevo]);
+        setTimeout(() => setTextoBotonAgregar("➕ AGREGAR COMERCIO"), 1800);
+      } catch (err) {
+        console.error("Error al registrar en Supabase:", err);
+        setTextoBotonAgregar("➕ AGREGAR COMERCIO");
       }
-    } catch (err) {
-      console.error("Error inesperado en agregarComercioInmediato:", err);
+    };
+
+   // Si el GPS en vivo ya tiene una posición, guardar inmediatamente
+if (posicionActual && posicionActual[0] && posicionActual[1]) {
+  guardarConCoords(posicionActual[0], posicionActual[1]);
+  return;
+}
+
+// Respaldo: si todavía no llegó una posición del GPS en vivo,
+// pedir una ubicación nueva
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      guardarConCoords(
+        pos.coords.latitude,
+        pos.coords.longitude
+      );
+    },
+    (err) => {
+      console.warn("No se pudo obtener ubicación:", err);
+      alert("Esperá unos segundos hasta que el GPS encuentre tu ubicación.");
+      setTextoBotonAgregar("➕ AGREGAR COMERCIO");
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
     }
+  );
+} else {
+  alert("Este dispositivo no tiene geolocalización disponible.");
+  setTextoBotonAgregar("➕ AGREGAR COMERCIO");
+} 
   };
 
-  const listaFiltrada = (comercios || []).filter(c => {
+  const listaFiltrada = (comercios || [])
+  .filter(c => {
+    if (vistaComercios === "HOY") {
+  const diaHoy = obtenerDiaActual().toLowerCase().trim();
+  const diaComercio = String(c.dia_visita || "").toLowerCase().trim();
+
+  if (diaComercio !== diaHoy) return false;
+}
     if (!busqueda || busqueda.trim() === "") return true;
+
     const q = busqueda.toLowerCase().trim();
+
     const nom = String(c.nombre || "").toLowerCase();
     const dir = String(c.direccion || "").toLowerCase();
     const rub = String(c.rubro || "").toLowerCase();
     const idStr = String(c.id || "");
-    return nom.includes(q) || dir.includes(q) || rub.includes(q) || idStr.includes(q);
+
+    return (
+      nom.includes(q) ||
+      dir.includes(q) ||
+      rub.includes(q) ||
+      idStr.includes(q)
+    );
+  })
+  .map(c => {
+    const latComercio =
+      Number(c.ubicacion_exacta_latitud) || Number(c.latitud);
+
+    const lngComercio =
+      Number(c.ubicacion_exacta_longitud) || Number(c.longitud);
+
+    const distancia =
+      posicionActual && latComercio && lngComercio
+        ? calcularMetrosGPS(
+            posicionActual[0],
+            posicionActual[1],
+            latComercio,
+            lngComercio
+          )
+        : null;
+
+    return {
+      ...c,
+      distancia_actual: distancia,
+    };
+  })
+  .sort((a, b) => {
+    if (a.distancia_actual === null && b.distancia_actual === null) return 0;
+    if (a.distancia_actual === null) return 1;
+    if (b.distancia_actual === null) return -1;
+
+    return a.distancia_actual - b.distancia_actual;
   });
 
   const [tomandoPedido, setTomandoPedido] = useState(false);
@@ -653,7 +910,73 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
   const dragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0, moved: false });
 
   const [modoManejo, setModoManejo] = useState(false);
+// 📍 GPS EN VIVO PARA MODO MANEJO
+useEffect(() => {
+  if (!modoManejo) return;
 
+  if (!navigator.geolocation) {
+    console.log("Geolocalización no disponible");
+    return;
+  }
+
+  const watchId = navigator.geolocation.watchPosition(
+    (position) => {
+      setPosicionActual([
+        position.coords.latitude,
+        position.coords.longitude,
+      ]);
+    },
+    (error) => {
+      console.error("Error GPS en Modo Manejo:", error);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
+    }
+  );
+
+  return () => {
+    navigator.geolocation.clearWatch(watchId);
+  };
+}, [modoManejo]);
+// 📋 CARGAR VISITAS PARA EL MAPA
+useEffect(() => {
+  if (!sesion?.user) return;
+
+  const cargarVisitasMapa = async () => {
+    try {
+      const pActivo = perfil || perfilProp || null;
+
+      if (!pActivo) return;
+
+      let query = supabase
+        .from("visitas")
+        .select("comercio_id, resultado, observacion, fecha, empresa_id, preventista")
+        .order("fecha", { ascending: false });
+
+      if (pActivo.empresa_id) {
+        query = query.eq("empresa_id", pActivo.empresa_id);
+      }
+
+      if (pActivo.nombre) {
+        query = query.eq("preventista", pActivo.nombre);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      setVisitasMapa(data || []);
+
+      console.log("🗺️ VISITAS PARA EL MAPA:", data);
+    } catch (error) {
+      console.error("Error cargando visitas para el mapa:", error);
+    }
+  };
+
+  cargarVisitasMapa();
+}, [modoManejo, perfil, perfilProp]);
   // 💡 SCREEN WAKE LOCK: Mantiene la pantalla encendida en Modo Manejo
   useEffect(() => {
     let wl = null;
@@ -672,471 +995,578 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
         wl.release().catch(() => {});
       }
     };
-  }, [modoManejo]);
+  }, [sesion]);
 
 
 
- if (editandoUbicacion && comercioSeleccionado) {
-    const latInicial = Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719);
-    const lngInicial = Number(comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.264);
+  if (tomandoPedido && comercioSeleccionado) {
+  return (
+    <TomaPedidos
+      comercio={comercioSeleccionado}
+      usuario={perfil || perfilProp}
+      onVolver={() => setTomandoPedido(false)}
+    />
+  );
+}
+if (modoManejo) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#111",
+        color: "#fff",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        padding: "25px 20px",
+        boxSizing: "border-box",
+        textAlign: "center",
+      }}
+    >
+      <div>
+        <h2 style={{ marginTop: 0 }}>🚗 MODO MANEJO</h2>
+        <p style={{ color: "#aaa" }}>
+          Registrá un comercio con tu ubicación actual
+        </p>
+      </div>
+      {posicionActual && (
+  <div
+    style={{
+      width: "100%",
+      height: "250px",
+      marginBottom: "35px",
+      borderRadius: "14px",
+      overflow: "hidden",
+      border: "2px solid #334155",
+    }}
+  >
+    <MapContainer
+      center={posicionActual}
+      zoom={17}
+      style={{ width: "100%", height: "100%" }}
+    >
+      <TileLayer
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
 
+      <Marker
+  position={posicionActual}
+  icon={iconoAuto}
+>
+  <Popup>
+    <strong>🚗 Mi ubicación</strong>
+  </Popup>
+</Marker>
+      {(comercios || []).map((comercio) => {
+  const lat = Number(
+    comercio.ubicacion_exacta_latitud || comercio.latitud
+  );
+
+  const lng = Number(
+    comercio.ubicacion_exacta_longitud || comercio.longitud
+  );
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  // 📅 Inicio de hoy
+  const ahora = new Date();
+
+  const inicioHoy = new Date(
+    ahora.getFullYear(),
+    ahora.getMonth(),
+    ahora.getDate()
+  );
+
+  // 🔎 Buscamos la visita más reciente de HOY para este comercio
+  const visitaHoy = (visitasMapa || []).find((visita) => {
+    if (String(visita.comercio_id) !== String(comercio.id)) {
+      return false;
+    }
+
+    const fechaVisita = new Date(visita.fecha);
+
+    return fechaVisita >= inicioHoy;
+  });
+
+  // 🔵 Por defecto: todavía no visitado
+  let iconoComercio = iconoAzul;
+
+// ⚫ NO VISITAR MÁS tiene prioridad absoluta
+if (comercio.no_visitar === true) {
+  iconoComercio = iconoNegro;
+
+} else if (visitaHoy) {
+  const resultado = (visitaHoy.resultado || "").toLowerCase();
+
+  // 🔴 No interesado
+  if (resultado.includes("no interesado")) {
+    iconoComercio = iconoRojo;
+
+  // 🟢 Hubo venta o tomó pedido
+  } else if (
+    resultado.includes("venta") ||
+    resultado.includes("pedido")
+  ) {
+    iconoComercio = iconoVerde;
+
+  // 🟡 Visitado pero sin venta
+  } else {
+    iconoComercio = iconoAmarillo;
+  }
+}
+
+  return (
+    <Marker
+      key={comercio.id}
+      position={[lat, lng]}
+      icon={iconoComercio}
+    >
+      <Popup>
+        <strong>{comercio.nombre || "Comercio"}</strong>
+        <br />
+        {comercio.direccion || "Sin dirección cargada"}
+        <br />
+        {visitaHoy
+          ? `Hoy: ${visitaHoy.resultado}`
+          : "Pendiente de visita"}
+      </Popup>
+    </Marker>
+  );
+})}
+    </MapContainer>
+  </div>
+)}
+      <button
+        type="button"
+        onClick={agregarComercioInmediato}
+        style={{
+          width: "100%",
+          minHeight: "230px",
+          backgroundColor: "#16a34a",
+          color: "#fff",
+          border: "none",
+          borderRadius: "18px",
+          fontSize: "28px",
+          fontWeight: "900",
+          cursor: "pointer",
+        }}
+      >
+        {textoBotonAgregar}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setModoManejo(false)}
+        style={{
+          width: "100%",
+          minHeight: "65px",
+          backgroundColor: "#334155",
+          color: "#fff",
+          border: "2px solid #fff",
+          borderRadius: "12px",
+          fontSize: "16px",
+          fontWeight: "800",
+          cursor: "pointer",
+        }}
+      >
+        📋 VOLVER AL MODO NORMAL
+      </button>
+    </div>
+  );
+}
+  //  const latInicial = Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719);
+  //  const lngInicial = Number(comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.264);
+if (comercioSeleccionado) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#090d16",
+        color: "#fff",
+        fontFamily: "sans-serif",
+        paddingBottom: "40px",
+      }}
+    >
+      <header
+        style={{
+          padding: "14px 16px",
+          backgroundColor: "#0f172a",
+          borderBottom: "1px solid #1e293b",
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+        }}
+      >
+        <button
+          onClick={() => setComercioSeleccionado(null)}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "#94a3b8",
+            fontSize: "15px",
+            fontWeight: "bold",
+            cursor: "pointer",
+          }}
+        >
+          ← Volver al listado
+        </button>
+      </header>
+
+      <div
+        style={{
+          padding: "16px",
+          maxWidth: "600px",
+          margin: "0 auto",
+        }}
+      >
+        <h2 style={{ marginTop: 0 }}>
+          {comercioSeleccionado.nombre || "Comercio"}
+        </h2>
+      <button
+   type="button"
+      onClick={() => setTomandoPedido(true)}
+   style={{
+    width: "100%",
+    padding: "14px",
+    marginBottom: "16px",
+    backgroundColor: "#2563eb",
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "16px",
+    fontWeight: "bold",
+    cursor: "pointer",
+  }}
+        >
+  📦 TOMAR PEDIDO
+    </button>
+    <div
+  style={{
+    backgroundColor: "#1e293b",
+    padding: "14px",
+    borderRadius: "10px",
+    marginBottom: "16px",
+  }}
+>
+  <div
+    style={{
+      fontWeight: "bold",
+      marginBottom: "10px",
+    }}
+  >
+    📍 Registrar visita
+  </div>
+
+  <select
+    value={resultadoVisita}
+    onChange={(e) => setResultadoVisita(e.target.value)}
+    style={{
+      width: "100%",
+      padding: "10px",
+      marginBottom: "10px",
+      boxSizing: "border-box",
+    }}
+  >
+    <option value="Visitado">Visitado</option>
+    <option value="Venta">Venta realizada</option>
+    <option value="No estaba">No estaba</option>
+    <option value="Cerrado">Cerrado</option>
+    <option value="No interesado">No interesado</option>
+  </select>
+
+  <textarea
+    value={observacionVisita}
+    onChange={(e) => setObservacionVisita(e.target.value)}
+    placeholder="Observación de la visita..."
+    rows="3"
+    style={{
+      width: "100%",
+      padding: "10px",
+      marginBottom: "10px",
+      boxSizing: "border-box",
+      resize: "vertical",
+    }}
+  />
+
+  <button
+    type="button"
+    onClick={() => registrarVisitaCheckIn(comercioSeleccionado)}
+    disabled={guardandoVisita}
+    style={{
+      width: "100%",
+      padding: "13px",
+      backgroundColor: guardandoVisita ? "#64748b" : "#16a34a",
+      color: "#fff",
+      border: "none",
+      borderRadius: "8px",
+      fontSize: "15px",
+      fontWeight: "bold",
+      cursor: guardandoVisita ? "default" : "pointer",
+    }}
+  >
+    {guardandoVisita ? "⏳ REGISTRANDO..." : "✅ REGISTRAR VISITA"}
+  </button>
+</div>
+       
+     <div
+  style={{
+    marginBottom: "16px",
+  }}
+>
+  <button
+  type="button"
+  onClick={() => {
+  if (comercioSeleccionado.no_visitar === true) {
+    alert(
+      "⚫ Este comercio está marcado como NO VISITAR MÁS.\n\nSolo un supervisor puede reactivarlo."
+    );
+    return;
+  }
+
+  solicitarNoVisitar(comercioSeleccionado);
+}}
+  style={{
+    width: "100%",
+    padding: "13px",
+    backgroundColor:
+      comercioSeleccionado.no_visitar === true
+        ? "#111827"
+        : "#374151",
+    color: "#fff",
+    border: "2px solid #000",
+    borderRadius: "8px",
+    fontSize: "15px",
+    fontWeight: "bold",
+    cursor: "pointer",
+  }}
+>
+  {comercioSeleccionado.no_visitar === true
+    ? "⚫ NO VISITAR MÁS"
+    : "🚫 SOLICITAR NO VISITAR MÁS"}
+</button>
+</div>  
+       
+        <div
+          style={{
+            backgroundColor: "#0f172a",
+            padding: "16px",
+            borderRadius: "12px",
+            border: "1px solid #1e293b",
+          }}
+        >
+          <label>Nombre del comercio</label>
+
+          <input
+            type="text"
+            value={comercioSeleccionado.nombre || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                nombre: e.target.value,
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              marginTop: "6px",
+              marginBottom: "15px",
+              boxSizing: "border-box",
+            }}
+          />
+
+          <label>Dirección</label>
+
+          <input
+            type="text"
+            value={comercioSeleccionado.direccion || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                direccion: e.target.value,
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              marginTop: "6px",
+              marginBottom: "15px",
+              boxSizing: "border-box",
+            }}
+          />
+
+          <label>Rubro</label>
+
+          <input
+            type="text"
+            value={comercioSeleccionado.rubro || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                rubro: e.target.value,
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              marginTop: "6px",
+              marginBottom: "20px",
+              boxSizing: "border-box",
+            }}
+          />
+          <div style={{ marginBottom: "20px" }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: "6px",
+              }}
+            >
+              Teléfono / WhatsApp
+            </label>
+
+            <div style={{ display: "flex", gap: "8px" }}>
+              <select
+                value={comercioSeleccionado.codigo_pais || "+54"}
+onChange={(e) =>
+  setComercioSeleccionado({
+    ...comercioSeleccionado,
+    codigo_pais: e.target.value,
+  })
+}
+                style={{
+                  width: "105px",
+                  padding: "10px",
+                  boxSizing: "border-box",
+                }}
+              >
+                <option value="+54">🇦🇷 +54</option>
+                <option value="+598">🇺🇾 +598</option>
+                <option value="+56">🇨🇱 +56</option>
+                <option value="+595">🇵🇾 +595</option>
+                <option value="+55">🇧🇷 +55</option>
+                <option value="+591">🇧🇴 +591</option>
+                <option value="+51">🇵🇪 +51</option>
+                <option value="+57">🇨🇴 +57</option>
+                <option value="+52">🇲🇽 +52</option>
+                <option value="+34">🇪🇸 +34</option>
+                <option value="+1">🇺🇸 +1</option>
+              </select>
+
+              <input
+                type="tel"
+                value={comercioSeleccionado.telefono || ""}
+                onChange={(e) =>
+                  setComercioSeleccionado({
+                    ...comercioSeleccionado,
+                    telefono: e.target.value,
+                  })
+                }
+                placeholder="Ej: 11 2250 1680"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: "10px",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+          </div>
+          <button
+  type="button"
+  onClick={() => {
+    const codigo = comercioSeleccionado.codigo_pais || "+54";
+    const telefono = comercioSeleccionado.telefono || "";
+
+    const numeroLimpio =
+      (codigo + telefono).replace(/\D/g, "");
+
+    if (!telefono.trim()) {
+      alert("Este comercio no tiene un teléfono cargado.");
+      return;
+    }
+
+    window.open(
+      "https://wa.me/" + numeroLimpio,
+      "_blank"
+    );
+  }}
+  style={{
+    width: "100%",
+    padding: "13px",
+    marginBottom: "12px",
+    backgroundColor: "#16a34a",
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "15px",
+    fontWeight: "bold",
+    cursor: "pointer",
+  }}
+>
+  💬 Abrir WhatsApp
+</button>
+          <button
+            type="button"
+            onClick={guardarEdicion}
+            disabled={guardandoEdicion}
+            style={{
+              width: "100%",
+              padding: "13px",
+              backgroundColor: "#16a34a",
+              color: "#fff",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            {guardandoEdicion ? "Guardando..." : "💾 Guardar Cambios"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
         <header style={{ padding: "14px 16px", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #334155" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700" }}>Ajustar Ubicación Exacta</h3>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#94a3b8" }}>Arrastrá el pin o tocá el mapa en la puerta del local</p>
-          </div>
-          <button
-            onClick={() => setEditandoUbicacion(false)}
-            style={{ background: "#334155", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "13px", cursor: "pointer", fontWeight: "600" }}
-          >
-            ✕ Volver
-          </button>
-        </header>
-
-        <div style={{ flex: 1, position: "relative" }}>
-          <MapContainer center={[latInicial, lngInicial]} zoom={18} style={{ height: "100%", width: "100%" }}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            <MarcadorArrastrable
-              posicion={[latInicial, lngInicial]}
-              setPosicion={(nuevaPos) => {
-                setComercioSeleccionado((prev) => ({
-                  ...prev,
-                  ubicacion_exacta_latitud: nuevaPos[0],
-                  ubicacion_exacta_longitud: nuevaPos[1],
-                  latitud: nuevaPos[0],
-                  longitud: nuevaPos[1]
-                }));
-              }}
-            />
-          </MapContainer>
-          {/* Barra fija inferior con botón grande de confirmación */}
-          <div style={{
-            position: "absolute",
-            bottom: "20px",
-            left: "16px",
-            right: "16px",
-            zIndex: 1000,
-            display: "flex",
-            gap: "10px"
-          }}>
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const latG = comercioSeleccionado.ubicacion_exacta_latitud || latInicial;
-                  const lngG = comercioSeleccionado.ubicacion_exacta_longitud || lngInicial;
-                  await supabase
-                    .from("comercios")
-                    .update({
-                      ubicacion_exacta_latitud: latG,
-                      ubicacion_exacta_longitud: lngG,
-                      latitud: latG,
-                      longitud: lngG
-                    })
-                    .eq("id", comercioSeleccionado.id);
-                  alert("✅ Ubicación guardada exitosamente");
-                  setEditandoUbicacion(false);
-                } catch (err) {
-                  alert("Error al guardar: " + (err.message || "Verifique conexión"));
-                }
-              }}
-              style={{
-                flex: 1,
-                padding: "14px",
-                background: "#16a34a",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "12px",
-                fontSize: "15px",
-                fontWeight: "700",
-                cursor: "pointer",
-                boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px"
-              }}
-            >
-              ✓ Guardar Ubicación Exacta
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-    
-  // 🚗 PANTALLA OFICIAL MODO MANEJO
-  if (modoManejo) {
-    const coordsMapa = posicionActual ? [posicionActual[0], posicionActual[1]] : [-34.719, -58.264];
-    return (
-      <div style={{ position: "fixed", inset: 0, zIndex: 9999, backgroundColor: "#0f172a", color: "#fff", display: "flex", flexDirection: "column", height: "100vh", width: "100vw", overflow: "hidden" }}>
-        {/* CABECERA MODO MANEJO */}
-        <header style={{ height: "54px", backgroundColor: "#1e293b", padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #334155", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "18px" }}>🚗</span>
-            <span style={{ fontWeight: "800", fontSize: "15px", color: "#38bdf8" }}>Modo Manejo en Vivo</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setModoManejo(false)}
-            style={{ padding: "6px 14px", backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}
-          >
-            ✕ Salir
-          </button>
-        </header>
-
-        {/* MAPA CALLEJERO LEAFLET */}
-        <div style={{ flex: 1, position: "relative", width: "100%", height: "100%" }}>
-          <MapContainer center={coordsMapa} zoom={16} style={{ height: "100%", width: "100%" }} zoomControl={false}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            <AutoCentradoMapa puntos={posicionActual ? [coordsMapa] : []} puntoActivo={coordsMapa} />
-
-            {/* Marcador GPS del Preventista en Auto */}
-            {posicionActual && (
-              <Marker
-                position={coordsMapa}
-                icon={L.divIcon({
-                  className: "pin-manejo-propio",
-                  html: '<div style="background:#2563eb;color:#fff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 16px rgba(37,99,235,0.9);border:2px solid #fff;">🚗</div>',
-                  iconSize: [34, 34],
-                  iconAnchor: [17, 17]
-                })}
-              >
-                <Popup><b>Tu Ubicación</b><br />GPS en vivo</Popup>
-              </Marker>
-            )}
-
-            {/* Marcadores de los Comercios */}
-            {(comercios || []).map(c => {
-              const lat = Number(c.ubicacion_exacta_latitud || c.latitud);
-              const lng = Number(c.ubicacion_exacta_longitud || c.longitud);
-              if (!lat || !lng || isNaN(lat) || isNaN(lng)) return null;
-              return (
-                <Marker
-                  key={c.id}
-                  position={[lat, lng]}
-                  icon={L.divIcon({
-                    className: "pin-comercio-manejo",
-                    html: '<div style="background:#0f172a;color:#38bdf8;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid #38bdf8;box-shadow:0 2px 8px rgba(0,0,0,0.5);">🏪</div>',
-                    iconSize: [26, 26],
-                    iconAnchor: [13, 13]
-                  })}
-                >
-                  <Popup>
-                    <b>{c.nombre || "Comercio #" + c.id}</b><br />
-                    {c.direccion || "Sin dirección"}<br />
-                    <button
-                      type="button"
-                      onClick={() => { setModoManejo(false); setComercioSeleccionado(c); }}
-                      style={{ marginTop: "6px", padding: "4px 8px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "4px", fontSize: "11px", cursor: "pointer", fontWeight: "bold" }}
-                    >
-                      Abrir Ficha
-                    </button>
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
-
-          {/* TARJETA SUPERIOR DE COMERCIO CERCANO */}
-          {comercioCercano && (
-            <div style={{ position: "absolute", top: "12px", left: "12px", right: "12px", zIndex: 1000, backgroundColor: "rgba(15, 23, 42, 0.92)", backdropFilter: "blur(6px)", padding: "12px 14px", borderRadius: "10px", border: "1px solid #38bdf8", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 4px 16px rgba(0,0,0,0.4)" }}>
-              <div>
-                <div style={{ fontSize: "10px", color: "#38bdf8", fontWeight: "800", textTransform: "uppercase", letterSpacing: "0.5px" }}>📍 Próxima Parada</div>
-                <div style={{ fontSize: "14px", fontWeight: "800", color: "#fff" }}>{comercioCercano.nombre || "Comercio #" + comercioCercano.id}</div>
-                <div style={{ fontSize: "11px", color: "#cbd5e1" }}>{comercioCercano.direccion || "Sin dirección"}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => { setModoManejo(false); setComercioSeleccionado(comercioCercano); }}
-                style={{ padding: "8px 12px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}
-              >
-                Visitar
-              </button>
-            </div>
-          )}
-
-          {/* BOTÓN FLOTANTE REGISTRAR COMERCIO AL TOQUE */}
-          <div
-            style={{
-              position: "absolute",
-              left: (posicionBotonManejo?.x || 16) + "px",
-              top: (posicionBotonManejo?.y || 500) + "px",
-              zIndex: 1001,
-              touchAction: "none"
-            }}
-            onTouchStart={(e) => {
-              const touch = e.touches[0];
-              dragRef.current = {
-                startX: touch.clientX,
-                startY: touch.clientY,
-                initialX: posicionBotonManejo?.x || 16,
-                initialY: posicionBotonManejo?.y || 500,
-                moved: false
-              };
-              setArrastrandoBoton(true);
-            }}
-            onTouchMove={(e) => {
-              const touch = e.touches[0];
-              const dx = touch.clientX - dragRef.current.startX;
-              const dy = touch.clientY - dragRef.current.startY;
-              if (Math.hypot(dx, dy) > 8) dragRef.current.moved = true;
-              const nuevoX = Math.max(10, Math.min(window.innerWidth - 180, dragRef.current.initialX + dx));
-              const nuevoY = Math.max(70, Math.min(window.innerHeight - 80, dragRef.current.initialY + dy));
-              setPosicionBotonManejo({ x: nuevoX, y: nuevoY });
-            }}
-            onTouchEnd={() => {
-              setArrastrandoBoton(false);
-              try { localStorage.setItem("posicion_boton_manejo", JSON.stringify(posicionBotonManejo)); } catch(e){}
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                if (dragRef.current?.moved) return;
-                agregarComercioInmediato();
-              }}
-              style={{
-                padding: "12px 18px",
-                backgroundColor: "#22c55e",
-                color: "#fff",
-                border: "2px solid #fff",
-                borderRadius: "30px",
-                fontSize: "13px",
-                fontWeight: "800",
-                cursor: "pointer",
-                boxShadow: "0 6px 20px rgba(34, 197, 94, 0.5)",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px"
-              }}
-            >
-              <span>➕</span> {textoBotonAgregar || "Guardar Comercio"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-
-  if (comercioSeleccionado) {
-    return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#fff', fontFamily: 'sans-serif', paddingBottom: '40px' }}>
-        <header style={{ padding: '14px 16px', background: '#131b2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', position: 'sticky', top: 0, zIndex: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '18px' }}>🏪</span>
-            <span style={{ fontSize: '15px', fontWeight: 'bold' }}>Ficha de Comercio</span>
-          </div>
-          <button
-            onClick={() => setComercioSeleccionado(null)}
-            style={{ padding: '6px 14px', borderRadius: '8px', background: '#334155', color: '#fff', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
-          >
-            ✕ Volver
-          </button>
-        </header>
-
-        <div style={{ padding: '16px', maxWidth: '500px', margin: '0 auto' }}>
-          {comercioSeleccionado.foto_url && (
-            <div style={{ marginBottom: '16px', borderRadius: '12px', overflow: 'hidden', border: '1px solid #1e293b' }}>
-              <img
-                src={comercioSeleccionado.foto_url}
-                alt="Fachada"
-                style={{ width: '100%', height: '200px', objectFit: 'cover', display: 'block' }}
-              />
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
-            <label style={{ flex: 1, padding: '12px', background: '#2563eb', color: '#fff', borderRadius: '10px', textAlign: 'center', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
-              📷 {comercioSeleccionado.foto_url ? 'Cambiar Foto' : 'Tomar Foto'}
-              <input type="file" accept="image/*" capture="environment" onChange={subirFotoFachada} style={{ display: 'none' }} />
-            </label>
-            {comercioSeleccionado.telefono && (
-              <button
-                onClick={enviarWhatsApp}
-                style={{ flex: 1, padding: '12px', background: '#16a34a', color: '#fff', borderRadius: '10px', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
-              >
-                💬 WhatsApp
-              </button>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setEditandoUbicacion(true)}
-            style={{ width: '100%', padding: '12px', marginBottom: '20px', background: '#1e293b', color: '#38bdf8', borderRadius: '10px', border: '1px solid #334155', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
-          >
-            📍 Ajustar Ubicación en Mapa
-          </button>
-
-          <form onSubmit={guardarEdicion} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Nombre</label>
-              <input
-                type="text"
-                value={comercioSeleccionado.nombre || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, nombre: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-                placeholder="Nombre del comercio"
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Rubro</label>
-              <input
-                type="text"
-                value={comercioSeleccionado.rubro || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, rubro: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-                placeholder="Rubro (Kiosco, Almacén, etc.)"
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Dirección</label>
-              <input
-                type="text"
-                value={comercioSeleccionado.direccion || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, direccion: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-                placeholder="Dirección aproximada"
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Teléfono (WhatsApp)</label>
-              <input
-                type="text"
-                value={comercioSeleccionado.telefono || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, telefono: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box' }}
-                placeholder="Ej: 1123456789"
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Notas</label>
-              <div style={{ marginBottom: "14px" }}>
-            <label style={{ display: "block", fontSize: "12px", color: "#64748b", fontWeight: "bold", marginBottom: "4px" }}>🗓️ Día de Visita Asignado</label>
-            <select
-              value={comercioSeleccionado.dia_visita || "Lunes"}
-              onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, dia_visita: e.target.value })}
-              style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#f8fafc", fontSize: "14px", fontWeight: "600", color: "#0f172a" }}
-            >
-              {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map(d => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-          </div>
-          <textarea
-                value={comercioSeleccionado.notas || ''}
-                onChange={(e) => setComercioSeleccionado({ ...comercioSeleccionado, notas: e.target.value })}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#131b2e', border: '1px solid #334155', color: '#fff', fontSize: '14px', boxSizing: 'border-box', minHeight: '80px' }}
-                placeholder="Comentarios, listas de precios solicitadas, etc."
-              />
-            </div>
-
-            <button
-              type="submit"
-              style={{ width: '100%', padding: '14px', marginTop: '12px', background: '#2563eb', color: '#fff', borderRadius: '10px', border: 'none', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' }}
-            >
-              💾 Guardar Cambios
-            </button>
-
-            <button
-              type="button"
-              onClick={() => eliminarComercio(comercioSeleccionado.id)}
-              style={{ width: '100%', padding: '14px', marginTop: '4px', background: '#dc2626', color: '#fff', borderRadius: '10px', border: 'none', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
-            >
-              🗑️ Eliminar Comercio
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-
-    return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
-      <header style={{ padding: "14px 16px", backgroundColor: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #334155", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <div style={{ width: "36px", height: "36px", borderRadius: "8px", backgroundColor: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", boxShadow: "0 2px 8px rgba(37,99,235,0.4)" }}>
-              📍
-            </div>
+            <img src="/logo.svg" alt="RutaComercio" style={{ width: "36px", height: "36px", objectFit: "contain" }} />
             <div>
-              <div style={{ fontSize: "16px", fontWeight: "800", color: "#fff", letterSpacing: "0.5px" }}>RutaComercio</div>
-              <div style={{ fontSize: "12px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "6px" }}>
-                <span>👤 {(typeof perfil !== "undefined" && perfil && perfil.nombre) ? perfil.nombre : "Walter"}</span>
+              <div style={{ fontSize: "15px", fontWeight: "800", color: "#ffffff", letterSpacing: "-0.3px" }}>RutaComercio</div>
+              <div style={{ fontSize: "11px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
+                <span>👤 {perfil?.nombre || "Preventista"}</span>
                 <span>·</span>
-                <span style={{ color: "#38bdf8", fontWeight: "600" }}>{(typeof perfil !== "undefined" && perfil && perfil.empresa) ? perfil.empresa : "Elifiant"}</span>
+                <span style={{ color: "#38bdf8", fontWeight: "600" }}>{perfil?.empresa || "DEMO S.A."}</span>
               </div>
             </div>
           </div>
-         <button onClick={handleCerrarSesion} style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#f87171", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px" }}
+          <button
+            type="button"
+            onClick={handleCerrarSesion}
+            style={{ background: "#ef4444", color: "#ffffff", border: "none", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", cursor: "pointer", fontWeight: "700" }}
           >
             ✕ Salir
-          </button> 
+          </button>
         </header>
-
-        {/* TABLERO JORNADA Y MODO MANEJO */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
-          {/* Tarjeta Jornada */}
-          <div style={{ backgroundColor: "#1e293b", padding: "10px", borderRadius: "10px", border: "1px solid #334155" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", textTransform: "uppercase" }}>Jornada</span>
-              <span style={{ fontSize: "10px", color: jornadaActiva ? "#4ade80" : "#94a3b8", fontWeight: "bold" }}>
-                {jornadaActiva ? "● En vivo" : "○ Inactiva"}
-              </span>
-            </div>
-            <div style={{ fontSize: "16px", fontWeight: "800", color: "#fff" }}>
-              {jornadaActiva ? tiempoTranscurrido : "0m"}
-            </div>
-            <button
-              onClick={() => {
-                if (jornadaActiva) {
-                    setJornadaActiva(false);
-                    localStorage.removeItem("rutacomercio_jornada_activa");
-                    localStorage.removeItem("rutacomercio_inicio_jornada");
-                    if (typeof setInicioTimestamp === "function") setInicioTimestamp(null);
-                  } else {
-                    const timestampInicio = Date.now().toString();
-                    setJornadaActiva(true);
-                    localStorage.setItem("rutacomercio_jornada_activa", "true");
-                    localStorage.setItem("rutacomercio_inicio_jornada", timestampInicio);
-                    if (typeof setInicioTimestamp === "function") setInicioTimestamp(timestampInicio);
-                  const ahora = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                  localStorage.setItem("jornada_activa", "true");
-                  localStorage.setItem("timestamp_inicio_jornada", Date.now().toString());
-                  localStorage.setItem("hora_inicio_jornada", ahora);
-                  setHoraInicioJornada(ahora);
-                }
-              }}
-              style={{ width: "100%", marginTop: "6px", padding: "6px 0", backgroundColor: jornadaActiva ? "#dc2626" : "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}
-            >
-              {jornadaActiva ? "Finalizar" : "Iniciar"}
-            </button>
-          </div>
-
-          {/* Tarjeta Modo Manejo */}
-          <div style={{ backgroundColor: "#1e293b", padding: "10px", borderRadius: "10px", border: "1px solid #334155", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "600", textTransform: "uppercase" }}>Navegación</span>
-              <span style={{ fontSize: "10px", color: "#38bdf8", fontWeight: "bold" }}>GPS Activo</span>
-            </div>
-            <button
-              onClick={() => setModoManejo(true)}
-              style={{ width: "100%", marginTop: "10px", padding: "10px 0", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: "800", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", boxShadow: "0 4px 12px rgba(37,99,235,0.4)" }}
-            >
-              🚗 Modo Manejo
-            </button>
-          </div>
-        </div>
-
+        <button
+  type="button"
+  onClick={() => setModoManejo(true)}
+  style={{
+    margin: "12px 16px 0",
+    padding: "14px",
+    backgroundColor: "#f59e0b",
+    color: "#111827",
+    border: "none",
+    borderRadius: "10px",
+    fontSize: "16px",
+    fontWeight: "800",
+    cursor: "pointer",
+  }}
+>
+  🚗 MODO MANEJO
+</button>
         {/* FRANJA DE MÉTRICAS DIARIAS DEL PREVENTISTA */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginTop: "10px" }}>
           <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
@@ -1174,12 +1604,57 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
             style={{ width: "100%", padding: "10px 14px", backgroundColor: "#0b1329", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
           />
         </div>
+        <div
+  style={{
+    display: "flex",
+    gap: "8px",
+    margin: "10px 16px 0",
+  }}
+>
+  <button
+    type="button"
+    onClick={() => setVistaComercios("HOY")}
+    style={{
+      flex: 1,
+      padding: "12px",
+      border: "none",
+      borderRadius: "8px",
+      backgroundColor: vistaComercios === "HOY" ? "#2563eb" : "#334155",
+      color: "#fff",
+      fontSize: "15px",
+      fontWeight: "800",
+      cursor: "pointer",
+    }}
+  >
+    HOY
+  </button>
 
+  <button
+    type="button"
+    onClick={() => setVistaComercios("TODOS")}
+    style={{
+      flex: 1,
+      padding: "12px",
+      border: "none",
+      borderRadius: "8px",
+      backgroundColor: vistaComercios === "TODOS" ? "#2563eb" : "#334155",
+      color: "#fff",
+      fontSize: "15px",
+      fontWeight: "800",
+      cursor: "pointer",
+    }}
+  >
+    TODOS
+  </button>
+</div>
       {/* LISTADO DE COMERCIOS */}
       <main style={{ flex: 1, overflowY: "auto", padding: "12px 16px 80px" }}>
+        
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
           <span style={{ fontSize: "12px", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-            Comercios Asignados ({listaFiltrada.length})
+            {vistaComercios === "HOY"
+  ? `COMERCIOS DE HOY · ${obtenerDiaActual().toUpperCase()} (${listaFiltrada.length})`
+  : `TODOS LOS COMERCIOS (${listaFiltrada.length})`}
           </span>
         </div>
 
@@ -1192,7 +1667,11 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
             {listaFiltrada.map((c) => (
               <div
                 key={c.id}
-                onClick={() => setComercioSeleccionado(c)}
+                onClick={() => {
+  setObservacionVisita('');
+  setResultadoVisita('Visitado');
+  setComercioSeleccionado(c);
+}}
                 style={{ backgroundColor: "#1e293b", padding: "12px 14px", borderRadius: "10px", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "transform 0.1s" }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -1210,6 +1689,20 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
                     <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
                       {c.rubro || "General"} {c.direccion ? "· " + c.direccion : ""}
                     </div>
+                    {c.distancia_actual !== null && (
+  <div
+    style={{
+      fontSize: "24px",
+      color: "#60a5fa",
+      marginTop: "6px",
+      fontWeight: "700",
+    }}
+  >
+    📍 {c.distancia_actual < 1000
+      ? `${c.distancia_actual} m`
+      : `${(c.distancia_actual / 1000).toFixed(1)} km`}
+  </div>
+)}
                   </div>
                 </div>
                 <span style={{ fontSize: "18px", color: "#64748b", paddingLeft: "8px" }}>›</span>
@@ -1221,11 +1714,30 @@ export default function App({ sesion: sesionProp, perfil: perfilProp }) {
 
       {/* BOTÓN FLOTANTE REGISTRAR COMERCIO */}
       <button
-        onClick={agregarComercioInmediato}
-        style={{ position: "fixed", bottom: "20px", right: "20px", width: "56px", height: "56px", borderRadius: "28px", backgroundColor: "#2563eb", color: "#fff", border: "none", fontSize: "26px", fontWeight: "bold", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px rgba(37,99,235,0.5)", cursor: "pointer", zIndex: 40 }}
-      >
+            type="button"
+            onClick={agregarComercioInmediato}
+            style={{
+              width: "100%",
+              minHeight: "76px",
+              padding: "20px 16px",
+              backgroundColor: "#2563eb",
+              color: "#ffffff",
+              border: "3px solid #60a5fa",
+              borderRadius: "18px",
+              fontSize: "20px",
+              fontWeight: "900",
+              letterSpacing: "0.5px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "12px",
+              boxShadow: "0 8px 24px rgba(37, 99, 235, 0.5)",
+              touchAction: "manipulation"
+            }}>
         +
       </button>
     </div>
   );
 }
+

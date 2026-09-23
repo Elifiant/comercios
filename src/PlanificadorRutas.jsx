@@ -27,10 +27,35 @@ export default function PlanificadorRutas() {
  useEffect(() => {
  async function cargar() {
  try {
- const res = await supabase.from("comercios").select("*").order("id", { ascending: true });
- if (res.data && res.data.length > 0) {
- setComercios(res.data);
- setSecuencia(res.data.slice(0, Math.min(6, res.data.length)));
+ const { data: authData } = await supabase.auth.getSession();
+ const sesion = authData?.session;
+ if (!sesion) throw new Error("No hay sesión activa.");
+
+ const { data: perfil, error: errorPerfil } = await supabase
+ .from("perfiles")
+ .select("empresa_id")
+ .eq("id", sesion.user.id)
+ .maybeSingle();
+
+ if (errorPerfil) throw errorPerfil;
+ if (!perfil?.empresa_id) throw new Error("El usuario no tiene empresa_id asignado.");
+
+ const res = await supabase
+ .from("comercios")
+ .select("*")
+ .eq("empresa_id", perfil.empresa_id)
+ .order("orden_visita", { ascending: true, nullsFirst: false })
+ .order("id", { ascending: true });
+
+ if (res.error) throw res.error;
+
+ if (res.data) {
+ const ordenados = res.data.map((c, index) => ({
+ ...c,
+ orden_visita: Number(c.orden_visita) || index + 1
+ }));
+ setComercios(ordenados);
+ setSecuencia(ordenados.slice(0, Math.min(6, ordenados.length)));
  }
  } catch (e) {
  console.error(e);
@@ -39,22 +64,49 @@ export default function PlanificadorRutas() {
  cargar();
  }, []);
 
- const subir = (i) => {
- if (i === 0) return;
- const n = [...secuencia];
- const aux = n[i - 1];
- n[i - 1] = n[i];
- n[i] = aux;
- setSecuencia(n);
+ const aplicarYGuardarOrden = async (lista) => {
+ const renumerada = lista.map((c, index) => ({
+ ...c,
+ orden_visita: index + 1
+ }));
+
+ setSecuencia(renumerada);
+ setComercios(actuales =>
+ actuales.map(c => {
+ const actualizado = renumerada.find(r => r.id === c.id);
+ return actualizado || c;
+ })
+ );
+
+ try {
+ const resultados = await Promise.all(
+ renumerada.map(c =>
+ supabase
+ .from("comercios")
+ .update({ orden_visita: c.orden_visita })
+ .eq("id", c.id)
+ )
+ );
+ const fallo = resultados.find(r => r.error);
+ if (fallo?.error) throw fallo.error;
+ } catch (e) {
+ console.error("Error guardando orden de visita:", e);
+ alert("No se pudo guardar el nuevo orden.");
+ }
  };
 
- const bajar = (i) => {
+ const subir = async (i) => {
+ if (i === 0) return;
+ const n = [...secuencia];
+ [n[i - 1], n[i]] = [n[i], n[i - 1]];
+ await aplicarYGuardarOrden(n);
+ };
+
+ const bajar = async (i) => {
  if (i === secuencia.length - 1) return;
  const n = [...secuencia];
- const aux = n[i + 1];
- n[i + 1] = n[i];
- n[i] = aux;
- setSecuencia(n);
+ [n[i + 1], n[i]] = [n[i], n[i + 1]];
+ await aplicarYGuardarOrden(n);
  };
 
  const quitar = (id) => setSecuencia(secuencia.filter(c => c.id !== id));
@@ -96,12 +148,12 @@ export default function PlanificadorRutas() {
  <span style={{ color: "#cbd5e1" }}>|</span>
  <div>
  <h1 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>Planificador Visual de Hojas de Ruta</h1>
- <p style={{ margin: 0, fontSize: "12px", color: "#64748b" }}>Walter Morales · Elifiant Zona Sur</p>
+ <p style={{ margin: 0, fontSize: "12px", color: "#64748b" }}>Ruta asignada al equipo de la empresa</p>
  </div>
  </div>
  <div style={{ display: "flex", gap: "10px" }}>
  <button onClick={optimizar} style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", padding: "8px 14px", borderRadius: "8px", fontWeight: "bold", fontSize: "13px", cursor: "pointer" }}>⚡ Auto-optimizar</button>
- <button onClick={() => { setEnviado(true); setTimeout(() => setEnviado(false), 3000); }} style={{ background: "#2563eb", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "8px", fontWeight: "bold", fontSize: "13px", cursor: "pointer" }}>{enviado ? "✓ Enviada a Walter" : "📲 Enviar Hoja a Walter"}</button>
+ <button onClick={() => { setEnviado(true); setTimeout(() => setEnviado(false), 3000); }} style={{ background: "#2563eb", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "8px", fontWeight: "bold", fontSize: "13px", cursor: "pointer" }}>{enviado ? "✓ Hoja preparada" : "📲 Preparar Hoja de Ruta"}</button>
  </div>
  </header>
  <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "8px 24px", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -120,7 +172,7 @@ export default function PlanificadorRutas() {
  const lng = c.ubicacion_exacta_longitud || c.longitud;
  if (!lat || !lng) return null;
  return (
- <Marker key={c.id} position={[lat, lng]} icon={crearIcono(idx + 1, idx === 0)}>
+ <Marker key={`${c.id}-${c.orden_visita}`} position={[lat, lng]} icon={crearIcono(c.orden_visita, c.orden_visita === 1)}>
  <Popup><div><strong>#{idx + 1}: {c.nombre}</strong><p style={{ margin: "4px 0 0", fontSize: "12px" }}>{c.direccion || ""}</p></div></Popup>
  </Marker>
  );
@@ -139,7 +191,7 @@ export default function PlanificadorRutas() {
  <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "8px" }}>
  {secuencia.map((comercio, index) => (
  <div key={comercio.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", background: "#f8fafc", borderRadius: "8px", border: index === 0 ? "1px solid #10b981" : "1px solid #e2e8f0" }}>
- <div style={{ background: index === 0 ? "#10b981" : "#2563eb", color: "#fff", fontWeight: "800", fontSize: "12px", width: "26px", height: "26px", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{index + 1}</div>
+ <div style={{ background: index === 0 ? "#10b981" : "#2563eb", color: "#fff", fontWeight: "800", fontSize: "12px", width: "26px", height: "26px", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{comercio.orden_visita}</div>
  <div style={{ flex: 1, minWidth: 0 }}>
  <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{comercio.nombre || "Comercio #" + comercio.id} {index === 0 && <span style={{ background: "#dcfce7", color: "#166534", fontSize: "10px", padding: "1px 4px", borderRadius: "4px" }}>PARTIDA</span>}</div>
  <div style={{ fontSize: "11px", color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{comercio.direccion || "Sin direccion"}</div>

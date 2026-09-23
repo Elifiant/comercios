@@ -11,11 +11,12 @@ import MonitorPedidos from "./MonitorPedidos";
 import { supabase } from "./supabase";
 
 function EnrutadorSeguro() {
+  console.log("🚦 EnrutadorSeguro está renderizando");
   const ruta = window.location.pathname;
   const [sesion, setSesion] = useState(null);
   const [perfil, setPerfil] = useState(null);
   const [cargando, setCargando] = useState(true);
-
+  console.log("🔎 ESTADO:", { cargando, sesion, perfil });
   const [emailLogin, setEmailLogin] = useState("");
   const [passwordLogin, setPasswordLogin] = useState("");
   const [errorLogin, setErrorLogin] = useState(null);
@@ -30,7 +31,7 @@ function EnrutadorSeguro() {
     try {
       const { data } = await supabase
         .from("perfiles")
-        .select("rol, empresa, nombre")
+        .select("rol, empresa, empresa_id, nombre")
         .eq("id", userId)
         .maybeSingle();
       setPerfil(data || null);

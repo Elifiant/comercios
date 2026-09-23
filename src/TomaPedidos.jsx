@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
 export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExistente = null }) {
+
+  console.log("🔎 USUARIO EN TOMA PEDIDOS:", usuario);
   const [busqueda, setBusqueda] = useState('');
   const [categoriaSel, setCategoriaSel] = useState('TODOS');
   const [pedidoCargadoPrevio, setPedidoCargadoPrevio] = useState(pedidoExistente);
@@ -149,11 +151,12 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         comercio_nombre: String(comercio?.nombre || ('Comercio #' + (comercio?.id || ''))),
         preventista: String(usuario?.nombre || perfil?.nombre || 'demo04'),
         empresa: String(usuario?.empresa || perfil?.empresa || 'DEMO S.A.'),
+        empresa_id: usuario?.empresa_id || perfil?.empresa_id || null,
         total: Number(totalFinal || 0),
         estado: 'Confirmado',
         notas: String((observaciones ? observaciones + ' | ' : '') + 'Comanda ' + codPedido)
       };
-
+        console.log("📦 PEDIDO QUE ENVÍO A SUPABASE:", pedidoPayload);
       const { data: pedData, error: errInsert } = await supabase
         .from('pedidos')
         .insert([pedidoPayload]);

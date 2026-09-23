@@ -9,15 +9,39 @@ const LISTA_ESTADOS = ["Ingresado", "En Preparación", "En Depósito"];
 export default function MonitorPedidos() {
     const [pedidos, setPedidos] = useState([]);
   const [cargandoPedidos, setCargandoPedidos] = useState(true);
-  const [preventistasReales, setPreventistasReales] = useState(["Todos", "Walter"]);
+  const [preventistasReales, setPreventistasReales] = useState(["Todos"]);
 
   const cargarPedidosReales = async () => {
     try {
       setCargandoPedidos(true);
-      // 1. Pedidos en Supabase
+      // 1. Identificar la empresa del usuario conectado
+      const { data: authData } = await supabase.auth.getSession();
+      const sesion = authData?.session;
+      if (!sesion) throw new Error("No hay sesión activa.");
+
+      const { data: perfil, error: errorPerfil } = await supabase
+        .from("perfiles")
+        .select("empresa_id")
+        .eq("id", sesion.user.id)
+        .maybeSingle();
+
+      if (errorPerfil) throw errorPerfil;
+      if (!perfil?.empresa_id) throw new Error("El usuario no tiene empresa_id asignado.");
+
+      // 2. Preventistas de SU empresa, aunque todavía no tengan pedidos
+      const { data: perfilesEmpresa, error: errorPerfiles } = await supabase
+        .from("perfiles")
+        .select("nombre, email, rol")
+        .eq("empresa_id", perfil.empresa_id)
+        .eq("rol", "preventista");
+
+      if (errorPerfiles) throw errorPerfiles;
+
+      // 3. Pedidos de SU empresa solamente
       const { data, error } = await supabase
         .from("pedidos")
         .select("*")
+        .eq("empresa_id", perfil.empresa_id)
         .order("created_at", { ascending: false });
 
       let listaConsolidada = [];
@@ -40,7 +64,9 @@ export default function MonitorPedidos() {
 
       // 2. Fallback de localStorage
       const locales = JSON.parse(localStorage.getItem("pedidos_local") || "[]");
-      locales.forEach(loc => {
+      locales
+        .filter(loc => loc.empresa_id === perfil.empresa_id)
+        .forEach(loc => {
         if (!listaConsolidada.some(p => String(p.id) === String(loc.id))) {
           listaConsolidada.push({
             id: loc.id || ("LOC-" + Date.now()),
@@ -64,8 +90,14 @@ export default function MonitorPedidos() {
         setPedidoActivo(listaConsolidada[0]);
       }
 
-      // 3. Extraer preventistas únicos reales sin inventos
-      const prevs = ["Todos", ...new Set(listaConsolidada.map(p => p.preventista).filter(Boolean))];
+      // 4. Preventistas reales de la empresa, tengan pedidos o no
+      const prevs = [
+        "Todos",
+        ...new Set([
+          ...(perfilesEmpresa || []).map(p => p.nombre || p.email).filter(Boolean),
+          ...listaConsolidada.map(p => p.preventista).filter(Boolean),
+        ]),
+      ];
       setPreventistasReales(prevs);
 
     } catch (err) {
