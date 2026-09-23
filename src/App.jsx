@@ -9,7 +9,7 @@ const obtenerDiaActual = () => {
 import Supervisor from './Supervisor';
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -167,6 +167,21 @@ function AutoCentradoMapa({ puntos, puntoActivo }) {
       } catch(e) {}
     }
   }, [puntoActivo, puntos, map]);
+  return null;
+}
+
+
+function SeguirAuto({ posicion }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!posicion || !Number.isFinite(Number(posicion[0])) || !Number.isFinite(Number(posicion[1]))) return;
+    map.panTo([Number(posicion[0]), Number(posicion[1])], {
+      animate: true,
+      duration: 0.5,
+    });
+  }, [posicion, map]);
+
   return null;
 }
 
@@ -668,7 +683,7 @@ useEffect(() => {
         localStorage.setItem('hora_inicio_jornada', ahora);
       }
 
-      const { error } = await supabase.from('visitas').insert([{
+      const nuevaVisita = {
         comercio_id: comercio.id,
         comercio_nombre: comercio.nombre || ('Comercio #' + comercio.id),
         preventista: prevNombre,
@@ -679,12 +694,22 @@ useEffect(() => {
         latitud: posicionActual ? posicionActual[0] : (comercio.latitud || null),
         longitud: posicionActual ? posicionActual[1] : (comercio.longitud || null),
         fecha: ahora
-      }]);
+      };
+
+      const { error } = await supabase.from('visitas').insert([nuevaVisita]);
 
       if (error) throw error;
 
+      setVisitasMapa((prev) => [nuevaVisita, ...(prev || [])]);
       setVisitaRegistradaHoy(true);
       alert('✅ ¡Visita registrada con éxito! (' + resultadoVisita + ')');
+
+      // 🧭 Al terminar la visita volvemos a HOY.
+      // Como visitasMapa ya se actualizó, PRÓXIMO DESTINO salta solo
+      // a la siguiente parada pendiente de la ruta sugerida.
+      setObservacionVisita('');
+      setComercioSeleccionado(null);
+      setVistaComercios("HOY");
     } catch (err) {
       console.error('Error al registrar visita:', err);
       alert('Aviso: Visita guardada localmente');
@@ -769,12 +794,47 @@ const solicitarNoVisitar = async (comercio) => {
   const [cargando, setCargando] = useState(true);
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
+  const [posicionEdicionUbicacion, setPosicionEdicionUbicacion] = useState(null);
   const [jornadaActiva, setJornadaActiva] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [vistaComercios, setVistaComercios] = useState("HOY");
+  const [destinoMapa, setDestinoMapa] = useState(null);
 
   // Lista filtrada de comercios por búsqueda y orden
   
+  // 🔊 Confirmación sonora fuerte al capturar un comercio
+  const reproducirAlerta = () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+
+      const ctx = new AudioContext();
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0.95, ctx.currentTime);
+      master.connect(ctx.destination);
+
+      const beep = (frecuencia, inicio, duracion) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(frecuencia, ctx.currentTime + inicio);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + inicio);
+        gain.gain.exponentialRampToValueAtTime(0.9, ctx.currentTime + inicio + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + inicio + duracion);
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(ctx.currentTime + inicio);
+        osc.stop(ctx.currentTime + inicio + duracion + 0.02);
+      };
+
+      beep(1100, 0, 0.16);
+      beep(850, 0.22, 0.18);
+      setTimeout(() => ctx.close().catch(() => {}), 700);
+    } catch (e) {
+      console.warn("No se pudo reproducir el sonido de captura:", e);
+    }
+  };
+
   // Función para agregar comercio inmediato capturando GPS actual
   const agregarComercioInmediato = () => {
     setTextoBotonAgregar("⏳ Capturando GPS...");
@@ -790,6 +850,9 @@ const solicitarNoVisitar = async (comercio) => {
           ubicacion_exacta_longitud: lng,
           fecha: new Date().toISOString(),
           notas: "Registrado en Modo Manejo",
+          dia_visita: new Intl.DateTimeFormat("es-AR", { weekday: "long" })
+            .format(new Date())
+            .replace(/^./, (letra) => letra.toUpperCase()),
           empresa: perfil?.empresa || "DEMO S.A.",
           empresa_id: perfil?.empresa_id || null,
           preventista: perfil?.nombre || "demo02"
@@ -797,6 +860,7 @@ const solicitarNoVisitar = async (comercio) => {
         
         setComercios(prev => [nuevo, ...prev]);
         setTextoBotonAgregar("✓ ¡REGISTRADO!");
+        setRenovarWakeLock((n) => n + 1);
         try { if (typeof reproducirAlerta === "function") reproducirAlerta(); } catch(e){}
         
         await supabase.from("comercios").insert([nuevo]);
@@ -839,6 +903,75 @@ if (navigator.geolocation) {
   setTextoBotonAgregar("➕ AGREGAR COMERCIO");
 } 
   };
+
+  // 📊 MÉTRICA REAL DE VISITAS DE HOY
+  const normalizarDia = (valor) =>
+    String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+
+  const diaActualNormalizado = normalizarDia(obtenerDiaActual());
+
+  const comerciosProgramadosHoy = (comercios || []).filter((c) =>
+    normalizarDia(c.dia_visita) === diaActualNormalizado &&
+    c.no_visitar !== true
+  );
+
+  const inicioHoyMetricas = new Date();
+  inicioHoyMetricas.setHours(0, 0, 0, 0);
+
+  const idsProgramadosHoy = new Set(
+    comerciosProgramadosHoy.map((c) => String(c.id))
+  );
+
+  const idsVisitadosHoy = new Set(
+    (visitasMapa || [])
+      .filter((v) =>
+        v?.fecha &&
+        new Date(v.fecha) >= inicioHoyMetricas &&
+        idsProgramadosHoy.has(String(v.comercio_id))
+      )
+      .map((v) => String(v.comercio_id))
+  );
+
+  const visitasRealizadasHoy = idsVisitadosHoy.size;
+  const visitasProgramadasHoy = comerciosProgramadosHoy.length;
+
+  // 🧭 PRÓXIMO DESTINO SEGÚN LA HOJA DE RUTA DEL SUPERVISOR
+  // El listado general sigue ordenado por cercanía. Esta tarjeta usa orden_visita.
+  const rutaSugeridaHoy = [...comerciosProgramadosHoy]
+    .filter((c) => Number.isFinite(Number(c.orden_visita)))
+    .sort((a, b) => Number(a.orden_visita) - Number(b.orden_visita));
+
+  const proximoDestino = rutaSugeridaHoy.find(
+    (c) => !idsVisitadosHoy.has(String(c.id))
+  ) || null;
+
+  const indiceProximoDestino = proximoDestino
+    ? rutaSugeridaHoy.findIndex((c) => String(c.id) === String(proximoDestino.id))
+    : -1;
+
+  const latProximo = proximoDestino
+    ? Number(proximoDestino.ubicacion_exacta_latitud || proximoDestino.latitud)
+    : null;
+  const lngProximo = proximoDestino
+    ? Number(proximoDestino.ubicacion_exacta_longitud || proximoDestino.longitud)
+    : null;
+
+  const distanciaProximoDestino =
+    proximoDestino &&
+    posicionActual &&
+    Number.isFinite(latProximo) &&
+    Number.isFinite(lngProximo)
+      ? calcularMetrosGPS(
+          posicionActual[0],
+          posicionActual[1],
+          latProximo,
+          lngProximo
+        )
+      : null;
 
   const listaFiltrada = (comercios || [])
   .filter(c => {
@@ -910,6 +1043,7 @@ if (navigator.geolocation) {
   const dragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0, moved: false });
 
   const [modoManejo, setModoManejo] = useState(false);
+  const [renovarWakeLock, setRenovarWakeLock] = useState(0);
 // 📍 GPS EN VIVO PARA MODO MANEJO
 useEffect(() => {
   if (!modoManejo) return;
@@ -977,27 +1111,154 @@ useEffect(() => {
 
   cargarVisitasMapa();
 }, [modoManejo, perfil, perfilProp]);
-  // 💡 SCREEN WAKE LOCK: Mantiene la pantalla encendida en Modo Manejo
+  // 💡 WAKE LOCK INTELIGENTE: mantiene la pantalla despierta 90 segundos
+  // al entrar en Modo Manejo. Después deja que el teléfono use su bloqueo normal.
   useEffect(() => {
+    if (!modoManejo) return;
+
     let wl = null;
-    const pedirLock = async () => {
+    let timer = null;
+    let cancelado = false;
+
+    const pedirLockTemporal = async () => {
       try {
-        if ("wakeLock" in navigator && Boolean(modoManejo)) {
+        if ("wakeLock" in navigator) {
           wl = await navigator.wakeLock.request("screen");
+
+          timer = setTimeout(() => {
+            if (wl) {
+              wl.release().catch(() => {});
+              wl = null;
+            }
+          }, 90 * 1000);
         }
-      } catch (e) {}
+      } catch (e) {
+        console.log("Wake Lock no disponible:", e);
+      }
     };
-    if (Boolean(modoManejo)) {
-      pedirLock();
-    }
+
+    pedirLockTemporal();
+
     return () => {
+      cancelado = true;
+      if (timer) clearTimeout(timer);
       if (wl) {
         wl.release().catch(() => {});
       }
     };
-  }, [sesion]);
+  }, [modoManejo, renovarWakeLock]);
 
 
+
+  if (destinoMapa) {
+    const latDestino = Number(destinoMapa.ubicacion_exacta_latitud || destinoMapa.latitud);
+    const lngDestino = Number(destinoMapa.ubicacion_exacta_longitud || destinoMapa.longitud);
+    const centroDestino =
+      Number.isFinite(latDestino) && Number.isFinite(lngDestino)
+        ? [latDestino, lngDestino]
+        : posicionActual;
+
+    return (
+      <div
+        style={{
+          height: "100vh",
+          backgroundColor: "#111827",
+          color: "#fff",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            minHeight: "62px",
+            padding: "10px 12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "10px",
+            backgroundColor: "#0f172a",
+            borderBottom: "1px solid #334155",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: "11px", fontWeight: "900", color: "#93c5fd" }}>
+              🧭 PRÓXIMO DESTINO
+            </div>
+            <div
+              style={{
+                fontSize: "15px",
+                fontWeight: "900",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {destinoMapa.nombre || `Comercio #${destinoMapa.id}`}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setDestinoMapa(null)}
+            style={{
+              padding: "9px 12px",
+              border: "1px solid #64748b",
+              borderRadius: "9px",
+              backgroundColor: "#1e293b",
+              color: "#fff",
+              fontWeight: "800",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            ← VOLVER
+          </button>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {centroDestino ? (
+            <MapContainer
+              center={centroDestino}
+              zoom={17}
+              style={{ width: "100%", height: "100%" }}
+            >
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+              {posicionActual && (
+                <Marker position={posicionActual} icon={iconoAuto}>
+                  <Popup><strong>🚗 Mi ubicación</strong></Popup>
+                </Marker>
+              )}
+
+              {Number.isFinite(latDestino) && Number.isFinite(lngDestino) && (
+                <Marker position={[latDestino, lngDestino]} icon={iconoAzul}>
+                  <Popup>
+                    <strong>{destinoMapa.nombre || `Comercio #${destinoMapa.id}`}</strong>
+                    <br />
+                    {destinoMapa.direccion || "Sin dirección cargada"}
+                  </Popup>
+                </Marker>
+              )}
+            </MapContainer>
+          ) : (
+            <div
+              style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "20px",
+                textAlign: "center",
+                color: "#cbd5e1",
+              }}
+            >
+              Este comercio no tiene una ubicación válida para mostrar.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (tomandoPedido && comercioSeleccionado) {
   return (
@@ -1009,175 +1270,250 @@ useEffect(() => {
   );
 }
 if (modoManejo) {
+  const moverBotonFlotante = (clientX, clientY) => {
+    const ancho = 220;
+    const alto = 92;
+    const margen = 12;
+    const maxX = Math.max(margen, window.innerWidth - ancho - margen);
+    const maxY = Math.max(90, window.innerHeight - alto - 90);
+
+    const x = Math.min(Math.max(margen, clientX - dragRef.current.startX), maxX);
+    const y = Math.min(Math.max(90, clientY - dragRef.current.startY), maxY);
+
+    if (
+      Math.abs(x - dragRef.current.initialX) > 6 ||
+      Math.abs(y - dragRef.current.initialY) > 6
+    ) {
+      dragRef.current.moved = true;
+    }
+
+    setPosicionBotonManejo({ x, y });
+  };
+
+  const iniciarArrastreBoton = (clientX, clientY) => {
+    dragRef.current = {
+      startX: clientX - posicionBotonManejo.x,
+      startY: clientY - posicionBotonManejo.y,
+      initialX: posicionBotonManejo.x,
+      initialY: posicionBotonManejo.y,
+      moved: false,
+    };
+    setArrastrandoBoton(true);
+  };
+
+  const terminarArrastreBoton = () => {
+    setArrastrandoBoton(false);
+    try {
+      localStorage.setItem(
+        "rutacomercio_pos_boton_manejo",
+        JSON.stringify(posicionBotonManejo)
+      );
+    } catch (e) {}
+  };
+
   return (
     <div
       style={{
-        minHeight: "100vh",
+        height: "100vh",
         backgroundColor: "#111",
         color: "#fff",
         display: "flex",
         flexDirection: "column",
-        justifyContent: "space-between",
-        padding: "25px 20px",
+        overflow: "hidden",
         boxSizing: "border-box",
-        textAlign: "center",
+        fontFamily: "sans-serif",
       }}
     >
-      <div>
-        <h2 style={{ marginTop: 0 }}>🚗 MODO MANEJO</h2>
-        <p style={{ color: "#aaa" }}>
-          Registrá un comercio con tu ubicación actual
-        </p>
+      <div
+        style={{
+          height: "64px",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "8px 12px",
+          backgroundColor: "#111827",
+          borderBottom: "1px solid #334155",
+          boxSizing: "border-box",
+        }}
+      >
+        <div style={{ textAlign: "left" }}>
+          <div style={{ fontSize: "17px", fontWeight: "900" }}>🚗 MODO MANEJO</div>
+          <div style={{ fontSize: "11px", color: posicionActual ? "#86efac" : "#facc15" }}>
+            {posicionActual ? "● GPS activo" : "● Buscando GPS..."}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setModoManejo(false)}
+          style={{
+            backgroundColor: "#334155",
+            color: "#fff",
+            border: "1px solid #64748b",
+            borderRadius: "9px",
+            padding: "9px 11px",
+            fontSize: "12px",
+            fontWeight: "800",
+            cursor: "pointer",
+          }}
+        >
+          ← SALIR
+        </button>
       </div>
-      {posicionActual && (
-  <div
-    style={{
-      width: "100%",
-      height: "250px",
-      marginBottom: "35px",
-      borderRadius: "14px",
-      overflow: "hidden",
-      border: "2px solid #334155",
-    }}
-  >
-    <MapContainer
-      center={posicionActual}
-      zoom={17}
-      style={{ width: "100%", height: "100%" }}
-    >
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
 
-      <Marker
-  position={posicionActual}
-  icon={iconoAuto}
->
-  <Popup>
-    <strong>🚗 Mi ubicación</strong>
-  </Popup>
-</Marker>
-      {(comercios || []).map((comercio) => {
-  const lat = Number(
-    comercio.ubicacion_exacta_latitud || comercio.latitud
-  );
+      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+        {posicionActual ? (
+          <MapContainer
+            center={posicionActual}
+            zoom={17}
+            style={{ width: "100%", height: "100%" }}
+          >
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
 
-  const lng = Number(
-    comercio.ubicacion_exacta_longitud || comercio.longitud
-  );
+            <SeguirAuto posicion={posicionActual} />
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return null;
-  }
+            <Marker position={posicionActual} icon={iconoAuto}>
+              <Popup>
+                <strong>🚗 Mi ubicación</strong>
+              </Popup>
+            </Marker>
 
-  // 📅 Inicio de hoy
-  const ahora = new Date();
+            {(comercios || []).map((comercio) => {
+              const lat = Number(
+                comercio.ubicacion_exacta_latitud || comercio.latitud
+              );
+              const lng = Number(
+                comercio.ubicacion_exacta_longitud || comercio.longitud
+              );
 
-  const inicioHoy = new Date(
-    ahora.getFullYear(),
-    ahora.getMonth(),
-    ahora.getDate()
-  );
+              if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
-  // 🔎 Buscamos la visita más reciente de HOY para este comercio
-  const visitaHoy = (visitasMapa || []).find((visita) => {
-    if (String(visita.comercio_id) !== String(comercio.id)) {
-      return false;
-    }
+              const ahora = new Date();
+              const inicioHoy = new Date(
+                ahora.getFullYear(),
+                ahora.getMonth(),
+                ahora.getDate()
+              );
 
-    const fechaVisita = new Date(visita.fecha);
+              const visitaHoy = (visitasMapa || []).find((visita) => {
+                if (String(visita.comercio_id) !== String(comercio.id)) return false;
+                return new Date(visita.fecha) >= inicioHoy;
+              });
 
-    return fechaVisita >= inicioHoy;
-  });
+              let iconoComercio = iconoAzul;
 
-  // 🔵 Por defecto: todavía no visitado
-  let iconoComercio = iconoAzul;
+              if (comercio.no_visitar === true) {
+                iconoComercio = iconoNegro;
+              } else if (visitaHoy) {
+                const resultado = (visitaHoy.resultado || "").toLowerCase();
+                if (resultado.includes("no interesado")) {
+                  iconoComercio = iconoRojo;
+                } else if (
+                  resultado.includes("venta") ||
+                  resultado.includes("pedido")
+                ) {
+                  iconoComercio = iconoVerde;
+                } else {
+                  iconoComercio = iconoAmarillo;
+                }
+              }
 
-// ⚫ NO VISITAR MÁS tiene prioridad absoluta
-if (comercio.no_visitar === true) {
-  iconoComercio = iconoNegro;
+              return (
+                <Marker
+                  key={comercio.id}
+                  position={[lat, lng]}
+                  icon={iconoComercio}
+                >
+                  <Popup>
+                    <strong>{comercio.nombre || "Comercio"}</strong>
+                    <br />
+                    {comercio.direccion || "Sin dirección cargada"}
+                    <br />
+                    {visitaHoy ? `Hoy: ${visitaHoy.resultado}` : "Pendiente de visita"}
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MapContainer>
+        ) : (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#cbd5e1",
+              fontWeight: "700",
+            }}
+          >
+            📍 Buscando ubicación GPS...
+          </div>
+        )}
 
-} else if (visitaHoy) {
-  const resultado = (visitaHoy.resultado || "").toLowerCase();
-
-  // 🔴 No interesado
-  if (resultado.includes("no interesado")) {
-    iconoComercio = iconoRojo;
-
-  // 🟢 Hubo venta o tomó pedido
-  } else if (
-    resultado.includes("venta") ||
-    resultado.includes("pedido")
-  ) {
-    iconoComercio = iconoVerde;
-
-  // 🟡 Visitado pero sin venta
-  } else {
-    iconoComercio = iconoAmarillo;
-  }
-}
-
-  return (
-    <Marker
-      key={comercio.id}
-      position={[lat, lng]}
-      icon={iconoComercio}
-    >
-      <Popup>
-        <strong>{comercio.nombre || "Comercio"}</strong>
-        <br />
-        {comercio.direccion || "Sin dirección cargada"}
-        <br />
-        {visitaHoy
-          ? `Hoy: ${visitaHoy.resultado}`
-          : "Pendiente de visita"}
-      </Popup>
-    </Marker>
-  );
-})}
-    </MapContainer>
-  </div>
-)}
-      <button
-        type="button"
-        onClick={agregarComercioInmediato}
-        style={{
-          width: "100%",
-          minHeight: "230px",
-          backgroundColor: "#16a34a",
-          color: "#fff",
-          border: "none",
-          borderRadius: "18px",
-          fontSize: "28px",
-          fontWeight: "900",
-          cursor: "pointer",
-        }}
-      >
-        {textoBotonAgregar}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setModoManejo(false)}
-        style={{
-          width: "100%",
-          minHeight: "65px",
-          backgroundColor: "#334155",
-          color: "#fff",
-          border: "2px solid #fff",
-          borderRadius: "12px",
-          fontSize: "16px",
-          fontWeight: "800",
-          cursor: "pointer",
-        }}
-      >
-        📋 VOLVER AL MODO NORMAL
-      </button>
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            iniciarArrastreBoton(e.clientX, e.clientY);
+          }}
+          onPointerMove={(e) => {
+            if (!arrastrandoBoton) return;
+            moverBotonFlotante(e.clientX, e.clientY);
+          }}
+          onPointerUp={(e) => {
+            if (!arrastrandoBoton) return;
+            const fueArrastre = dragRef.current.moved;
+            terminarArrastreBoton();
+            if (!fueArrastre) agregarComercioInmediato();
+          }}
+          onPointerCancel={() => {
+            if (arrastrandoBoton) terminarArrastreBoton();
+          }}
+          style={{
+            position: "fixed",
+            left: `${posicionBotonManejo.x}px`,
+            top: `${posicionBotonManejo.y}px`,
+            width: "220px",
+            minHeight: "92px",
+            zIndex: 1000,
+            backgroundColor: "#16a34a",
+            color: "#fff",
+            border: "3px solid rgba(255,255,255,0.9)",
+            borderRadius: "18px",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+            fontSize: "19px",
+            fontWeight: "900",
+            lineHeight: 1.15,
+            cursor: arrastrandoBoton ? "grabbing" : "grab",
+            touchAction: "none",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            padding: "12px",
+          }}
+        >
+          {textoBotonAgregar === "➕ AGREGAR COMERCIO"
+            ? "📍 GUARDAR UBICACIÓN"
+            : textoBotonAgregar}
+          <div
+            style={{
+              marginTop: "5px",
+              fontSize: "10px",
+              fontWeight: "700",
+              opacity: 0.85,
+            }}
+          >
+            Tocá para guardar · arrastrá para mover
+          </div>
+        </button>
+      </div>
     </div>
   );
 }
-  //  const latInicial = Number(comercioSeleccionado.ubicacion_exacta_latitud || comercioSeleccionado.latitud || -34.719);
-  //  const lngInicial = Number(comercioSeleccionado.ubicacion_exacta_longitud || comercioSeleccionado.longitud || -58.264);
+
 if (comercioSeleccionado) {
   return (
     <div
@@ -1415,6 +1751,34 @@ if (comercioSeleccionado) {
               boxSizing: "border-box",
             }}
           />
+
+          <label>Día de visita</label>
+
+          <select
+            value={comercioSeleccionado.dia_visita || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                dia_visita: e.target.value,
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              marginTop: "6px",
+              marginBottom: "20px",
+              boxSizing: "border-box",
+            }}
+          >
+            <option value="">Sin día asignado</option>
+            <option value="Lunes">Lunes</option>
+            <option value="Martes">Martes</option>
+            <option value="Miércoles">Miércoles</option>
+            <option value="Jueves">Jueves</option>
+            <option value="Viernes">Viernes</option>
+            <option value="Sábado">Sábado</option>
+            <option value="Domingo">Domingo</option>
+          </select>
           <div style={{ marginBottom: "20px" }}>
             <label
               style={{
@@ -1472,6 +1836,146 @@ onChange={(e) =>
               />
             </div>
           </div>
+          <div style={{ marginBottom: "16px" }}>
+            {!editandoUbicacion ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const lat = Number(
+                    comercioSeleccionado.ubicacion_exacta_latitud ||
+                    comercioSeleccionado.latitud
+                  );
+                  const lng = Number(
+                    comercioSeleccionado.ubicacion_exacta_longitud ||
+                    comercioSeleccionado.longitud
+                  );
+
+                  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                    alert("Este comercio no tiene una ubicación válida para corregir.");
+                    return;
+                  }
+
+                  setPosicionEdicionUbicacion([lat, lng]);
+                  setEditandoUbicacion(true);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "13px",
+                  backgroundColor: "#0ea5e9",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontSize: "15px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                }}
+              >
+                📍 CORREGIR UBICACIÓN EXACTA
+              </button>
+            ) : (
+              <div
+                style={{
+                  backgroundColor: "#111827",
+                  border: "1px solid #334155",
+                  borderRadius: "10px",
+                  padding: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: "700",
+                    marginBottom: "8px",
+                    color: "#e2e8f0",
+                  }}
+                >
+                  Arrastrá el marcador hasta la ubicación exacta o tocá el mapa.
+                </div>
+
+                <div
+                  style={{
+                    width: "100%",
+                    height: "320px",
+                    borderRadius: "10px",
+                    overflow: "hidden",
+                    marginBottom: "10px",
+                  }}
+                >
+                  <MapContainer
+                    center={posicionEdicionUbicacion}
+                    zoom={18}
+                    style={{ width: "100%", height: "100%" }}
+                  >
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <MarcadorArrastrable
+                      posicion={posicionEdicionUbicacion}
+                      setPosicion={setPosicionEdicionUbicacion}
+                    />
+                  </MapContainer>
+                </div>
+
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditandoUbicacion(false);
+                      setPosicionEdicionUbicacion(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "11px",
+                      backgroundColor: "#475569",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    CANCELAR
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!posicionEdicionUbicacion) return;
+
+                      setComercioSeleccionado({
+                        ...comercioSeleccionado,
+                        ubicacion_exacta_latitud: posicionEdicionUbicacion[0],
+                        ubicacion_exacta_longitud: posicionEdicionUbicacion[1],
+                      });
+                      setEditandoUbicacion(false);
+                      setPosicionEdicionUbicacion(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "11px",
+                      backgroundColor: "#16a34a",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ✓ USAR ESTA UBICACIÓN
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: "8px",
+                    fontSize: "11px",
+                    color: "#94a3b8",
+                  }}
+                >
+                  Después tocá “💾 Guardar Cambios” para dejarla guardada en Supabase.
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
   type="button"
   onClick={() => {
@@ -1572,9 +2076,9 @@ onChange={(e) =>
           <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "10px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Visitas</div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: "#38bdf8", marginTop: "2px" }}>
-              {jornadaActiva ? "3 / 18" : "0 / 18"}
+              {`${visitasRealizadasHoy} / ${visitasProgramadasHoy}`}
             </div>
-            <div style={{ fontSize: "9px", color: "#64748b" }}>{jornadaActiva ? "En curso" : "Meta del día"}</div>
+            <div style={{ fontSize: "9px", color: "#64748b" }}>{"Realizadas / programadas"}</div>
           </div>
 
           <div style={{ backgroundColor: "#1e293b", padding: "8px 6px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
@@ -1647,6 +2151,132 @@ onChange={(e) =>
     TODOS
   </button>
 </div>
+      {/* PRÓXIMO DESTINO SEGÚN RUTA SUGERIDA */}
+      {vistaComercios === "HOY" && (
+        <div style={{ padding: "12px 16px 0" }}>
+          <div
+            onClick={() => {
+              if (!proximoDestino) return;
+              setComercioSeleccionado(proximoDestino);
+            }}
+            title={proximoDestino ? "Tocá para abrir la ficha del próximo destino" : ""}
+            style={{
+              background: proximoDestino ? "#172554" : "#14532d",
+              border: proximoDestino ? "1px solid #2563eb" : "1px solid #22c55e",
+              borderRadius: "12px",
+              padding: "13px 14px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+              cursor: proximoDestino ? "pointer" : "default",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "11px",
+                fontWeight: "900",
+                color: proximoDestino ? "#93c5fd" : "#bbf7d0",
+                letterSpacing: "0.7px",
+                marginBottom: "5px",
+              }}
+            >
+              🧭 PRÓXIMO DESTINO
+            </div>
+
+            {proximoDestino ? (
+              <>
+                <div style={{ fontSize: "17px", fontWeight: "900", color: "#fff" }}>
+                  {proximoDestino.nombre || `Comercio #${proximoDestino.id}`}
+                </div>
+
+                <div style={{ fontSize: "12px", color: "#cbd5e1", marginTop: "4px" }}>
+                  📍 {proximoDestino.direccion || "Sin dirección cargada"}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: "10px",
+                    flexWrap: "wrap",
+                    marginTop: "8px",
+                    fontSize: "12px",
+                    fontWeight: "800",
+                  }}
+                >
+                  <span style={{ color: "#f8fafc" }}>
+                    {distanciaProximoDestino === null
+                      ? "Distancia no disponible"
+                      : distanciaProximoDestino < 1000
+                        ? `🚗 ${distanciaProximoDestino} m`
+                        : `🚗 ${(distanciaProximoDestino / 1000).toFixed(1)} km`}
+                  </span>
+
+                  <span style={{ color: "#bfdbfe" }}>
+                    Parada {indiceProximoDestino + 1} de {rutaSugeridaHoy.length}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                    alignItems: "center",
+                    marginTop: "7px",
+                    fontSize: "10px",
+                    color: "#94a3b8",
+                  }}
+                >
+                  <span>Según ruta sugerida</span>
+                  <span style={{ color: "#bfdbfe", fontWeight: "800" }}>
+                    TOCAR PARA ABRIR →
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDestinoMapa(proximoDestino);
+                  }}
+                  style={{
+                    width: "100%",
+                    marginTop: "10px",
+                    padding: "10px 12px",
+                    backgroundColor: "#2563eb",
+                    color: "#fff",
+                    border: "1px solid #60a5fa",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: "900",
+                    cursor: "pointer",
+                  }}
+                >
+                  🗺️ VER EN MAPA
+                </button>
+              </>
+            ) : rutaSugeridaHoy.length > 0 ? (
+              <>
+                <div style={{ fontSize: "16px", fontWeight: "900", color: "#fff" }}>
+                  ✓ Ruta del día completada
+                </div>
+                <div style={{ fontSize: "11px", color: "#bbf7d0", marginTop: "4px" }}>
+                  No quedan paradas pendientes en la ruta sugerida.
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#fff" }}>
+                  Sin ruta sugerida para hoy
+                </div>
+                <div style={{ fontSize: "11px", color: "#bbf7d0", marginTop: "4px" }}>
+                  El listado de comercios sigue disponible por cercanía.
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* LISTADO DE COMERCIOS */}
       <main style={{ flex: 1, overflowY: "auto", padding: "12px 16px 80px" }}>
         
