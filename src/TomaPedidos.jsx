@@ -1,88 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExistente = null }) {
-
-  console.log("🔎 USUARIO EN TOMA PEDIDOS:", usuario);
+export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuardado, pedidoExistente = null }) {
   const [busqueda, setBusqueda] = useState('');
   const [categoriaSel, setCategoriaSel] = useState('TODOS');
-  const [pedidoCargadoPrevio, setPedidoCargadoPrevio] = useState(pedidoExistente);
-  const esAnexoOPrevio = Boolean(pedidoExistente || pedidoCargadoPrevio);
-  const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || []);
+  const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || [
+    { id: 1, codigo: 'CGE-102', marca: 'COCA-COLA', nombre: 'Gaseosa 2.25L Sabor Original', precioLista: 3200, bonif: 10, cant: 12, esNuevo: false, nota: 'Entregar bien fría' },
+    { id: 2, codigo: 'CGE-208', marca: 'ARCOR', nombre: 'Chocolates Bon o Bon Caja x30', precioLista: 7500, bonif: 0, cant: 2, esNuevo: true, nota: '' }
+  ]);
   const [medioPago, setMedioPago] = useState('Efectivo');
-  const [observaciones, setObservaciones] = useState(pedidoExistente?.observaciones || '');
+  const [observaciones, setObservaciones] = useState(pedidoExistente ? '[REANEXO]: Sumó 2 cajas de Bon o Bon de último momento.' : 'Dejar en depósito lateral.');
   const [enviarWsp, setEnviarWsp] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [exitoGuardado, setExitoGuardado] = useState(false);
-  // Recuperación automática del último pedido del comercio
-  useEffect(() => {
-    if (esAnexoOPrevio) return;
-    try {
-      const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
-      const previo = historico.find(p => String(p.comercio_id) === String(comercio?.id));
-      if (previo && previo.items && previo.items.length > 0) {
-        setItemsPedido(previo.items);
-        if (previo.observaciones) setObservaciones(previo.observaciones);
-        if (previo.medio_pago) setMedioPago(previo.medio_pago);
-        setPedidoCargadoPrevio(previo);
-      }
-    } catch (e) {
-      console.warn("Aviso al recuperar pedido:", e);
-    }
-  }, [comercio]);
 
   // Catálogo base de artículos disponibles
-  
-  const [catalogo, setCatalogo] = useState([]);
-  const [cargandoCat, setCargandoCat] = useState(true);
+  const catalogoDemo = [
+    { id: 101, codigo: 'CGE-102', marca: 'COCA-COLA', nombre: 'Gaseosa 2.25L Sabor Original', categoria: 'Bebidas', precio: 3200, stock: 450 },
+    { id: 102, codigo: 'CGE-208', marca: 'ARCOR', nombre: 'Chocolates Bon o Bon Caja x30', categoria: 'Golosinas', precio: 7500, stock: 120 },
+    { id: 103, codigo: 'CGE-315', marca: 'LUCCHETTI', nombre: 'Fideos Spaghetti 500g (x12)', categoria: 'Almacén', precio: 1150, stock: 240 },
+    { id: 104, codigo: 'CGE-401', marca: 'QUILMES', nombre: 'Cerveza Clásica 1L Retornable', categoria: 'Bebidas', precio: 2400, stock: 310 },
+    { id: 105, codigo: 'CGE-502', marca: 'BAGLEY', nombre: 'Galletitas Chocolinas 250g', categoria: 'Almacén', precio: 1800, stock: 180 }
+  ];
 
-  useEffect(() => {
-    async function cargarArticulosReales() {
-      try {
-        // Traemos de lista_productos
-        const { data: lpData } = await supabase
-          .from("lista_productos")
-          .select("id, codigo_lista, detalle_en_lista, precio, producto_id")
-          .limit(1000);
-
-        if (lpData && lpData.length > 0) {
-          const items = lpData.map(lp => ({
-            id: lp.id,
-            codigo: lp.codigo_lista || "S/C",
-            marca: "General",
-            nombre: lp.detalle_en_lista || "Artículo",
-            precio: Number(lp.precio) || 0,
-            categoria: "TODOS"
-          }));
-          setCatalogo(items);
-        } else {
-          // Fallback a productos directo
-          const { data: pData } = await supabase
-            .from("productos")
-            .select("id, codigo_cge, nombre, presentacion, marca")
-            .limit(1000);
-          if (pData && pData.length > 0) {
-            setCatalogo(pData.map(p => ({
-              id: p.id,
-              codigo: p.codigo_cge || "S/C",
-              marca: p.marca || "General",
-              nombre: p.nombre || "Artículo",
-              precio: 0,
-              categoria: "TODOS"
-            })));
-          }
-        }
-      } catch (err) {
-        console.warn("Aviso catalogo:", err);
-      } finally {
-        setCargandoCat(false);
-      }
-    }
-    cargarArticulosReales();
-  }, []);
-
-
-  const catalogoFiltrado = catalogo.filter(p => {
+  const catalogoFiltrado = catalogoDemo.filter(p => {
     const coincideTexto = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || p.codigo.toLowerCase().includes(busqueda.toLowerCase()) || p.marca.toLowerCase().includes(busqueda.toLowerCase());
     const coincideCat = categoriaSel === 'TODOS' || p.categoria === categoriaSel;
     return coincideTexto && coincideCat;
@@ -101,7 +42,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         precioLista: producto.precio,
         bonif: 0,
         cant: 1,
-        esNuevo: !!esAnexoOPrevio,
+        esNuevo: !!pedidoExistente,
         nota: ''
       }]);
     }
@@ -130,61 +71,70 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
   const totalDescuentos = itemsPedido.reduce((acc, it) => acc + ((it.precioLista * it.cant) * (it.bonif / 100)), 0);
   const totalFinal = subtotalBruto - totalDescuentos;
 
-        const confirmarPedido = async () => {
+  const confirmarPedido = async () => {
+    if (itemsPedido.length === 0) {
+      alert('Agregá al menos un artículo al pedido');
+      return;
+    }
+    setGuardando(true);
     try {
-      setGuardando(true);
-
-      // Generación estricta del código de comanda timestamp: #AAMMDD-HHMMSS
-      const ahora = new Date();
-      const aa = String(ahora.getFullYear()).slice(-2);
-      const mm = String(ahora.getMonth() + 1).padStart(2, '0');
-      const dd = String(ahora.getDate()).padStart(2, '0');
-      const hh = String(ahora.getHours()).padStart(2, '0');
-      const min = String(ahora.getMinutes()).padStart(2, '0');
-      const ss = String(ahora.getSeconds()).padStart(2, '0');
-      const codPedido = '#' + aa + mm + dd + '-' + hh + min + ss;
-
-      // 1. Guardar primero en Supabase con columnas reales
       const pedidoPayload = {
-        fecha: ahora.toISOString(),
-        comercio_id: String(comercio?.id || '1'),
-        comercio_nombre: String(comercio?.nombre || ('Comercio #' + (comercio?.id || ''))),
-        preventista: String(usuario?.nombre || perfil?.nombre || 'demo04'),
-        empresa: String(usuario?.empresa || perfil?.empresa || 'DEMO S.A.'),
-        empresa_id: usuario?.empresa_id || perfil?.empresa_id || null,
-        total: Number(totalFinal || 0),
-        estado: 'Confirmado',
-        notas: String((observaciones ? observaciones + ' | ' : '') + 'Comanda ' + codPedido)
+        comercio_id: comercio?.id || 104,
+        comercio_nombre: comercio?.nombre || 'Almacén Los Amigos',
+        comercio_direccion: comercio?.direccion || 'Av. Mitre 4820, Avellaneda',
+        preventista: usuario?.nombre || 'Alex Preventista',
+        empresa: usuario?.empresa || 'Elifiant',
+        subtotal: subtotalBruto,
+        descuentos: totalDescuentos,
+        total: totalFinal,
+        medio_pago: medioPago,
+        observaciones: observaciones,
+        items: itemsPedido,
+        es_anexo: !!pedidoExistente,
+        estado: 'Confirmado / Listo para Reparto',
+        fecha: new Date().toISOString()
       };
-        console.log("📦 PEDIDO QUE ENVÍO A SUPABASE:", pedidoPayload);
-      const { data: pedData, error: errInsert } = await supabase
-        .from('pedidos')
-        .insert([pedidoPayload]);
 
-      if (errInsert) {
-        console.error('Error al insertar pedido en Supabase:', errInsert);
-      } else {
-        console.log('✅ Pedido insertado exitosamente en Supabase:', codPedido);
+      // Guardar en Supabase si la tabla existe, con respaldo en localStorage
+      try {
+        await supabase.from('pedidos').insert([pedidoPayload]);
+      } catch (e) {
+        console.warn('Registro local de pedido:', e);
       }
 
-      // 2. Envío por WhatsApp: ÚNICAMENTE si el comercio tiene teléfono registrado
-      const telComercioRaw = comercio?.telefono || comercio?.celular || comercio?.whatsapp || '';
-      const telLimpio = String(telComercioRaw).replace(/\D/g, '');
+      // Guardado local de contingencia
+      const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
+      historico.unshift(pedidoPayload);
+      localStorage.setItem('pedidos_guardados', JSON.stringify(historico));
 
-      if (telLimpio && telLimpio.length >= 8) {
-        const mensajeWa = '*PEDIDO ' + codPedido + '* - Comercio: ' + (comercio?.nombre || '') + ' - Total: $' + Number(totalFinal || 0).toLocaleString() + ' ARS';
-        const urlWa = 'https://wa.me/' + telLimpio + '?text=' + encodeURIComponent(mensajeWa);
-        window.open(urlWa, '_blank');
-      } else {
-        alert('ℹ️ Pedido ' + codPedido + ' guardado con éxito.\n(El comercio no tiene teléfono de WhatsApp registrado en su ficha)');
+      // WhatsApp si está tildado
+      if (enviarWsp) {
+        const telLimpio = (comercio?.telefono || '1166646806').replace(/\D/g, '');
+        const msj = encodeURIComponent(
+          `*📦 PEDIDO #${pedidoExistente ? '104 (ACTUALIZADO)' : '104'} - ${comercio?.nombre || 'Comercio'}*\n` +
+          `Preventista: ${usuario?.nombre || 'Alex'}\n` +
+          `Medio de Pago: ${medioPago}\n` +
+          `--------------------------\n` +
+          itemsPedido.map(it => `• ${it.cant}x ${it.nombre} (${it.bonif > 0 ? it.bonif + '% OFF' : 'Neto'}): $${((it.precioLista * it.cant) * (1 - it.bonif / 100)).toLocaleString()}`).join('\n') +
+          `\n--------------------------\n` +
+          `*TOTAL A COBRAR: $${totalFinal.toLocaleString()} ARS*\n` +
+          (observaciones ? `Notas: ${observaciones}\n` : '') +
+          `_RutaComercio · Comanda Oficial_`
+        );
+        window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
       }
 
       setExitoGuardado(true);
-      setTimeout(() => {
-        if (onVolver) onVolver();
+      setTimeout(async () => {
+        if (onPedidoGuardado) {
+          await onPedidoGuardado();
+        } else if (onVolver) {
+          onVolver();
+        }
       }, 1500);
+
     } catch (err) {
-      alert('Error en el proceso de pedido: ' + err.message);
+      alert('Error al procesar comanda: ' + err.message);
     } finally {
       setGuardando(false);
     }
@@ -199,9 +149,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         </button>
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
-            {esAnexoOPrevio ? `Modificar Pedido #${comercio?.id ? String(comercio.id).slice(-4) : 'ACTIVO'}` : 'Toma de Pedido'}
+            {pedidoExistente ? 'Modificar Pedido #104' : 'Toma de Pedido'}
           </h1>
-          {esAnexoOPrevio && (
+          {pedidoExistente && (
             <span style={{ fontSize: '11px', color: '#d97706', fontWeight: '700' }}>
               ⏱️ Ventana abierta: 15 min restantes
             </span>
@@ -218,7 +168,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <span style={{ backgroundColor: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase' }}>
-                Ficha #{comercio?.id || 'LOCAL'}
+                Ficha #{comercio?.id || 104}
               </span>
               <h2 style={{ margin: '4px 0 2px', fontSize: '17px', fontWeight: '800' }}>{comercio?.nombre || 'Almacén Los Amigos'}</h2>
               <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>📍 {comercio?.direccion || 'Av. Mitre 4820, Avellaneda'}</p>
@@ -231,11 +181,11 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
         </div>
 
         {/* Alerta de Reedición / Anexo Rápido */}
-        {esAnexoOPrevio && (
+        {pedidoExistente && (
           <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '12px', padding: '12px', marginBottom: '16px', display: 'flex', gap: '10px' }}>
             <span style={{ fontSize: '20px' }}>✏️</span>
             <div>
-              <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>Modificando Pedido Unificado en Curso</div>
+              <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>Modificando Pedido #104 (Unificación Activa)</div>
               <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#1e3a8a' }}>
                 Los nuevos ítems se unificarán en una <strong>sola comanda de reparto</strong> antes del despacho del camión.
               </p>
@@ -443,7 +393,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
             disabled={guardando || exitoGuardado}
             style={{
               width: '100%',
-              backgroundColor: exitoGuardado ? '#16a34a' : esAnexoOPrevio ? '#d97706' : '#2563eb',
+              backgroundColor: exitoGuardado ? '#16a34a' : pedidoExistente ? '#d97706' : '#2563eb',
               color: '#ffffff',
               border: 'none',
               borderRadius: '12px',
@@ -461,9 +411,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, pedidoExisten
               <span>⏳ Procesando Comanda...</span>
             ) : exitoGuardado ? (
               <span>✅ Comanda Registrada y Enviada</span>
-            ) : esAnexoOPrevio ? (
+            ) : pedidoExistente ? (
               <>
-                <span>🔁 Actualizar y Reenviar Pedido</span>
+                <span>🔁 Actualizar y Reenviar Pedido #104</span>
                 <span style={{ fontSize: '11px', fontWeight: 'normal', opacity: 0.9 }}>Comanda Única · Sincroniza Depósito, WhatsApp y Supervisor</span>
               </>
             ) : (

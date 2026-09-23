@@ -668,7 +668,7 @@ useEffect(() => {
   const [guardandoVisita, setGuardandoVisita] = useState(false);
   const [visitaRegistradaHoy, setVisitaRegistradaHoy] = useState(false);
 
-  const registrarVisitaCheckIn = async (comercio) => {
+  const registrarVisitaCheckIn = async (comercio, resultadoDirecto = null) => {
     if (!comercio) return;
     setGuardandoVisita(true);
     try {
@@ -689,7 +689,7 @@ useEffect(() => {
         preventista: prevNombre,
         empresa: empNombre,
         empresa_id: perfil?.empresa_id || null,
-        resultado: resultadoVisita,
+        resultado: resultadoDirecto || resultadoVisita,
         observacion: observacionVisita || 'Visita registrada en campo',
         latitud: posicionActual ? posicionActual[0] : (comercio.latitud || null),
         longitud: posicionActual ? posicionActual[1] : (comercio.longitud || null),
@@ -702,7 +702,7 @@ useEffect(() => {
 
       setVisitasMapa((prev) => [nuevaVisita, ...(prev || [])]);
       setVisitaRegistradaHoy(true);
-      alert('✅ ¡Visita registrada con éxito! (' + resultadoVisita + ')');
+      alert('✅ ¡Visita registrada con éxito! (' + (resultadoDirecto || resultadoVisita) + ')');
 
       // 🧭 Al terminar la visita volvemos a HOY.
       // Como visitasMapa ya se actualizó, PRÓXIMO DESTINO salta solo
@@ -799,6 +799,8 @@ const solicitarNoVisitar = async (comercio) => {
   const [busqueda, setBusqueda] = useState("");
   const [vistaComercios, setVistaComercios] = useState("HOY");
   const [destinoMapa, setDestinoMapa] = useState(null);
+  const [llegueDestino, setLlegueDestino] = useState(null);
+  const [tieneStockDestino, setTieneStockDestino] = useState(null);
 
   // Lista filtrada de comercios por búsqueda y orden
   
@@ -914,9 +916,19 @@ if (navigator.geolocation) {
 
   const diaActualNormalizado = normalizarDia(obtenerDiaActual());
 
+  const fechaLocalISO = (fecha = new Date()) => {
+    const y = fecha.getFullYear();
+    const m = String(fecha.getMonth() + 1).padStart(2, "0");
+    const d = String(fecha.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const fechaHoyLocal = fechaLocalISO();
+
   const comerciosProgramadosHoy = (comercios || []).filter((c) =>
     normalizarDia(c.dia_visita) === diaActualNormalizado &&
-    c.no_visitar !== true
+    c.no_visitar !== true &&
+    c.omitir_visita_fecha !== fechaHoyLocal
   );
 
   const inicioHoyMetricas = new Date();
@@ -1150,6 +1162,208 @@ useEffect(() => {
 
 
 
+  if (tieneStockDestino) {
+    const proximaFecha = new Date();
+    proximaFecha.setDate(proximaFecha.getDate() + 7);
+    const proximaFechaISO = fechaLocalISO(proximaFecha);
+    const proximaFechaTexto = new Intl.DateTimeFormat("es-AR", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    }).format(proximaFecha);
+
+    const finalizarTieneStock = async (saltarProxima) => {
+      const comercio = tieneStockDestino;
+
+      if (saltarProxima) {
+        const { error } = await supabase
+          .from("comercios")
+          .update({ omitir_visita_fecha: proximaFechaISO })
+          .eq("id", comercio.id)
+          .eq("empresa_id", perfil?.empresa_id || comercio.empresa_id);
+
+        if (error) {
+          console.error("Error guardando omisión de próxima visita:", error);
+          alert("No pude guardar la omisión de la próxima visita.");
+          return;
+        }
+
+        setComercios((prev) =>
+          (prev || []).map((c) =>
+            String(c.id) === String(comercio.id)
+              ? { ...c, omitir_visita_fecha: proximaFechaISO }
+              : c
+          )
+        );
+      }
+
+      setTieneStockDestino(null);
+      setResultadoVisita("Tiene stock");
+      setObservacionVisita("");
+      await registrarVisitaCheckIn(comercio, "Tiene stock");
+    };
+
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", padding: "18px", boxSizing: "border-box" }}>
+        <div style={{ maxWidth: "520px", margin: "0 auto", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "14px", padding: "18px" }}>
+          <div style={{ fontSize: "13px", color: "#facc15", fontWeight: "900" }}>
+            📦 TIENE STOCK
+          </div>
+
+          <div style={{ fontSize: "21px", fontWeight: "900", marginTop: "5px" }}>
+            {tieneStockDestino.nombre || "Comercio"}
+          </div>
+
+          <div style={{ color: "#cbd5e1", fontSize: "14px", margin: "12px 0 18px" }}>
+            ¿La próxima visita se hace normalmente o este cliente pidió que no vayas?
+          </div>
+
+          <button
+            type="button"
+            onClick={() => finalizarTieneStock(false)}
+            style={{
+              width: "100%", minHeight: "50px", marginBottom: "10px",
+              border: "1px solid #4ade80", borderRadius: "10px",
+              backgroundColor: "#166534", color: "#fff",
+              fontSize: "14px", fontWeight: "900", cursor: "pointer",
+            }}
+          >
+            ✓ FINALIZAR VISITA
+          </button>
+
+          <button
+            type="button"
+            onClick={() => finalizarTieneStock(true)}
+            style={{
+              width: "100%", minHeight: "58px", marginBottom: "10px",
+              border: "1px solid #facc15", borderRadius: "10px",
+              backgroundColor: "#713f12", color: "#fff",
+              fontSize: "14px", fontWeight: "900", cursor: "pointer",
+            }}
+          >
+            ⏭️ SALTAR PRÓXIMA VISITA
+            <div style={{ fontSize: "11px", fontWeight: "700", marginTop: "3px", color: "#fde68a" }}>
+              No aparecerá el {proximaFechaTexto}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTieneStockDestino(null);
+              setLlegueDestino(tieneStockDestino);
+            }}
+            style={{
+              width: "100%", minHeight: "44px",
+              border: "1px solid #64748b", borderRadius: "10px",
+              backgroundColor: "#0f172a", color: "#cbd5e1",
+              fontWeight: "800", cursor: "pointer",
+            }}
+          >
+            ← VOLVER
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (llegueDestino) {
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", padding: "18px", boxSizing: "border-box" }}>
+        <div style={{ maxWidth: "520px", margin: "0 auto", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "14px", padding: "18px" }}>
+          <div style={{ fontSize: "13px", color: "#86efac", fontWeight: "900" }}>
+            ✓ RESULTADO DE LA VISITA
+          </div>
+
+          <div style={{ fontSize: "21px", fontWeight: "900", marginTop: "5px", marginBottom: "18px" }}>
+            {llegueDestino.nombre || "Comercio"}
+          </div>
+
+          <div style={{ fontSize: "14px", color: "#cbd5e1", marginBottom: "10px" }}>
+            ¿Qué pasó?
+          </div>
+
+          {[
+            ["💰 VENTA / CARGAR PEDIDO", "#2563eb"],
+            ["📦 TIENE STOCK", "#334155"],
+            ["🚪 NO ESTABA", "#334155"],
+            ["🔒 CERRADO", "#334155"],
+            ["❌ NO INTERESADO", "#334155"],
+          ].map(([texto, fondo]) => (
+            <button
+              key={texto}
+              type="button"
+              onClick={async () => {
+                if (texto.startsWith("💰")) {
+                  setComercioSeleccionado(llegueDestino);
+                  setLlegueDestino(null);
+                  setTomandoPedido(true);
+                  return;
+                }
+
+                if (texto.startsWith("❌")) {
+                  alert("NO INTERESADO lo conectaremos aparte para respetar su circuito especial.");
+                  return;
+                }
+
+                if (texto.startsWith("📦")) {
+                  setTieneStockDestino(llegueDestino);
+                  setLlegueDestino(null);
+                  return;
+                }
+
+                const resultado =
+                  texto.startsWith("🚪") ? "No estaba" :
+                  texto.startsWith("🔒") ? "Cerrado" :
+                  "Visitado";
+
+                setResultadoVisita(resultado);
+                setObservacionVisita("");
+                setLlegueDestino(null);
+
+                await registrarVisitaCheckIn(llegueDestino, resultado);
+              }}
+              style={{
+                width: "100%",
+                minHeight: "50px",
+                marginBottom: "9px",
+                padding: "10px 12px",
+                border: texto.startsWith("💰") ? "1px solid #60a5fa" : "1px solid #475569",
+                borderRadius: "10px",
+                backgroundColor: fondo,
+                color: "#fff",
+                fontSize: "14px",
+                fontWeight: "900",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              {texto}
+            </button>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => setLlegueDestino(null)}
+            style={{
+              width: "100%",
+              minHeight: "46px",
+              marginTop: "5px",
+              border: "1px solid #64748b",
+              borderRadius: "10px",
+              backgroundColor: "#0f172a",
+              color: "#cbd5e1",
+              fontWeight: "800",
+              cursor: "pointer",
+            }}
+          >
+            ← CANCELAR
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (destinoMapa) {
     const latDestino = Number(destinoMapa.ubicacion_exacta_latitud || destinoMapa.latitud);
     const lngDestino = Number(destinoMapa.ubicacion_exacta_longitud || destinoMapa.longitud);
@@ -1292,6 +1506,12 @@ useEffect(() => {
       comercio={comercioSeleccionado}
       usuario={perfil || perfilProp}
       onVolver={() => setTomandoPedido(false)}
+      onPedidoGuardado={async () => {
+        setTomandoPedido(false);
+        setResultadoVisita("Venta");
+        setObservacionVisita("");
+        await registrarVisitaCheckIn(comercioSeleccionado, "Venta");
+      }}
     />
   );
 }
@@ -2288,6 +2508,23 @@ onChange={(e) =>
                       }}
                     >
                       🗺️ MAPA
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setLlegueDestino(proximoDestino)}
+                      style={{
+                        padding: "7px 9px",
+                        backgroundColor: "#166534",
+                        color: "#fff",
+                        border: "1px solid #4ade80",
+                        borderRadius: "7px",
+                        fontSize: "10px",
+                        fontWeight: "900",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ✓ LLEGUÉ
                     </button>
                   </div>
                 </div>
