@@ -925,7 +925,9 @@ const solicitarNoVisitar = async (comercio) => {
             .replace(/^./, (letra) => letra.toUpperCase()),
           empresa: perfil?.empresa || "DEMO S.A.",
           empresa_id: perfil?.empresa_id || null,
-          preventista: perfil?.nombre || "demo02"
+          preventista: perfil?.nombre || "demo02",
+          estado_alta: "provisorio",
+          creado_por_preventista: true
         };
         
         setComercios(prev => [nuevo, ...prev]);
@@ -933,7 +935,47 @@ const solicitarNoVisitar = async (comercio) => {
         setRenovarWakeLock((n) => n + 1);
         try { if (typeof reproducirAlerta === "function") reproducirAlerta(); } catch(e){}
         
-        await supabase.from("comercios").insert([nuevo]);
+        const { data: comercioCreado, error: errorComercio } = await supabase
+          .from("comercios")
+          .insert([nuevo])
+          .select("*")
+          .single();
+
+        if (errorComercio) throw errorComercio;
+
+        // Reemplazamos la captura temporal por el comercio real de Supabase.
+        setComercios(prev => [
+          comercioCreado,
+          ...prev.filter(c => c !== nuevo)
+        ]);
+
+        // Buscar la lista activa predeterminada de la empresa y asignarla al nuevo comercio.
+        const { data: listaPredeterminada, error: errorLista } = await supabase
+          .from("listas_precios")
+          .select("id")
+          .ilike("empresa", String(nuevo.empresa || "").trim())
+          .eq("activo", true)
+          .eq("predeterminada", true)
+          .limit(1)
+          .maybeSingle();
+
+        if (errorLista) {
+          console.error("Error buscando lista predeterminada:", errorLista);
+        } else if (listaPredeterminada?.id) {
+          const { error: errorAsignacion } = await supabase
+            .from("comercios_listas")
+            .insert([{
+              comercio_id: comercioCreado.id,
+              lista_id: listaPredeterminada.id
+            }]);
+
+          if (errorAsignacion) {
+            console.error("Error asignando lista predeterminada:", errorAsignacion);
+          }
+        } else {
+          console.warn("La empresa no tiene una lista activa predeterminada:", nuevo.empresa);
+        }
+
         setTimeout(() => setTextoBotonAgregar("➕ AGREGAR COMERCIO"), 1800);
       } catch (err) {
         console.error("Error al registrar en Supabase:", err);
