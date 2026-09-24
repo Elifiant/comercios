@@ -16,7 +16,7 @@ L.Icon.Default.mergeOptions({
 const COLORES = ["#2563eb", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#06b6d4"];
 
 function iconoNumero(numero, estado) {
-  const bg = estado === "visitado" ? "#10b981" : estado === "activo" ? "#2563eb" : "#64748b";
+  const bg = estado === "no_visitar" ? "#111827" : estado === "visitado" ? "#10b981" : estado === "activo" ? "#2563eb" : "#64748b";
   return L.divIcon({
     className: "pin-parada",
     html: `<div style="background-color: ${bg}; color: #fff; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.35);">${numero}</div>`,
@@ -95,7 +95,7 @@ if (!solicitudActualizada) {
 
     // 3️⃣ Sacarla de pendientes en pantalla
     setSolicitudesNoVisitar((prev) =>
-      prev.filter((s) => s.id !== solicitud.id)
+      prev.map((s) => s.id === solicitud.id ? { ...s, estado: "aprobada" } : s)
     );
 
     // 4️⃣ Actualizar también el comercio en Supervisor
@@ -136,7 +136,7 @@ if (!solicitudActualizada) {
 }
 
     setSolicitudesNoVisitar((prev) =>
-      prev.filter((s) => s.id !== solicitud.id)
+      prev.map((s) => s.id === solicitud.id ? { ...s, estado: "rechazada" } : s)
     );
 
     alert("❌ Solicitud rechazada. El comercio continúa activo.");
@@ -293,7 +293,6 @@ useEffect(() => {
         .from("solicitudes_no_visitar")
         .select("id, created_at, comercio_id, comercio_nombre, preventista, empresa_id, motivo, estado")
         .eq("empresa_id", perfilSupervisor.empresa_id)
-        .eq("estado", "pendiente")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -787,6 +786,8 @@ useEffect(() => {
 
   const clientesConSaldo = (comercios || []).filter(c => Number(c.deuda || 0) > 0).length;
   const saldoTotalPendiente = (comercios || []).reduce((acc, c) => acc + Math.max(0, Number(c.deuda || 0)), 0);
+  const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
+  const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -897,6 +898,12 @@ useEffect(() => {
         >
           💳 Estado de Cuenta
         </button>
+        <button
+          onClick={() => setSeccionActiva("solicitudes")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "solicitudes" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "solicitudes" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          🚫 Solicitudes{solicitudesPendientes.length > 0 ? ` (${solicitudesPendientes.length})` : ""}
+        </button>
       </div>
 
       <main style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
@@ -956,6 +963,45 @@ useEffect(() => {
             perfilSupervisor={perfilSupervisor}
             perfiles={perfiles}
           />
+         ) : seccionActiva === "solicitudes" ? (
+          <div>
+            <div style={{ marginBottom: "16px" }}>
+              <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>🚫 Solicitudes de NO VISITAR MÁS</h2>
+              <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>El supervisor decide si un comercio deja de aparecer en futuras rutas.</p>
+            </div>
+
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px", marginBottom: "16px" }}>
+              <div style={{ fontSize: "14px", fontWeight: "900", color: "#9a3412", marginBottom: "10px" }}>⏳ Pendientes ({solicitudesPendientes.length})</div>
+              {solicitudesPendientes.length === 0 ? (
+                <div style={{ padding: "20px 8px", color: "#64748b", fontSize: "12px" }}>No hay solicitudes pendientes.</div>
+              ) : solicitudesPendientes.map((solicitud) => (
+                <div key={solicitud.id} style={{ border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: "9px", padding: "12px", marginTop: "8px" }}>
+                  <div style={{ fontWeight: "900", fontSize: "13px" }}>🏪 {solicitud.comercio_nombre}</div>
+                  <div style={{ fontSize: "12px", marginTop: "4px", color: "#475569" }}>👤 Preventista: <strong>{solicitud.preventista || "Sin informar"}</strong></div>
+                  <div style={{ fontSize: "12px", marginTop: "4px", color: "#475569" }}>💬 Motivo: <strong>{solicitud.motivo || "Sin motivo"}</strong></div>
+                  <div style={{ fontSize: "11px", marginTop: "4px", color: "#94a3b8" }}>{solicitud.created_at ? new Date(solicitud.created_at).toLocaleString("es-AR") : ""}</div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
+                    <button type="button" onClick={() => aprobarNoVisitar(solicitud)} style={{ padding: "7px 12px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>✅ APROBAR</button>
+                    <button type="button" onClick={() => rechazarNoVisitar(solicitud)} style={{ padding: "7px 12px", backgroundColor: "#dc2626", color: "#fff", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>❌ RECHAZAR</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px" }}>
+              <div style={{ fontSize: "14px", fontWeight: "900", color: "#334155", marginBottom: "10px" }}>📚 Historial ({solicitudesHistorial.length})</div>
+              {solicitudesHistorial.length === 0 ? (
+                <div style={{ padding: "20px 8px", color: "#64748b", fontSize: "12px" }}>Todavía no hay solicitudes resueltas.</div>
+              ) : solicitudesHistorial.map((solicitud) => (
+                <div key={solicitud.id} style={{ display: "grid", gridTemplateColumns: "minmax(180px,2fr) minmax(130px,1fr) minmax(180px,2fr) 110px", gap: "8px", alignItems: "center", padding: "9px 4px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
+                  <div><strong>{solicitud.comercio_nombre}</strong></div>
+                  <div style={{ color: "#475569" }}>{solicitud.preventista || "Sin informar"}</div>
+                  <div style={{ color: "#64748b" }}>{solicitud.motivo || "Sin motivo"}</div>
+                  <div style={{ fontWeight: "900", color: solicitud.estado === "aprobada" ? "#16a34a" : "#dc2626" }}>{solicitud.estado === "aprobada" ? "✅ APROBADA" : "❌ RECHAZADA"}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         ) : seccionActiva === "estadoCuenta" ? (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
@@ -1034,89 +1080,6 @@ useEffect(() => {
           </div>
         ) : (
           <>
-        {/* 🚫 SOLICITUDES DE NO VISITAR MÁS */}
-{solicitudesNoVisitar.length > 0 && (
-  <div
-    style={{
-      backgroundColor: "#fff7ed",
-      border: "1px solid #fdba74",
-      borderRadius: "10px",
-      padding: "14px 16px",
-      marginBottom: "16px",
-    }}
-  >
-    <div
-      style={{
-        fontSize: "14px",
-        fontWeight: "800",
-        color: "#9a3412",
-        marginBottom: "10px",
-      }}
-    >
-      🚫 Solicitudes pendientes de NO VISITAR MÁS ({solicitudesNoVisitar.length})
-    </div>
-
-    {solicitudesNoVisitar.map((solicitud) => (
-      <div
-        key={solicitud.id}
-        style={{
-          backgroundColor: "#ffffff",
-          border: "1px solid #fed7aa",
-          borderRadius: "8px",
-          padding: "10px 12px",
-          marginTop: "8px",
-        }}
-      >
-        <div style={{ fontWeight: "800", fontSize: "13px" }}>
-          🏪 {solicitud.comercio_nombre}
-        </div>
-
-        <div style={{ fontSize: "12px", marginTop: "4px", color: "#475569" }}>
-          👤 Preventista: <strong>{solicitud.preventista}</strong>
-        </div>
-        <button
-  type="button"
-  onClick={() => aprobarNoVisitar(solicitud)}
-  style={{
-    marginTop: "10px",
-    padding: "7px 12px",
-    backgroundColor: "#16a34a",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "6px",
-    fontSize: "12px",
-    fontWeight: "800",
-    cursor: "pointer",
-  }}
->
-  ✅ APROBAR
-</button>
-<button
-  type="button"
-  onClick={() => rechazarNoVisitar(solicitud)}
-  style={{
-    marginTop: "10px",
-    marginLeft: "8px",
-    padding: "7px 12px",
-    backgroundColor: "#dc2626",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "6px",
-    fontSize: "12px",
-    fontWeight: "800",
-    cursor: "pointer",
-  }}
->
-  ❌ RECHAZAR
-</button>
-
-        <div style={{ fontSize: "12px", marginTop: "4px", color: "#475569" }}>
-          💬 Motivo: <strong>{solicitud.motivo}</strong>
-        </div>
-      </div>
-    ))}
-  </div>
-)}
         {/* KPI CARDS */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", marginBottom: "16px" }}>
           <div style={{ backgroundColor: "#ffffff", padding: "12px 16px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
@@ -1361,7 +1324,13 @@ useEffect(() => {
                   const lat = c.ubicacion_exacta_latitud || c.latitud;
                   const lng = c.ubicacion_exacta_longitud || c.longitud;
                   if (!lat || !lng) return null;
-                  const estadoPin = i < rutaRecorrida.length ? "visitado" : i === rutaRecorrida.length ? "activo" : "pendiente";
+                  const estadoPin = c.no_visitar === true
+                    ? "no_visitar"
+                    : i < rutaRecorrida.length
+                      ? "visitado"
+                      : i === rutaRecorrida.length
+                        ? "activo"
+                        : "pendiente";
                   return (
                     <Marker key={c.id} position={[lat, lng]} icon={iconoNumero(i + 1, estadoPin)}>
                       <Popup>
