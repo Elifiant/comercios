@@ -1803,9 +1803,30 @@ if (comercioSeleccionado) {
           margin: "0 auto",
         }}
       >
-        <h2 style={{ marginTop: 0 }}>
+        <h2 style={{ marginTop: 0, marginBottom: "8px" }}>
           {comercioSeleccionado.nombre || "Comercio"}
         </h2>
+
+        <div
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            padding: "11px 12px",
+            marginBottom: "14px",
+            borderRadius: "9px",
+            backgroundColor: Number(comercioSeleccionado.deuda || 0) > 0 ? "#7f1d1d" : "#1e3a8a",
+            border: Number(comercioSeleccionado.deuda || 0) > 0 ? "1px solid #ef4444" : "1px solid #60a5fa",
+            color: "#fff",
+            fontSize: "14px",
+            fontWeight: "900",
+            textAlign: "center",
+          }}
+        >
+          {Number(comercioSeleccionado.deuda || 0) > 0
+            ? `🔴 CON DEUDA $${Number(comercioSeleccionado.deuda || 0).toLocaleString("es-AR")}`
+            : "🔵 SIN DEUDA"}
+        </div>
+
       <button
    type="button"
       onClick={() => setTomandoPedido(true)}
@@ -2491,6 +2512,28 @@ onChange={(e) =>
                       }}
                     >
                       ABRIR
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled
+                      title={Number(proximoDestino.deuda || 0) > 0 ? "Cliente con saldo pendiente" : "Cliente sin saldo pendiente"}
+                      style={{
+                        padding: "7px 9px",
+                        backgroundColor: Number(proximoDestino.deuda || 0) > 0 ? "#991b1b" : "#1d4ed8",
+                        color: "#fff",
+                        border: Number(proximoDestino.deuda || 0) > 0 ? "1px solid #ef4444" : "1px solid #60a5fa",
+                        borderRadius: "7px",
+                        fontSize: "10px",
+                        fontWeight: "900",
+                        cursor: "default",
+                        opacity: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {Number(proximoDestino.deuda || 0) > 0
+                        ? `🔴 DEBE $${Number(proximoDestino.deuda || 0).toLocaleString("es-AR")}`
+                        : "🔵 SIN DEUDA"}
                     </button>
 
                     <button
