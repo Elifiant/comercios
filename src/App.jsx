@@ -2390,6 +2390,66 @@ onChange={(e) =>
               />
             </div>
           </div>
+
+          {/* 📸 Foto del comercio / fachada */}
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: "8px",
+                fontWeight: "bold",
+              }}
+            >
+              📷 Foto del comercio
+            </label>
+
+            {comercioSeleccionado.foto_url && (
+              <img
+                src={comercioSeleccionado.foto_url}
+                alt="Foto del comercio"
+                style={{
+                  width: "100%",
+                  maxHeight: "220px",
+                  objectFit: "cover",
+                  borderRadius: "10px",
+                  marginBottom: "10px",
+                  border: "1px solid #334155",
+                }}
+              />
+            )}
+
+            <label
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "13px",
+                boxSizing: "border-box",
+                backgroundColor: "#7c3aed",
+                color: "#fff",
+                borderRadius: "8px",
+                fontSize: "15px",
+                fontWeight: "bold",
+                textAlign: "center",
+                cursor: subiendoFoto ? "wait" : "pointer",
+                opacity: subiendoFoto ? 0.7 : 1,
+              }}
+            >
+              {subiendoFoto
+                ? "⏳ GUARDANDO FOTO..."
+                : comercioSeleccionado.foto_url
+                  ? "📸 CAMBIAR FOTO"
+                  : "📸 SACAR FOTO / ELEGIR FOTO"}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={subirFotoFachada}
+                disabled={subiendoFoto}
+                style={{ display: "none" }}
+              />
+            </label>
+          </div>
+
           <div style={{ marginBottom: "16px" }}>
             {!editandoUbicacion ? (
               <button
