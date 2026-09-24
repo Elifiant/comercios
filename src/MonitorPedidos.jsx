@@ -44,22 +44,55 @@ export default function MonitorPedidos() {
         .eq("empresa_id", perfil.empresa_id)
         .order("created_at", { ascending: false });
 
+      if (error) throw error;
+
+      // 4. Traer los renglones reales de pedido_items
+      const idsPedidos = (data || []).map(p => p.id).filter(Boolean);
+      let itemsPorPedido = {};
+
+      if (idsPedidos.length > 0) {
+        const { data: itemsData, error: errorItems } = await supabase
+          .from("pedido_items")
+          .select("pedido_id, producto_id, producto_nombre, codigo, cantidad, precio_unitario, subtotal")
+          .in("pedido_id", idsPedidos);
+
+        if (errorItems) throw errorItems;
+
+        (itemsData || []).forEach(it => {
+          if (!itemsPorPedido[it.pedido_id]) itemsPorPedido[it.pedido_id] = [];
+          itemsPorPedido[it.pedido_id].push({
+            producto_id: it.producto_id,
+            codigo: it.codigo || "",
+            nombre: it.producto_nombre || it.codigo || "Artículo",
+            cant: Number(it.cantidad || 0),
+            p_unit: Number(it.precio_unitario || 0),
+            subtotal: Number(it.subtotal || 0)
+          });
+        });
+      }
+
       let listaConsolidada = [];
-      if (!error && data && data.length > 0) {
-        listaConsolidada = data.map(p => ({
-          id: p.id || ("PED-" + String(p.created_at || Date.now()).slice(-4)),
-          hora: p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "En curso",
-          preventista: p.preventista || p.vendedor || "Walter",
-          ruta: p.ruta || "Ruta de Visita",
-          cliente: p.cliente || p.comercio_nombre || ("Comercio #" + (p.comercio_id || "")),
-          direccion: p.direccion || "En recorrido",
-          condicion: p.condicion || "Consumidor Final",
-          bultos: p.bultos || (Array.isArray(p.items) ? p.items.length : 1),
-          total: Number(p.total || p.total_pedido || 0),
-          estado: p.estado || "Ingresado",
-          items: Array.isArray(p.items) ? p.items : (Array.isArray(p.detalle) ? p.detalle : []),
-          nota: p.notas || p.nota || "Pedido registrado desde app móvil"
-        }));
+      if (data && data.length > 0) {
+        listaConsolidada = data.map(p => {
+          const itemsReales = itemsPorPedido[p.id] || [];
+          const unidades = itemsReales.reduce((acc, it) => acc + Number(it.cant || 0), 0);
+
+          return {
+            id: p.id || ("PED-" + String(p.created_at || Date.now()).slice(-4)),
+            numeroPedido: p.numero_pedido || null,
+            hora: p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "En curso",
+            preventista: p.preventista || p.vendedor || "Walter",
+            ruta: p.ruta || "Ruta de Visita",
+            cliente: p.cliente || p.comercio_nombre || ("Comercio #" + (p.comercio_id || "")),
+            direccion: p.direccion || "En recorrido",
+            condicion: p.condicion || "Consumidor Final",
+            bultos: unidades,
+            total: Number(p.total || p.total_pedido || 0),
+            estado: p.estado || "Ingresado",
+            items: itemsReales,
+            nota: p.notas || p.nota || "Pedido registrado desde app móvil"
+          };
+        });
       }
 
       // 2. Fallback de localStorage
@@ -235,25 +268,33 @@ export default function MonitorPedidos() {
               <div style={{ fontSize: "11px", fontWeight: "800", color: "#475569", marginBottom: "8px", textTransform: "uppercase" }}>
                 Comandas Activas ({listaFiltrada.length})
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
                 {listaFiltrada.map(p => {
                   const b = getBadgeColor(p.estado);
                   const activo = pedidoActivo && pedidoActivo.id === p.id;
                   return (
-                    <div key={p.id} onClick={() => setPedidoActivo(p)} style={{ background: activo ? "#eff6ff" : "#fff", border: activo ? "2px solid #2563eb" : "1px solid #e2e8f0", borderRadius: "8px", padding: "10px", cursor: "pointer" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                    <div key={p.id} onClick={() => setPedidoActivo(p)} style={{
+                        background: activo ? "#dbeafe" : (listaFiltrada.indexOf(p) % 2 === 0 ? "#eef2f7" : "#dde5ee"),
+                        border: activo ? "2px solid #2563eb" : "1px solid #b8c4d1",
+                        borderRadius: "7px",
+                        padding: "5px 8px",
+                        cursor: "pointer",
+                        boxShadow: activo ? "0 1px 4px rgba(37,99,235,0.12)" : "none"
+                      }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1px" }}>
                         <div>
-                          <span style={{ fontWeight: "800", fontSize: "12px", color: "#2563eb" }}>#{p.id}</span>
+                          <span style={{ fontWeight: "800", fontSize: "12px", color: "#2563eb" }}>
+                            {p.numeroPedido ? `Pedido #${String(p.numeroPedido).padStart(6, "0")}` : "Pedido"}
+                          </span>
                           <span style={{ fontSize: "10px", color: "#64748b", marginLeft: "4px" }}>{p.hora}</span>
                         </div>
                         <span style={{ background: b.bg, color: b.text, border: "1px solid " + b.border, fontSize: "9px", fontWeight: "800", padding: "2px 6px", borderRadius: "10px" }}>
                           {p.estado}
                         </span>
                       </div>
-                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>{p.cliente}</div>
-                      <div style={{ fontSize: "10px", color: "#64748b", marginTop: "1px" }}>📍 {p.direccion}</div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "6px", borderTop: "1px solid #f1f5f9" }}>
-                        <span style={{ fontSize: "10px", color: "#475569" }}>👤 <strong>{p.preventista}</strong> ({p.bultos} bultos)</span>
+                      <div style={{ fontWeight: "850", fontSize: "13px", color: "#172033", marginTop: "2px" }}>{p.cliente}</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "3px", paddingTop: "3px", borderTop: "1px solid #b8c4d1" }}>
+                        <span style={{ fontSize: "10px", color: "#475569" }}>👤 <strong>{p.preventista}</strong> ({p.bultos} unidades)</span>
                         <span style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>${p.total.toLocaleString("es-AR")}</span>
                       </div>
                     </div>
@@ -263,47 +304,60 @@ export default function MonitorPedidos() {
             </div>
 
             {pedidoActivo && (
-              <div style={{ width: esMovil ? "100%" : "45%", background: "#fff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "12px", position: esMovil ? "static" : "sticky", top: "70px", marginTop: esMovil ? "10px" : 0 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", marginBottom: "10px" }}>
+              <div style={{ width: esMovil ? "100%" : "45%", background: "#f8fafc", borderRadius: "9px", border: "1px solid #cbd5e1", padding: "10px", position: esMovil ? "static" : "sticky", top: "70px", marginTop: esMovil ? "10px" : 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px", marginBottom: "6px" }}>
                   <div>
-                    <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "700" }}>DETALLE SELECCIONADO</div>
-                    <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>{pedidoActivo.id} - {pedidoActivo.cliente}</div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "7px", flexWrap: "wrap" }}>
+                       <span style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>DETALLE DEL PEDIDO ·</span>
+                       <span style={{ fontSize: "14px", fontWeight: "900", color: "#172033" }}>{pedidoActivo.cliente}</span>
+                     </div>
+                     <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "800", marginTop: "2px" }}>
+                       {pedidoActivo.numeroPedido ? `Pedido #${String(pedidoActivo.numeroPedido).padStart(6, "0")}` : "Pedido"} · {pedidoActivo.hora}
+                     </div>
                   </div>
                   <span style={{ background: "#dcfce7", color: "#15803d", fontSize: "10px", fontWeight: "800", padding: "3px 6px", borderRadius: "4px" }}>
                     {pedidoActivo.lista}
                   </span>
                 </div>
 
-                <div style={{ fontSize: "11px", color: "#475569", marginBottom: "10px", lineHeight: 1.4 }}>
-                  <div>📍 <strong>Dirección:</strong> {pedidoActivo.direccion}</div>
-                  <div>👤 <strong>Preventista:</strong> {pedidoActivo.preventista} ({pedidoActivo.ruta})</div>
-                  <div>📝 <strong>Nota:</strong> <em>"{pedidoActivo.nota}"</em></div>
+                <div style={{ fontSize: "10px", color: "#475569", marginBottom: "8px", lineHeight: 1.35 }}>
+                  <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+                    <span>👤 <strong>{pedidoActivo.preventista}</strong></span>
+                    <span>💳 {String(pedidoActivo.nota || "").replace(/^Medio de pago:\s*/i, "")}</span>
+                  </div>
                 </div>
-
-                <div style={{ fontSize: "11px", fontWeight: "800", color: "#0f172a", marginBottom: "6px" }}>MERCADERÍA ({pedidoActivo.items.length} ítems)</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "12px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginBottom: "8px" }}>
                   {pedidoActivo.items.map((it, idx) => (
-                    <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px", background: "#f8fafc", borderRadius: "6px", fontSize: "11px" }}>
-                      <div>
-                        <div style={{ fontWeight: "700", color: "#0f172a" }}>{it.nombre}</div>
-                        <div style={{ color: "#64748b", fontSize: "10px" }}>{it.cant} × ${it.p_unit.toLocaleString("es-AR")}</div>
+                    <div key={idx} style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "4px 7px",
+                      background: idx % 2 === 0 ? "#e2e8f0" : "#f1f5f9",
+                      border: "1px solid #c5cfdb",
+                      borderRadius: "5px",
+                      fontSize: "9.5px"
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
+                        <span style={{ fontWeight: "750", color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.nombre}</span>
+                        <span style={{ color: "#526176", fontSize: "9px", whiteSpace: "nowrap" }}>{it.cant} × ${it.p_unit.toLocaleString("es-AR")}</span>
                       </div>
-                      <div style={{ fontWeight: "800", color: "#0f172a" }}>${it.subtotal.toLocaleString("es-AR")}</div>
+                      <div style={{ fontWeight: "850", color: "#0f172a", marginLeft: "8px", whiteSpace: "nowrap" }}>${it.subtotal.toLocaleString("es-AR")}</div>
                     </div>
                   ))}
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px", background: "#eff6ff", borderRadius: "6px", marginBottom: "10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", background: "#e8f0ff", border: "1px solid #c7d7f5", borderRadius: "6px", marginBottom: "8px" }}>
                   <div>
                     <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "700" }}>TOTAL PEDIDO</div>
-                    <div style={{ fontSize: "10px", color: "#64748b" }}>{pedidoActivo.bultos} bultos</div>
+                    <div style={{ fontSize: "10px", color: "#64748b" }}>{pedidoActivo.bultos} unidades</div>
                   </div>
-                  <div style={{ fontSize: "18px", fontWeight: "900", color: "#1d4ed8" }}>
+                  <div style={{ fontSize: "16px", fontWeight: "900", color: "#1d4ed8" }}>
                     ${pedidoActivo.total.toLocaleString("es-AR")}
                   </div>
                 </div>
 
-                <button onClick={() => alert("Comanda despachada al depósito.")} style={{ width: "100%", background: "#2563eb", color: "#fff", border: "none", padding: "10px", borderRadius: "6px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>
+                <button onClick={() => alert("Comanda despachada al depósito.")} style={{ width: "100%", background: "#2563eb", color: "#fff", border: "none", padding: "8px", borderRadius: "6px", fontSize: "11px", fontWeight: "800", cursor: "pointer" }}>
                   📦 Pasar a Depósito
                 </button>
               </div>

@@ -4,26 +4,108 @@ import { supabase } from './supabase';
 export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuardado, pedidoExistente = null }) {
   const [busqueda, setBusqueda] = useState('');
   const [categoriaSel, setCategoriaSel] = useState('TODOS');
-  const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || [
-    { id: 1, codigo: 'CGE-102', marca: 'COCA-COLA', nombre: 'Gaseosa 2.25L Sabor Original', precioLista: 3200, bonif: 10, cant: 12, esNuevo: false, nota: 'Entregar bien fría' },
-    { id: 2, codigo: 'CGE-208', marca: 'ARCOR', nombre: 'Chocolates Bon o Bon Caja x30', precioLista: 7500, bonif: 0, cant: 2, esNuevo: true, nota: '' }
-  ]);
+  const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || []);
+  const [catalogo, setCatalogo] = useState([]);
+  const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
+  const [errorCatalogo, setErrorCatalogo] = useState('');
   const [medioPago, setMedioPago] = useState('Efectivo');
-  const [observaciones, setObservaciones] = useState(pedidoExistente ? '[REANEXO]: Sumó 2 cajas de Bon o Bon de último momento.' : 'Dejar en depósito lateral.');
-  const [enviarWsp, setEnviarWsp] = useState(true);
+  const [observaciones, setObservaciones] = useState(pedidoExistente?.observaciones || '');
+  const [enviarWsp, setEnviarWsp] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [exitoGuardado, setExitoGuardado] = useState(false);
 
-  // Catálogo base de artículos disponibles
-  const catalogoDemo = [
-    { id: 101, codigo: 'CGE-102', marca: 'COCA-COLA', nombre: 'Gaseosa 2.25L Sabor Original', categoria: 'Bebidas', precio: 3200, stock: 450 },
-    { id: 102, codigo: 'CGE-208', marca: 'ARCOR', nombre: 'Chocolates Bon o Bon Caja x30', categoria: 'Golosinas', precio: 7500, stock: 120 },
-    { id: 103, codigo: 'CGE-315', marca: 'LUCCHETTI', nombre: 'Fideos Spaghetti 500g (x12)', categoria: 'Almacén', precio: 1150, stock: 240 },
-    { id: 104, codigo: 'CGE-401', marca: 'QUILMES', nombre: 'Cerveza Clásica 1L Retornable', categoria: 'Bebidas', precio: 2400, stock: 310 },
-    { id: 105, codigo: 'CGE-502', marca: 'BAGLEY', nombre: 'Galletitas Chocolinas 250g', categoria: 'Almacén', precio: 1800, stock: 180 }
-  ];
+  // Catálogo real: toma las listas activas asignadas al comercio y trae sus productos/precios desde Supabase.
+  useEffect(() => {
+    let cancelado = false;
 
-  const catalogoFiltrado = catalogoDemo.filter(p => {
+    const cargarCatalogo = async () => {
+
+      if (!comercio?.id) {
+        setCatalogo([]);
+        setCargandoCatalogo(false);
+        return;
+      }
+
+      setCargandoCatalogo(true);
+      setErrorCatalogo('');
+
+      try {
+        const { data: asignaciones, error: errAsignaciones } = await supabase
+          .from('comercios_listas')
+          .select('lista_id')
+          .eq('comercio_id', comercio.id)
+          .eq('activo', true);
+
+        if (errAsignaciones) throw errAsignaciones;
+
+        const listaIds = [...new Set((asignaciones || []).map(x => x.lista_id).filter(Boolean))];
+        if (listaIds.length === 0) {
+          if (!cancelado) setCatalogo([]);
+          return;
+        }
+
+        // Primero traemos los renglones/precios de las listas asignadas.
+        const { data: renglones, error: errRenglones } = await supabase
+          .from('lista_productos')
+          .select('id, producto_id, lista_id, codigo_lista, detalle_en_lista, precio')
+          .in('lista_id', listaIds)
+          .eq('activo', true);
+
+        if (errRenglones) throw errRenglones;
+
+        const productoIds = [...new Set((renglones || []).map(r => r.producto_id).filter(Boolean))];
+        if (productoIds.length === 0) {
+          if (!cancelado) setCatalogo([]);
+          return;
+        }
+
+        // Después traemos los datos de los productos en una consulta separada.
+        // Así no dependemos de que Supabase resuelva automáticamente la relación anidada.
+        const { data: productos, error: errProductos } = await supabase
+          .from('productos')
+          .select('id, codigo_cge, nombre, marca, descripcion, activo')
+          .in('id', productoIds);
+
+        if (errProductos) throw errProductos;
+
+        const productosPorId = new Map((productos || []).map(p => [p.id, p]));
+
+        const normalizados = (renglones || [])
+          .map(r => ({ r, producto: productosPorId.get(r.producto_id) }))
+          .filter(x => x.producto && x.producto.activo !== false)
+          .map(({ r, producto }) => ({
+            id: r.id,
+            productoId: r.producto_id,
+            listaId: r.lista_id,
+            codigo: r.codigo_lista || producto.codigo_cge || '',
+            marca: producto.marca || '',
+            nombre: r.detalle_en_lista || producto.nombre || 'Artículo',
+            categoria: producto.descripcion || 'General',
+            precio: Number(r.precio || 0),
+          }))
+          .sort((a, b) => a.codigo.localeCompare(b.codigo, 'es', { numeric: true }));
+
+        if (!cancelado) {
+          setCatalogo(normalizados);
+        }
+      } catch (err) {
+        console.error('Error cargando catálogo del comercio:', err);
+        if (!cancelado) {
+          setCatalogo([]);
+          setErrorCatalogo(err.message || 'No se pudo cargar la lista de precios');
+        }
+      } finally {
+        if (!cancelado) setCargandoCatalogo(false);
+      }
+    };
+
+    cargarCatalogo();
+    return () => { cancelado = true; };
+  }, [comercio?.id]);
+
+  const categoriasDisponibles = ['TODOS', ...Array.from(new Set(catalogo.map(p => p.categoria).filter(Boolean)))];
+
+  const catalogoFiltrado = catalogo.filter(p => {
     const coincideTexto = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || p.codigo.toLowerCase().includes(busqueda.toLowerCase()) || p.marca.toLowerCase().includes(busqueda.toLowerCase());
     const coincideCat = categoriaSel === 'TODOS' || p.categoria === categoriaSel;
     return coincideTexto && coincideCat;
@@ -36,6 +118,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     } else {
       setItemsPedido([...itemsPedido, {
         id: Date.now(),
+        productoId: producto.productoId,
         codigo: producto.codigo,
         marca: producto.marca,
         nombre: producto.nombre,
@@ -76,65 +159,116 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
       alert('Agregá al menos un artículo al pedido');
       return;
     }
+
+    const empresaId = usuario?.empresa_id || comercio?.empresa_id || null;
+    if (!empresaId) {
+      alert('No se pudo identificar la empresa del pedido.');
+      return;
+    }
+
+    const itemsSinProducto = itemsPedido.filter(it => !it.productoId);
+    if (itemsSinProducto.length > 0) {
+      alert('Hay artículos sin vínculo al catálogo real. Volvé a agregarlos al pedido.');
+      return;
+    }
+
     setGuardando(true);
+
     try {
+      const pedidoId = crypto.randomUUID();
+      const ahora = new Date().toISOString();
+      const descuentoPorcentaje = subtotalBruto > 0
+        ? Number(((totalDescuentos / subtotalBruto) * 100).toFixed(4))
+        : 0;
+
+      const notasPartes = [];
+      if (medioPago) notasPartes.push(`Medio de pago: ${medioPago}`);
+      if (observaciones?.trim()) notasPartes.push(observaciones.trim());
+
       const pedidoPayload = {
-        comercio_id: comercio?.id || 104,
-        comercio_nombre: comercio?.nombre || 'Almacén Los Amigos',
-        comercio_direccion: comercio?.direccion || 'Av. Mitre 4820, Avellaneda',
-        preventista: usuario?.nombre || 'Alex Preventista',
-        empresa: usuario?.empresa || 'Elifiant',
+        id: pedidoId,
+        fecha: ahora,
+        comercio_id: String(comercio?.id || ''),
+        comercio_nombre: comercio?.nombre || `Comercio #${comercio?.id || ''}`,
+        preventista: usuario?.nombre || 'Preventista',
+        empresa: usuario?.empresa || comercio?.empresa || '',
+        empresa_id: empresaId,
         subtotal: subtotalBruto,
-        descuentos: totalDescuentos,
+        descuento_porcentaje: descuentoPorcentaje,
         total: totalFinal,
-        medio_pago: medioPago,
-        observaciones: observaciones,
-        items: itemsPedido,
-        es_anexo: !!pedidoExistente,
-        estado: 'Confirmado / Listo para Reparto',
-        fecha: new Date().toISOString()
+        estado: 'Confirmado',
+        notas: notasPartes.join(' | ')
       };
 
-      // Guardar en Supabase si la tabla existe, con respaldo en localStorage
-      try {
-        await supabase.from('pedidos').insert([pedidoPayload]);
-      } catch (e) {
-        console.warn('Registro local de pedido:', e);
+      const { error: errorPedido } = await supabase
+        .from('pedidos')
+        .insert([pedidoPayload]);
+
+      if (errorPedido) throw new Error(`No se pudo guardar el pedido: ${errorPedido.message}`);
+
+      const itemsPayload = itemsPedido.map(it => {
+        const bruto = Number(it.precioLista || 0) * Number(it.cant || 0);
+        const neto = bruto * (1 - Number(it.bonif || 0) / 100);
+
+        return {
+          pedido_id: pedidoId,
+          producto_id: it.productoId,
+          producto_nombre: it.nombre,
+          codigo: it.codigo,
+          cantidad: Number(it.cant || 0),
+          precio_unitario: Number(it.precioLista || 0),
+          subtotal: Number(neto.toFixed(2))
+        };
+      });
+
+      const { error: errorItems } = await supabase
+        .from('pedido_items')
+        .insert(itemsPayload);
+
+      if (errorItems) {
+        // Intentamos no dejar una cabecera huérfana si fallan los renglones.
+        await supabase.from('pedidos').delete().eq('id', pedidoId);
+        throw new Error(`El pedido no pudo guardar sus artículos: ${errorItems.message}`);
       }
 
-      // Guardado local de contingencia
+      // Respaldo local solamente DESPUÉS de que Supabase confirmó cabecera + artículos.
+      const respaldoLocal = { ...pedidoPayload, items: itemsPedido };
       const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
-      historico.unshift(pedidoPayload);
+      historico.unshift(respaldoLocal);
       localStorage.setItem('pedidos_guardados', JSON.stringify(historico));
 
       // WhatsApp si está tildado
       if (enviarWsp) {
-        const telLimpio = (comercio?.telefono || '1166646806').replace(/\D/g, '');
-        const msj = encodeURIComponent(
-          `*📦 PEDIDO #${pedidoExistente ? '104 (ACTUALIZADO)' : '104'} - ${comercio?.nombre || 'Comercio'}*\n` +
-          `Preventista: ${usuario?.nombre || 'Alex'}\n` +
-          `Medio de Pago: ${medioPago}\n` +
-          `--------------------------\n` +
-          itemsPedido.map(it => `• ${it.cant}x ${it.nombre} (${it.bonif > 0 ? it.bonif + '% OFF' : 'Neto'}): $${((it.precioLista * it.cant) * (1 - it.bonif / 100)).toLocaleString()}`).join('\n') +
-          `\n--------------------------\n` +
-          `*TOTAL A COBRAR: $${totalFinal.toLocaleString()} ARS*\n` +
-          (observaciones ? `Notas: ${observaciones}\n` : '') +
-          `_RutaComercio · Comanda Oficial_`
-        );
-        window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
+        const telLimpio = (comercio?.telefono || '').replace(/\D/g, '');
+        if (telLimpio) {
+          const msj = encodeURIComponent(
+            `*📦 PEDIDO - ${comercio?.nombre || 'Comercio'}*\n` +
+            `Preventista: ${usuario?.nombre || 'Preventista'}\n` +
+            `Medio de Pago: ${medioPago}\n` +
+            `--------------------------\n` +
+            itemsPedido.map(it => `• ${it.cant}x ${it.nombre} (${it.bonif > 0 ? it.bonif + '% OFF' : 'Neto'}): $${((it.precioLista * it.cant) * (1 - it.bonif / 100)).toLocaleString()}`).join('\n') +
+            `\n--------------------------\n` +
+            `*TOTAL A COBRAR: $${totalFinal.toLocaleString()} ARS*\n` +
+            (observaciones ? `Notas: ${observaciones}\n` : '') +
+            `_RutaComercio · Comanda Oficial_`
+          );
+          window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
+        }
       }
 
       setExitoGuardado(true);
+
       setTimeout(async () => {
         if (onPedidoGuardado) {
           await onPedidoGuardado();
         } else if (onVolver) {
           onVolver();
         }
-      }, 1500);
+      }, 1200);
 
     } catch (err) {
-      alert('Error al procesar comanda: ' + err.message);
+      console.error('Error guardando pedido:', err);
+      alert('❌ ' + (err.message || 'No se pudo guardar el pedido.'));
     } finally {
       setGuardando(false);
     }
@@ -211,7 +345,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
           {/* Categorías */}
           <div style={{ display: 'flex', gap: '6px', marginTop: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
-            {['TODOS', 'Bebidas', 'Golosinas', 'Almacén'].map(cat => (
+            {categoriasDisponibles.map(cat => (
               <button
                 key={cat}
                 onClick={() => setCategoriaSel(cat)}
@@ -231,12 +365,27 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
               </button>
             ))}
           </div>
+          {cargandoCatalogo && (
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#64748b' }}>⏳ Cargando lista de precios del cliente...</div>
+          )}
+          {!cargandoCatalogo && errorCatalogo && (
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#dc2626', fontWeight: '700' }}>❌ {errorCatalogo}</div>
+          )}
+          {!cargandoCatalogo && !errorCatalogo && catalogo.length === 0 && (
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#d97706', fontWeight: '700' }}>⚠️ Este cliente no tiene una lista de precios activa asignada.</div>
+          )}
+          {!cargandoCatalogo && catalogo.length > 0 && (
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#16a34a', fontWeight: '700' }}>✅ {catalogo.length} artículos disponibles</div>
+          )}
         </div>
 
         {/* Desplegable de sugerencias de búsqueda si escribe */}
         {busqueda.length > 0 && (
           <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', padding: '8px', marginBottom: '16px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
             <div style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', padding: '4px 8px', textTransform: 'uppercase' }}>Artículos Encontrados</div>
+            {!cargandoCatalogo && catalogoFiltrado.length === 0 && (
+              <div style={{ padding: '12px 8px', fontSize: '13px', color: '#64748b' }}>No se encontraron artículos con esa búsqueda.</div>
+            )}
             {catalogoFiltrado.map(prod => (
               <div key={prod.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>
                 <div>
