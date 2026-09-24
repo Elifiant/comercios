@@ -1284,7 +1284,7 @@ useEffect(() => {
             {tieneStockDestino.nombre || "Comercio"}
           </div>
 
-          <div style={{ color: "#cbd5e1", fontSize: "14px", margin: "12px 0 18px" }}>
+          <div style={{ color: "#cbd5e1", fontSize: "13px", margin: "12px 0 18px" }}>
             ¿La próxima visita se hace normalmente o este cliente pidió que no vayas?
           </div>
 
@@ -1295,7 +1295,7 @@ useEffect(() => {
               width: "100%", minHeight: "50px", marginBottom: "10px",
               border: "1px solid #4ade80", borderRadius: "10px",
               backgroundColor: "#166534", color: "#fff",
-              fontSize: "14px", fontWeight: "900", cursor: "pointer",
+              fontSize: "13px", fontWeight: "900", cursor: "pointer",
             }}
           >
             ✓ FINALIZAR VISITA
@@ -1484,7 +1484,7 @@ useEffect(() => {
             </div>
             <div
               style={{
-                fontSize: "15px",
+                fontSize: "13px",
                 fontWeight: "900",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
@@ -2416,12 +2416,12 @@ onChange={(e) =>
 }
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
-        <header style={{ padding: "14px 16px", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #334155" }}>
+        <header style={{ padding: "9px 14px", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #334155" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <img src="/logo.svg" alt="RutaComercio" style={{ width: "36px", height: "36px", objectFit: "contain" }} />
+            <img src="/logo.svg" alt="RutaComercio" style={{ width: "30px", height: "30px", objectFit: "contain" }} />
             <div>
-              <div style={{ fontSize: "14px", fontWeight: "800", color: "#ffffff", letterSpacing: "-0.3px" }}>RutaComercio</div>
-              <div style={{ fontSize: "11px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
+              <div style={{ fontSize: "13px", fontWeight: "800", color: "#ffffff", letterSpacing: "-0.3px" }}>RutaComercio</div>
+              <div style={{ fontSize: "10px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
                 <span>👤 {perfil?.nombre || "Preventista"}</span>
                 <span>·</span>
                 <span style={{ color: "#38bdf8", fontWeight: "600" }}>{perfil?.empresa || "DEMO S.A."}</span>
@@ -2431,7 +2431,7 @@ onChange={(e) =>
           <button
             type="button"
             onClick={handleCerrarSesion}
-            style={{ background: "#ef4444", color: "#ffffff", border: "none", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", cursor: "pointer", fontWeight: "700" }}
+            style={{ background: "#ef4444", color: "#ffffff", border: "none", padding: "5px 10px", borderRadius: "7px", fontSize: "11px", cursor: "pointer", fontWeight: "700" }}
           >
             ✕ Salir
           </button>
@@ -2440,13 +2440,13 @@ onChange={(e) =>
   type="button"
   onClick={() => setModoManejo(true)}
   style={{
-    margin: "12px 16px 0",
-    padding: "14px",
+    margin: "9px 16px 0",
+    padding: "11px",
     backgroundColor: "#f59e0b",
     color: "#111827",
     border: "none",
     borderRadius: "10px",
-    fontSize: "16px",
+    fontSize: "15px",
     fontWeight: "800",
     cursor: "pointer",
   }}
@@ -2454,23 +2454,23 @@ onChange={(e) =>
   🚗 MODO MANEJO
 </button>
         {/* FRANJA DE MÉTRICAS DIARIAS DEL PREVENTISTA */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginTop: "10px" }}>
-          <div style={{ backgroundColor: "#1e293b", padding: "5px 4px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "9px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Visitas</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px", marginTop: "7px" }}>
+          <div style={{ backgroundColor: "#1e293b", padding: "4px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Visitas</div>
             <div style={{ fontSize: "14px", fontWeight: "800", color: "#38bdf8", marginTop: "2px" }}>
               {`${visitasRealizadasHoy} de ${visitasProgramadasHoy}`}
             </div>
           </div>
 
-          <div style={{ backgroundColor: "#1e293b", padding: "5px 4px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "9px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Venta Hoy</div>
+          <div style={{ backgroundColor: "#1e293b", padding: "4px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Venta Hoy</div>
             <div style={{ fontSize: "14px", fontWeight: "800", color: "#4ade80", marginTop: "2px" }}>
               {jornadaActiva ? "$ 148.5K" : "$ 0"}
             </div>
           </div>
 
-          <div style={{ backgroundColor: "#1e293b", padding: "5px 4px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "9px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Efectividad</div>
+          <div style={{ backgroundColor: "#1e293b", padding: "4px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Efectividad</div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: "#facc15", marginTop: "2px" }}>
               {jornadaActiva ? "44%" : "0%"}
             </div>
