@@ -2550,7 +2550,7 @@ onChange={(e) =>
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: "8px",
-                    marginBottom: "4px",
+                    marginBottom: "5px",
                   }}
                 >
                   <div
@@ -2558,7 +2558,8 @@ onChange={(e) =>
                       fontSize: "10px",
                       fontWeight: "900",
                       color: "#93c5fd",
-                      letterSpacing: "0.5px",
+                      letterSpacing: "0.4px",
+                      minWidth: 0,
                     }}
                   >
                     🧭 PRÓXIMO DESTINO · Parada {indiceProximoDestino + 1} de {rutaSugeridaHoy.length}
@@ -2572,15 +2573,17 @@ onChange={(e) =>
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "8px",
-                  }}
-                >
-                  <div style={{ minWidth: 0, flex: 1 }}>
+                {/* En móvil, los datos del cliente ocupan todo el ancho.
+                    Así los botones nunca tapan el nombre ni la dirección. */}
+                <div style={{ minWidth: 0, marginBottom: "6px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      minWidth: 0,
+                    }}
+                  >
                     <div
                       style={{
                         fontSize: "15px",
@@ -2589,102 +2592,117 @@ onChange={(e) =>
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
+                        minWidth: 0,
+                        flex: 1,
                       }}
                     >
                       {proximoDestino.nombre || `Comercio #${proximoDestino.id}`}
                     </div>
-                    <div
-                      style={{
-                        fontSize: "10px",
-                        color: "#cbd5e1",
-                        marginTop: "1px",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      📍 {proximoDestino.direccion || "Sin dirección cargada"}
-                    </div>
-                  </div>
 
-                  <div style={{ display: "flex", gap: "5px", flexShrink: 0 }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setObservacionVisita("");
-                        setResultadoVisita("Visitado");
-                        setComercioSeleccionado(proximoDestino);
-                      }}
-                      style={{
-                        padding: "7px 9px",
-                        backgroundColor: "#334155",
-                        color: "#fff",
-                        border: "1px solid #64748b",
-                        borderRadius: "7px",
-                        fontSize: "10px",
-                        fontWeight: "900",
-                        cursor: "pointer",
-                      }}
-                    >
-                      ABRIR
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled
+                    <span
                       title={Number(proximoDestino.deuda || 0) > 0 ? "Cliente con saldo pendiente" : "Cliente sin saldo pendiente"}
                       style={{
-                        padding: "7px 9px",
-                        backgroundColor: Number(proximoDestino.deuda || 0) > 0 ? "#991b1b" : "#1d4ed8",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        flexShrink: 0,
+                        padding: "3px 6px",
+                        backgroundColor: Number(proximoDestino.deuda || 0) > 0 ? "#991b1b" : "#1e40af",
                         color: "#fff",
                         border: Number(proximoDestino.deuda || 0) > 0 ? "1px solid #ef4444" : "1px solid #60a5fa",
-                        borderRadius: "7px",
-                        fontSize: "10px",
+                        borderRadius: "999px",
+                        fontSize: "9px",
+                        lineHeight: 1.1,
                         fontWeight: "900",
-                        cursor: "default",
-                        opacity: 1,
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {Number(proximoDestino.deuda || 0) > 0
-                        ? "🔴 DEBE"
-                        : "🔵 SIN DEUDA"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setDestinoMapa(proximoDestino)}
-                      style={{
-                        padding: "7px 9px",
-                        backgroundColor: "#2563eb",
-                        color: "#fff",
-                        border: "1px solid #60a5fa",
-                        borderRadius: "7px",
-                        fontSize: "10px",
-                        fontWeight: "900",
-                        cursor: "pointer",
-                      }}
-                    >
-                      🗺️ MAPA
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setLlegueDestino(proximoDestino)}
-                      style={{
-                        padding: "7px 9px",
-                        backgroundColor: "#166534",
-                        color: "#fff",
-                        border: "1px solid #4ade80",
-                        borderRadius: "7px",
-                        fontSize: "10px",
-                        fontWeight: "900",
-                        cursor: "pointer",
-                      }}
-                    >
-                      ✓ LLEGUÉ
-                    </button>
+                      {Number(proximoDestino.deuda || 0) > 0 ? "🔴 DEBE" : "🔵 SIN DEUDA"}
+                    </span>
                   </div>
+
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      color: "#cbd5e1",
+                      marginTop: "2px",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    📍 {proximoDestino.direccion || "Sin dirección cargada"}
+                  </div>
+                </div>
+
+                {/* Acciones compactas: tres columnas iguales para iPhone chico */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                    gap: "5px",
+                    width: "100%",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setObservacionVisita("");
+                      setResultadoVisita("Visitado");
+                      setComercioSeleccionado(proximoDestino);
+                    }}
+                    style={{
+                      minWidth: 0,
+                      padding: "7px 4px",
+                      backgroundColor: "#334155",
+                      color: "#fff",
+                      border: "1px solid #64748b",
+                      borderRadius: "7px",
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ABRIR
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDestinoMapa(proximoDestino)}
+                    style={{
+                      minWidth: 0,
+                      padding: "7px 4px",
+                      backgroundColor: "#2563eb",
+                      color: "#fff",
+                      border: "1px solid #60a5fa",
+                      borderRadius: "7px",
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    🗺️ MAPA
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLlegueDestino(proximoDestino)}
+                    style={{
+                      minWidth: 0,
+                      padding: "7px 4px",
+                      backgroundColor: "#166534",
+                      color: "#fff",
+                      border: "1px solid #4ade80",
+                      borderRadius: "7px",
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ✓ LLEGUÉ
+                  </button>
                 </div>
               </>
             ) : rutaSugeridaHoy.length > 0 ? (
