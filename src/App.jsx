@@ -859,6 +859,7 @@ const solicitarNoVisitar = async (comercio) => {
   const [destinoMapa, setDestinoMapa] = useState(null);
   const [llegueDestino, setLlegueDestino] = useState(null);
   const [tieneStockDestino, setTieneStockDestino] = useState(null);
+  const [confirmarSaltoVisita, setConfirmarSaltoVisita] = useState(false);
 
   // 📍 Cada comercio empieza su corrección de ubicación desde SU propio punto.
   // Evita que quede visible la posición usada al editar el comercio anterior.
@@ -1301,25 +1302,83 @@ useEffect(() => {
             ✓ FINALIZAR VISITA
           </button>
 
-          <button
-            type="button"
-            onClick={() => finalizarTieneStock(true)}
-            style={{
-              width: "100%", minHeight: "58px", marginBottom: "10px",
-              border: "1px solid #facc15", borderRadius: "10px",
-              backgroundColor: "#713f12", color: "#fff",
-              fontSize: "14px", fontWeight: "900", cursor: "pointer",
-            }}
-          >
-            ⏭️ SALTAR PRÓXIMA VISITA
-            <div style={{ fontSize: "11px", fontWeight: "700", marginTop: "3px", color: "#fde68a" }}>
-              No aparecerá el {proximaFechaTexto}
+          {!confirmarSaltoVisita ? (
+            <button
+              type="button"
+              onClick={() => setConfirmarSaltoVisita(true)}
+              style={{
+                width: "100%", minHeight: "62px", marginBottom: "10px",
+                border: "2px solid #facc15", borderRadius: "10px",
+                backgroundColor: "#713f12", color: "#fff",
+                fontSize: "14px", fontWeight: "900", cursor: "pointer",
+              }}
+            >
+              ⏭️ SALTAR PRÓXIMA VISITA
+              <div style={{ fontSize: "11px", fontWeight: "800", marginTop: "4px", color: "#fde68a" }}>
+                ⚠️ No aparecerá el {proximaFechaTexto}
+              </div>
+            </button>
+          ) : (
+            <div
+              style={{
+                marginBottom: "10px",
+                padding: "14px",
+                border: "2px solid #facc15",
+                borderRadius: "12px",
+                backgroundColor: "#451a03",
+                boxShadow: "0 0 0 3px rgba(250,204,21,0.10)",
+              }}
+            >
+              <div style={{ fontSize: "17px", fontWeight: "900", color: "#fef08a", textAlign: "center" }}>
+                ⚠️ ¿SALTAR LA PRÓXIMA VISITA?
+              </div>
+
+              <div style={{ fontSize: "13px", lineHeight: 1.45, color: "#fff", textAlign: "center", margin: "8px 0 12px" }}>
+                Este comercio <strong>NO aparecerá</strong> en la ruta del <strong>{proximaFechaTexto}</strong>.
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirmarSaltoVisita(false)}
+                  style={{
+                    minHeight: "46px",
+                    border: "1px solid #94a3b8",
+                    borderRadius: "9px",
+                    backgroundColor: "#334155",
+                    color: "#fff",
+                    fontSize: "12px",
+                    fontWeight: "900",
+                    cursor: "pointer",
+                  }}
+                >
+                  ← NO, VOLVER
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => finalizarTieneStock(true)}
+                  style={{
+                    minHeight: "46px",
+                    border: "2px solid #facc15",
+                    borderRadius: "9px",
+                    backgroundColor: "#a16207",
+                    color: "#fff",
+                    fontSize: "12px",
+                    fontWeight: "900",
+                    cursor: "pointer",
+                  }}
+                >
+                  ✓ SÍ, SALTAR
+                </button>
+              </div>
             </div>
-          </button>
+          )}
 
           <button
             type="button"
             onClick={() => {
+              setConfirmarSaltoVisita(false);
               setTieneStockDestino(null);
               setLlegueDestino(tieneStockDestino);
             }}
