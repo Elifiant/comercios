@@ -1,4 +1,5 @@
- import React, { useState, useEffect } from "react";
+ import React, { useState, useEffect, useRef } from "react";
+import * as XLSX from "xlsx";
 import { supabase } from "./supabase";
 import DisenadorRutas from "./DisenadorRutas";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
@@ -215,6 +216,15 @@ const reactivarComercio = async (comercio) => {
   const [reproduciendoAudio, setReproduciendoAudio] = useState(false);
   const [audioActivoObj, setAudioActivoObj] = useState(null);
   const [datosAbono, setDatosAbono] = useState(null);
+  const [filtroEstadoCuenta, setFiltroEstadoCuenta] = useState("todos");
+  const [filtroPreventistaCuenta, setFiltroPreventistaCuenta] = useState("TODOS");
+  const [busquedaCuenta, setBusquedaCuenta] = useState("");
+  const [modalImportacionCuenta, setModalImportacionCuenta] = useState(false);
+  const [modoImportacionCuenta, setModoImportacionCuenta] = useState("parcial");
+  const [archivoCuentaNombre, setArchivoCuentaNombre] = useState("");
+  const [vistaPreviaCuenta, setVistaPreviaCuenta] = useState(null);
+  const [importandoCuenta, setImportandoCuenta] = useState(false);
+  const inputArchivoCuentaRef = useRef(null);
 
   // Inicialización de supervisor y datos
   useEffect(() => {
@@ -600,8 +610,183 @@ useEffect(() => {
   };
 
   const nombrePrevActivo = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado?.nombre : (preventistaSeleccionado || "");
-  
-  
+
+  const normalizarCodigoCliente = (valor) => String(valor ?? "").trim().toUpperCase();
+
+  const leerArchivoEstadoCuenta = async (event) => {
+    const archivo = event.target.files?.[0];
+    if (!archivo) return;
+
+    try {
+      setArchivoCuentaNombre(archivo.name);
+      setVistaPreviaCuenta(null);
+
+      const buffer = await archivo.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const hoja = workbook.Sheets[workbook.SheetNames[0]];
+      const filas = XLSX.utils.sheet_to_json(hoja, { defval: "", raw: false });
+
+      if (!filas.length) throw new Error("La planilla está vacía.");
+
+      const obtenerCampo = (fila, opciones) => {
+        const mapa = Object.fromEntries(Object.entries(fila).map(([k, v]) => [String(k).trim().toLowerCase(), v]));
+        for (const op of opciones) {
+          if (Object.prototype.hasOwnProperty.call(mapa, op)) return mapa[op];
+        }
+        return undefined;
+      };
+
+      const mapaComercios = new Map(
+        (comercios || []).map(c => [normalizarCodigoCliente(c.codigo_cliente), c])
+      );
+      const vistos = new Set();
+      const encontrados = [];
+      const noEncontrados = [];
+      const duplicados = [];
+      const invalidos = [];
+
+      filas.forEach((fila, indice) => {
+        const codigoRaw = obtenerCampo(fila, ["codigo_cliente", "código_cliente", "codigo cliente", "código cliente", "codigo", "código"]);
+        const saldoRaw = obtenerCampo(fila, ["saldo", "deuda", "saldo pendiente", "saldo_pendiente"]);
+        const codigo = normalizarCodigoCliente(codigoRaw);
+
+        if (!codigo) {
+          invalidos.push({ fila: indice + 2, motivo: "Código vacío" });
+          return;
+        }
+        if (vistos.has(codigo)) {
+          duplicados.push({ fila: indice + 2, codigo });
+          return;
+        }
+        vistos.add(codigo);
+
+        let textoSaldo = String(saldoRaw ?? "").trim().replace(/\s/g, "");
+        if (textoSaldo.includes(",") && textoSaldo.includes(".")) {
+          textoSaldo = textoSaldo.lastIndexOf(",") > textoSaldo.lastIndexOf(".")
+            ? textoSaldo.replace(/\./g, "").replace(",", ".")
+            : textoSaldo.replace(/,/g, "");
+        } else if (textoSaldo.includes(",")) {
+          textoSaldo = textoSaldo.replace(",", ".");
+        }
+        textoSaldo = textoSaldo.replace(/[^0-9.-]/g, "");
+        const saldo = Number(textoSaldo);
+        if (!Number.isFinite(saldo) || saldo < 0) {
+          invalidos.push({ fila: indice + 2, codigo, motivo: "Saldo inválido" });
+          return;
+        }
+
+        const comercio = mapaComercios.get(codigo);
+        if (!comercio) {
+          noEncontrados.push({ fila: indice + 2, codigo, saldo });
+          return;
+        }
+        encontrados.push({ comercio, codigo, saldo });
+      });
+
+      const totalSaldo = encontrados.reduce((acc, item) => acc + item.saldo, 0);
+      const conSaldo = encontrados.filter(item => item.saldo > 0).length;
+      setVistaPreviaCuenta({
+        totalFilas: filas.length,
+        encontrados,
+        noEncontrados,
+        duplicados,
+        invalidos,
+        totalSaldo,
+        conSaldo
+      });
+    } catch (error) {
+      console.error("Error leyendo Estado de Cuenta:", error);
+      alert("❌ No se pudo leer la planilla: " + (error.message || "Formato inválido"));
+      setArchivoCuentaNombre("");
+      setVistaPreviaCuenta(null);
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const confirmarImportacionEstadoCuenta = async () => {
+    if (!vistaPreviaCuenta || !perfilSupervisor?.empresa_id) return;
+    if (vistaPreviaCuenta.duplicados.length || vistaPreviaCuenta.invalidos.length) {
+      alert("⚠️ Corregí los códigos duplicados o filas inválidas antes de importar.");
+      return;
+    }
+    if (!vistaPreviaCuenta.encontrados.length) {
+      alert("⚠️ No hay clientes válidos para actualizar.");
+      return;
+    }
+
+    const mensaje = modoImportacionCuenta === "completo"
+      ? "⚠️ REEMPLAZAR ESTADO DE CUENTA COMPLETO\n\nLos clientes que NO aparecen en la planilla pasarán a saldo $0.\n\n¿Confirmar importación?"
+      : `Se actualizarán ${vistaPreviaCuenta.encontrados.length} clientes incluidos en la planilla.\n\n¿Confirmar importación?`;
+    if (!window.confirm(mensaje)) return;
+
+    setImportandoCuenta(true);
+    try {
+      const ahora = new Date().toISOString();
+      const idsIncluidos = new Set(vistaPreviaCuenta.encontrados.map(x => x.comercio.id));
+      const operaciones = vistaPreviaCuenta.encontrados.map(item =>
+        supabase.from("comercios")
+          .update({ deuda: item.saldo, deuda_actualizada_at: ahora })
+          .eq("id", item.comercio.id)
+          .eq("empresa_id", perfilSupervisor.empresa_id)
+      );
+
+      if (modoImportacionCuenta === "completo") {
+        (comercios || []).filter(c => !idsIncluidos.has(c.id)).forEach(c => {
+          operaciones.push(
+            supabase.from("comercios")
+              .update({ deuda: 0, deuda_actualizada_at: ahora })
+              .eq("id", c.id)
+              .eq("empresa_id", perfilSupervisor.empresa_id)
+          );
+        });
+      }
+
+      const resultados = await Promise.all(operaciones);
+      const error = resultados.find(r => r.error)?.error;
+      if (error) throw error;
+
+      const saldoPorId = new Map(vistaPreviaCuenta.encontrados.map(x => [x.comercio.id, x.saldo]));
+      setComercios(prev => (prev || []).map(c => {
+        if (saldoPorId.has(c.id)) return { ...c, deuda: saldoPorId.get(c.id), deuda_actualizada_at: ahora };
+        if (modoImportacionCuenta === "completo") return { ...c, deuda: 0, deuda_actualizada_at: ahora };
+        return c;
+      }));
+
+      alert(`✅ Estado de Cuenta actualizado.\n\n${vistaPreviaCuenta.encontrados.length} clientes procesados.${vistaPreviaCuenta.noEncontrados.length ? `\n⚠️ ${vistaPreviaCuenta.noEncontrados.length} códigos no encontrados.` : ""}`);
+      setModalImportacionCuenta(false);
+      setVistaPreviaCuenta(null);
+      setArchivoCuentaNombre("");
+    } catch (error) {
+      console.error("Error importando Estado de Cuenta:", error);
+      alert("❌ No se pudo completar la importación: " + (error.message || "Verifique conexión"));
+    } finally {
+      setImportandoCuenta(false);
+    }
+  };
+
+  // 💳 Estado de Cuenta de clientes
+  const comerciosEstadoCuenta = (comercios || []).filter((c) => {
+    const deuda = Number(c.deuda || 0);
+    if (filtroEstadoCuenta === "con_saldo" && deuda <= 0) return false;
+    if (filtroEstadoCuenta === "sin_saldo" && deuda > 0) return false;
+
+    if (filtroPreventistaCuenta !== "TODOS") {
+      const asignado = String(c.preventista || "").trim().toLowerCase();
+      if (asignado !== String(filtroPreventistaCuenta).trim().toLowerCase()) return false;
+    }
+
+    const q = String(busquedaCuenta || "").trim().toLowerCase();
+    if (q) {
+      const nombre = String(c.nombre || "").toLowerCase();
+      const codigo = String(c.codigo_cliente || c.codigo || c.id || "").toLowerCase();
+      if (!nombre.includes(q) && !codigo.includes(q)) return false;
+    }
+    return true;
+  }).sort((a, b) => Number(b.deuda || 0) - Number(a.deuda || 0));
+
+  const clientesConSaldo = (comercios || []).filter(c => Number(c.deuda || 0) > 0).length;
+  const saldoTotalPendiente = (comercios || []).reduce((acc, c) => acc + Math.max(0, Number(c.deuda || 0)), 0);
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -706,14 +891,147 @@ useEffect(() => {
         >
           📦 Pedidos
         </button>
+        <button
+          onClick={() => setSeccionActiva("estadoCuenta")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "estadoCuenta" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "estadoCuenta" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          💳 Estado de Cuenta
+        </button>
       </div>
 
       <main style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
+        {modalImportacionCuenta && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "18px" }}>
+            <div style={{ width: "min(760px, 96vw)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: "14px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", padding: "18px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "18px" }}>📥 Importar Estado de Cuenta</h3>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>Excel con dos columnas: <strong>codigo_cliente</strong> y <strong>saldo</strong>.</div>
+                </div>
+                <button type="button" onClick={() => !importandoCuenta && setModalImportacionCuenta(false)} style={{ border: "none", background: "#f1f5f9", borderRadius: "8px", padding: "7px 10px", cursor: "pointer", fontWeight: "800" }}>✕</button>
+              </div>
+
+              <div style={{ marginTop: "16px", display: "grid", gap: "9px" }}>
+                <label style={{ border: modoImportacionCuenta === "parcial" ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: "10px", padding: "11px", cursor: "pointer", background: modoImportacionCuenta === "parcial" ? "#eff6ff" : "#fff" }}>
+                  <input type="radio" name="modoCuenta" checked={modoImportacionCuenta === "parcial"} onChange={() => setModoImportacionCuenta("parcial")} /> <strong>Actualizar solamente los clientes incluidos</strong>
+                  <div style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 22px" }}>Los demás clientes conservan su saldo actual.</div>
+                </label>
+                <label style={{ border: modoImportacionCuenta === "completo" ? "2px solid #d97706" : "1px solid #cbd5e1", borderRadius: "10px", padding: "11px", cursor: "pointer", background: modoImportacionCuenta === "completo" ? "#fffbeb" : "#fff" }}>
+                  <input type="radio" name="modoCuenta" checked={modoImportacionCuenta === "completo"} onChange={() => setModoImportacionCuenta("completo")} /> <strong>Reemplazar estado de cuenta completo</strong>
+                  <div style={{ fontSize: "11px", color: "#92400e", margin: "4px 0 0 22px" }}>⚠️ Los clientes que no aparezcan en el archivo pasarán a saldo $0.</div>
+                </label>
+              </div>
+
+              <input ref={inputArchivoCuentaRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoEstadoCuenta} style={{ display: "none" }} />
+              <button type="button" onClick={() => inputArchivoCuentaRef.current?.click()} style={{ marginTop: "14px", width: "100%", padding: "10px", border: "1px dashed #2563eb", borderRadius: "9px", background: "#eff6ff", color: "#1d4ed8", fontWeight: "800", cursor: "pointer" }}>📄 ELEGIR ARCHIVO EXCEL</button>
+              {archivoCuentaNombre && <div style={{ fontSize: "11px", color: "#475569", marginTop: "6px" }}>Archivo: <strong>{archivoCuentaNombre}</strong></div>}
+
+              {vistaPreviaCuenta && (
+                <div style={{ marginTop: "16px" }}>
+                  <div style={{ fontWeight: "800", fontSize: "13px", marginBottom: "8px" }}>Vista previa — todavía no se modificó Supabase</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: "8px" }}>
+                    <div style={{ background: "#f8fafc", padding: "9px", borderRadius: "8px" }}><small>Filas leídas</small><div style={{ fontWeight: "900" }}>{vistaPreviaCuenta.totalFilas}</div></div>
+                    <div style={{ background: "#f0fdf4", padding: "9px", borderRadius: "8px" }}><small>Encontrados</small><div style={{ fontWeight: "900", color: "#15803d" }}>{vistaPreviaCuenta.encontrados.length}</div></div>
+                    <div style={{ background: "#fef2f2", padding: "9px", borderRadius: "8px" }}><small>Con saldo</small><div style={{ fontWeight: "900", color: "#dc2626" }}>{vistaPreviaCuenta.conSaldo}</div></div>
+                    <div style={{ background: "#fff7ed", padding: "9px", borderRadius: "8px" }}><small>No encontrados</small><div style={{ fontWeight: "900", color: "#c2410c" }}>{vistaPreviaCuenta.noEncontrados.length}</div></div>
+                  </div>
+                  <div style={{ marginTop: "9px", fontSize: "13px", fontWeight: "900" }}>Saldo de clientes encontrados: $ {vistaPreviaCuenta.totalSaldo.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+
+                  {(vistaPreviaCuenta.noEncontrados.length > 0 || vistaPreviaCuenta.duplicados.length > 0 || vistaPreviaCuenta.invalidos.length > 0) && (
+                    <div style={{ marginTop: "10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px", padding: "9px", fontSize: "11px", maxHeight: "150px", overflowY: "auto" }}>
+                      {vistaPreviaCuenta.noEncontrados.map((x, i) => <div key={`n-${i}`}>⚠️ {x.codigo} — cliente no encontrado</div>)}
+                      {vistaPreviaCuenta.duplicados.map((x, i) => <div key={`d-${i}`}>❌ Fila {x.fila}: {x.codigo} está repetido en la planilla</div>)}
+                      {vistaPreviaCuenta.invalidos.map((x, i) => <div key={`i-${i}`}>❌ Fila {x.fila}: {x.codigo ? `${x.codigo} — ` : ""}{x.motivo}</div>)}
+                    </div>
+                  )}
+
+                  <button type="button" disabled={importandoCuenta || vistaPreviaCuenta.duplicados.length > 0 || vistaPreviaCuenta.invalidos.length > 0 || vistaPreviaCuenta.encontrados.length === 0} onClick={confirmarImportacionEstadoCuenta} style={{ marginTop: "14px", width: "100%", padding: "11px", border: "none", borderRadius: "9px", background: importandoCuenta ? "#94a3b8" : "#16a34a", color: "#fff", fontWeight: "900", cursor: importandoCuenta ? "wait" : "pointer" }}>{importandoCuenta ? "GUARDANDO..." : "✅ CONFIRMAR IMPORTACIÓN"}</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {seccionActiva === "planificador" ? (
           <DisenadorRutas
             perfilSupervisor={perfilSupervisor}
             perfiles={perfiles}
           />
+        ) : seccionActiva === "estadoCuenta" ? (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>💳 Estado de Cuenta</h2>
+                <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>Saldos pendientes de los clientes de tu empresa</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setModalImportacionCuenta(true); setVistaPreviaCuenta(null); setArchivoCuentaNombre(""); setModoImportacionCuenta("parcial"); }}
+                style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 14px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
+              >
+                📥 IMPORTAR ESTADO DE CUENTA
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "12px", marginBottom: "14px" }}>
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px 14px" }}>
+                <div style={{ fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Clientes</div>
+                <div style={{ fontSize: "21px", fontWeight: "800", marginTop: "2px" }}>{comercios.length}</div>
+              </div>
+              <div style={{ background: "#fff", border: "1px solid #fecaca", borderRadius: "10px", padding: "12px 14px" }}>
+                <div style={{ fontSize: "10px", fontWeight: "800", color: "#991b1b", textTransform: "uppercase" }}>Con saldo pendiente</div>
+                <div style={{ fontSize: "21px", fontWeight: "800", color: "#dc2626", marginTop: "2px" }}>{clientesConSaldo}</div>
+              </div>
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px 14px" }}>
+                <div style={{ fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>Saldo total pendiente</div>
+                <div style={{ fontSize: "21px", fontWeight: "800", color: "#dc2626", marginTop: "2px" }}>$ {saldoTotalPendiente.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              </div>
+            </div>
+
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", marginBottom: "14px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {[
+                  ["todos", "Todos"],
+                  ["con_saldo", "Con saldo pendiente"],
+                  ["sin_saldo", "Sin saldo"]
+                ].map(([valor, texto]) => (
+                  <button key={valor} type="button" onClick={() => setFiltroEstadoCuenta(valor)} style={{ padding: "7px 10px", borderRadius: "7px", border: filtroEstadoCuenta === valor ? "1px solid #2563eb" : "1px solid #cbd5e1", background: filtroEstadoCuenta === valor ? "#eff6ff" : "#fff", color: filtroEstadoCuenta === valor ? "#1d4ed8" : "#475569", fontSize: "11px", fontWeight: "800", cursor: "pointer" }}>
+                    {texto}
+                  </button>
+                ))}
+              </div>
+
+              <select value={filtroPreventistaCuenta} onChange={(e) => setFiltroPreventistaCuenta(e.target.value)} style={{ padding: "7px 10px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", fontSize: "11px", fontWeight: "700", color: "#334155" }}>
+                <option value="TODOS">👤 Todos los preventistas</option>
+                {listaPreventistas.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+
+              <input type="text" value={busquedaCuenta} onChange={(e) => setBusquedaCuenta(e.target.value)} placeholder="🔎 Buscar cliente o código..." style={{ flex: "1 1 220px", minWidth: "200px", padding: "7px 10px", borderRadius: "7px", border: "1px solid #cbd5e1", fontSize: "11px", outline: "none" }} />
+            </div>
+
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>
+                <div>Cliente</div><div>Código</div><div>Preventista</div><div style={{ textAlign: "right" }}>Saldo</div><div>Actualizado</div>
+              </div>
+              {comerciosEstadoCuenta.length === 0 ? (
+                <div style={{ padding: "35px 15px", textAlign: "center", color: "#64748b", fontSize: "12px" }}>No hay clientes que coincidan con los filtros.</div>
+              ) : comerciosEstadoCuenta.map((c) => {
+                const deuda = Number(c.deuda || 0);
+                const conSaldo = deuda > 0;
+                return (
+                  <div key={c.id} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: "800", color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nombre || `Comercio #${c.id}`}</div>
+                      <div style={{ fontSize: "10px", color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.direccion || "Sin dirección"}</div>
+                    </div>
+                    <div style={{ fontWeight: "700", color: "#475569" }}>{c.codigo_cliente || c.codigo || c.id}</div>
+                    <div style={{ color: "#475569" }}>{c.preventista || "Sin asignar"}</div>
+                    <div style={{ textAlign: "right", fontWeight: "900", color: conSaldo ? "#dc2626" : "#2563eb" }}>{conSaldo ? "🔴" : "🔵"} $ {deuda.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                    <div style={{ color: "#64748b", fontSize: "11px" }}>{c.deuda_actualizada_at ? new Date(c.deuda_actualizada_at).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "Sin actualizar"}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         ) : (
           <>
         {/* 🚫 SOLICITUDES DE NO VISITAR MÁS */}
