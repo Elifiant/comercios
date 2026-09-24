@@ -1302,7 +1302,21 @@ useEffect(() => {
                 }
 
                 if (texto.startsWith("❌")) {
-                  alert("NO INTERESADO lo conectaremos aparte para respetar su circuito especial.");
+                  const comercioNoInteresado = llegueDestino;
+                  const solicitarBaja = window.confirm(
+                    `❌ ${comercioNoInteresado.nombre || "Este comercio"} indicó que no está interesado.\n\n` +
+                    `Aceptar = solicitar NO VISITAR MÁS al supervisor.\n` +
+                    `Cancelar = registrar solamente esta visita.`
+                  );
+
+                  if (solicitarBaja) {
+                    await solicitarNoVisitar(comercioNoInteresado);
+                  }
+
+                  setResultadoVisita("No interesado");
+                  setObservacionVisita("");
+                  setLlegueDestino(null);
+                  await registrarVisitaCheckIn(comercioNoInteresado, "No interesado");
                   return;
                 }
 
@@ -2532,7 +2546,7 @@ onChange={(e) =>
                       }}
                     >
                       {Number(proximoDestino.deuda || 0) > 0
-                        ? `🔴 DEBE $${Number(proximoDestino.deuda || 0).toLocaleString("es-AR")}`
+                        ? "🔴 DEBE"
                         : "🔵 SIN DEUDA"}
                     </button>
 
