@@ -1052,6 +1052,11 @@ if (navigator.geolocation) {
 
   const listaFiltrada = (comercios || [])
   .filter(c => {
+    // ⚫ Los comercios dados de baja no aparecen como clientes activos
+    // en HOY, TODOS ni en búsquedas. Siguen existiendo para historial
+    // y pueden seguir mostrándose en el mapa con marcador negro.
+    if (c.no_visitar === true) return false;
+
     if (vistaComercios === "HOY") {
   const diaHoy = obtenerDiaActual().toLowerCase().trim();
   const diaComercio = String(c.dia_visita || "").toLowerCase().trim();
