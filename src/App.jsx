@@ -668,7 +668,7 @@ useEffect(() => {
   const [guardandoVisita, setGuardandoVisita] = useState(false);
   const [visitaRegistradaHoy, setVisitaRegistradaHoy] = useState(false);
 
-  const registrarVisitaCheckIn = async (comercio, resultadoDirecto = null) => {
+  const registrarVisitaCheckIn = async (comercio, resultadoDirecto = null, observacionDirecta = null) => {
     if (!comercio) return;
     setGuardandoVisita(true);
     try {
@@ -690,7 +690,7 @@ useEffect(() => {
         empresa: empNombre,
         empresa_id: perfil?.empresa_id || null,
         resultado: resultadoDirecto || resultadoVisita,
-        observacion: observacionVisita || 'Visita registrada en campo',
+        observacion: observacionDirecta || observacionVisita || 'Visita registrada en campo',
         latitud: posicionActual ? posicionActual[0] : (comercio.latitud || null),
         longitud: posicionActual ? posicionActual[1] : (comercio.longitud || null),
         fecha: ahora
@@ -860,6 +860,8 @@ const solicitarNoVisitar = async (comercio) => {
   const [llegueDestino, setLlegueDestino] = useState(null);
   const [tieneStockDestino, setTieneStockDestino] = useState(null);
   const [confirmarSaltoVisita, setConfirmarSaltoVisita] = useState(false);
+  const [fechaRevisitaManual, setFechaRevisitaManual] = useState("");
+  const [motivoRevisita, setMotivoRevisita] = useState("");
 
   // 📍 Cada comercio empieza su corrección de ubicación desde SU propio punto.
   // Evita que quede visible la posición usada al editar el comercio anterior.
@@ -991,11 +993,15 @@ if (navigator.geolocation) {
 
   const fechaHoyLocal = fechaLocalISO();
 
-  const comerciosProgramadosHoy = (comercios || []).filter((c) =>
-    normalizarDia(c.dia_visita) === diaActualNormalizado &&
-    c.no_visitar !== true &&
-    c.omitir_visita_fecha !== fechaHoyLocal
-  );
+  const comerciosProgramadosHoy = (comercios || []).filter((c) => {
+    const esDiaHabitual = normalizarDia(c.dia_visita) === diaActualNormalizado;
+    const esRevisitaExcepcional = c.revisita_fecha === fechaHoyLocal;
+    return (
+      (esDiaHabitual || esRevisitaExcepcional) &&
+      c.no_visitar !== true &&
+      c.omitir_visita_fecha !== fechaHoyLocal
+    );
+  });
 
   const inicioHoyMetricas = new Date();
   inicioHoyMetricas.setHours(0, 0, 0, 0);
@@ -1059,11 +1065,13 @@ if (navigator.geolocation) {
     if (c.no_visitar === true) return false;
 
     if (vistaComercios === "HOY") {
-  const diaHoy = obtenerDiaActual().toLowerCase().trim();
-  const diaComercio = String(c.dia_visita || "").toLowerCase().trim();
+      const diaHoy = obtenerDiaActual().toLowerCase().trim();
+      const diaComercio = String(c.dia_visita || "").toLowerCase().trim();
+      const esRevisitaExcepcional = c.revisita_fecha === fechaHoyLocal;
 
-  if (diaComercio !== diaHoy) return false;
-}
+      if (diaComercio !== diaHoy && !esRevisitaExcepcional) return false;
+      if (c.omitir_visita_fecha === fechaHoyLocal) return false;
+    }
     if (!busqueda || busqueda.trim() === "") return true;
 
     const q = busqueda.toLowerCase().trim();
@@ -1234,8 +1242,25 @@ useEffect(() => {
 
 
   if (tieneStockDestino) {
+    const diasSemana = {
+      domingo: 0, lunes: 1, martes: 2, miercoles: 3,
+      jueves: 4, viernes: 5, sabado: 6,
+    };
+
+    const diaHabitualNormalizado = normalizarDia(tieneStockDestino.dia_visita);
+    const numeroDiaHabitual = diasSemana[diaHabitualNormalizado];
+
     const proximaFecha = new Date();
-    proximaFecha.setDate(proximaFecha.getDate() + 7);
+    proximaFecha.setHours(12, 0, 0, 0);
+
+    if (Number.isInteger(numeroDiaHabitual)) {
+      let diferencia = (numeroDiaHabitual - proximaFecha.getDay() + 7) % 7;
+      if (diferencia === 0) diferencia = 7;
+      proximaFecha.setDate(proximaFecha.getDate() + diferencia);
+    } else {
+      proximaFecha.setDate(proximaFecha.getDate() + 7);
+    }
+
     const proximaFechaISO = fechaLocalISO(proximaFecha);
     const proximaFechaTexto = new Intl.DateTimeFormat("es-AR", {
       weekday: "long",
@@ -1243,35 +1268,69 @@ useEffect(() => {
       month: "long",
     }).format(proximaFecha);
 
-    const finalizarTieneStock = async (saltarProxima) => {
+    const fechaManualTexto = fechaRevisitaManual
+      ? new Intl.DateTimeFormat("es-AR", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+        }).format(new Date(fechaRevisitaManual + "T12:00:00"))
+      : "";
+
+    const finalizarTieneStock = async (saltarProxima, fechaManual = "") => {
       const comercio = tieneStockDestino;
 
       if (saltarProxima) {
+        if (!fechaManual) {
+          alert("📅 Elegí el día en que querés volver a visitar al cliente.");
+          return;
+        }
+
+        if (fechaManual <= fechaHoyLocal) {
+          alert("⚠️ La fecha de re-visita tiene que ser posterior a hoy.");
+          return;
+        }
+
+        const actualizacion = {
+          omitir_visita_fecha: proximaFechaISO,
+          revisita_fecha: fechaManual,
+          revisita_motivo: motivoRevisita.trim() || null,
+        };
+
         const { error } = await supabase
           .from("comercios")
-          .update({ omitir_visita_fecha: proximaFechaISO })
+          .update(actualizacion)
           .eq("id", comercio.id)
           .eq("empresa_id", perfil?.empresa_id || comercio.empresa_id);
 
         if (error) {
-          console.error("Error guardando omisión de próxima visita:", error);
-          alert("No pude guardar la omisión de la próxima visita.");
+          console.error("Error guardando cambio excepcional de visita:", error);
+          alert(
+            "No pude guardar el cambio de visita.\n\n" +
+            "Si todavía no agregamos las columnas nuevas en Supabase, primero hay que hacerlo."
+          );
           return;
         }
 
         setComercios((prev) =>
           (prev || []).map((c) =>
             String(c.id) === String(comercio.id)
-              ? { ...c, omitir_visita_fecha: proximaFechaISO }
+              ? { ...c, ...actualizacion }
               : c
           )
         );
       }
 
+      const observacionCambio = saltarProxima
+        ? `Visita realizada con éxito. Próxima visita habitual saltada: ${proximaFechaTexto}. Re-visitar el día: ${fechaManualTexto}.${motivoRevisita.trim() ? " Motivo: " + motivoRevisita.trim() : ""}`
+        : "Visita realizada con éxito. Mantiene su próxima visita habitual.";
+
+      setConfirmarSaltoVisita(false);
+      setFechaRevisitaManual("");
+      setMotivoRevisita("");
       setTieneStockDestino(null);
       setResultadoVisita("Tiene stock");
       setObservacionVisita("");
-      await registrarVisitaCheckIn(comercio, "Tiene stock");
+      await registrarVisitaCheckIn(comercio, "Tiene stock", observacionCambio);
     };
 
     return (
@@ -1286,7 +1345,7 @@ useEffect(() => {
           </div>
 
           <div style={{ color: "#cbd5e1", fontSize: "13px", margin: "12px 0 18px" }}>
-            ¿La próxima visita se hace normalmente o este cliente pidió que no vayas?
+            ¿La próxima visita se hace normalmente o el cliente pidió cambiarla?
           </div>
 
           <button
@@ -1299,7 +1358,7 @@ useEffect(() => {
               fontSize: "13px", fontWeight: "900", cursor: "pointer",
             }}
           >
-            ✓ FINALIZAR VISITA
+            ✓ FINALIZAR VISITA · MANTENER RUTA NORMAL
           </button>
 
           {!confirmarSaltoVisita ? (
@@ -1307,49 +1366,87 @@ useEffect(() => {
               type="button"
               onClick={() => setConfirmarSaltoVisita(true)}
               style={{
-                width: "100%", minHeight: "62px", marginBottom: "10px",
+                width: "100%", minHeight: "66px", marginBottom: "10px",
                 border: "2px solid #facc15", borderRadius: "10px",
                 backgroundColor: "#713f12", color: "#fff",
                 fontSize: "14px", fontWeight: "900", cursor: "pointer",
               }}
             >
-              ⏭️ SALTAR PRÓXIMA VISITA
+              ⏭️ SALTAR PRÓXIMA VISITA / CAMBIAR FECHA
               <div style={{ fontSize: "11px", fontWeight: "800", marginTop: "4px", color: "#fde68a" }}>
-                ⚠️ No aparecerá el {proximaFechaTexto}
+                ⚠️ Visita habitual: {proximaFechaTexto}
               </div>
             </button>
           ) : (
             <div
               style={{
-                marginBottom: "10px",
-                padding: "14px",
-                border: "2px solid #facc15",
-                borderRadius: "12px",
+                marginBottom: "10px", padding: "14px",
+                border: "3px solid #facc15", borderRadius: "12px",
                 backgroundColor: "#451a03",
-                boxShadow: "0 0 0 3px rgba(250,204,21,0.10)",
+                boxShadow: "0 0 0 3px rgba(250,204,21,0.12)",
               }}
             >
               <div style={{ fontSize: "17px", fontWeight: "900", color: "#fef08a", textAlign: "center" }}>
-                ⚠️ ¿SALTAR LA PRÓXIMA VISITA?
+                ⚠️ CAMBIO EXCEPCIONAL DE VISITA
               </div>
 
-              <div style={{ fontSize: "13px", lineHeight: 1.45, color: "#fff", textAlign: "center", margin: "8px 0 12px" }}>
-                Este comercio <strong>NO aparecerá</strong> en la ruta del <strong>{proximaFechaTexto}</strong>.
+              <div style={{ marginTop: "10px", padding: "9px", backgroundColor: "#7c2d12", borderRadius: "8px", textAlign: "center" }}>
+                <div style={{ fontSize: "11px", color: "#fed7aa", fontWeight: "800" }}>⏭️ SE SALTARÁ LA VISITA HABITUAL</div>
+                <div style={{ fontSize: "15px", color: "#fff", fontWeight: "900", marginTop: "3px" }}>
+                  {proximaFechaTexto}
+                </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <label style={{ display: "block", marginTop: "13px", fontSize: "12px", color: "#fde68a", fontWeight: "900" }}>
+                📅 RE-VISITAR EL DÍA:
+              </label>
+              <input
+                type="date"
+                value={fechaRevisitaManual}
+                min={fechaHoyLocal}
+                onChange={(e) => setFechaRevisitaManual(e.target.value)}
+                style={{
+                  width: "100%", boxSizing: "border-box", marginTop: "6px",
+                  minHeight: "48px", borderRadius: "9px", border: "2px solid #facc15",
+                  padding: "8px 10px", fontSize: "16px", fontWeight: "800",
+                  backgroundColor: "#fff", color: "#111827",
+                }}
+              />
+
+              {fechaManualTexto && (
+                <div style={{ marginTop: "7px", color: "#86efac", fontSize: "13px", fontWeight: "900", textAlign: "center" }}>
+                  ✓ Volver: {fechaManualTexto}
+                </div>
+              )}
+
+              <label style={{ display: "block", marginTop: "12px", fontSize: "12px", color: "#fde68a", fontWeight: "900" }}>
+                📝 MOTIVO / INDICACIÓN DEL CLIENTE (opcional)
+              </label>
+              <input
+                type="text"
+                value={motivoRevisita}
+                onChange={(e) => setMotivoRevisita(e.target.value)}
+                placeholder="Ej.: Cliente viaja; pidió que pase el lunes"
+                style={{
+                  width: "100%", boxSizing: "border-box", marginTop: "6px",
+                  minHeight: "44px", borderRadius: "9px", border: "1px solid #d97706",
+                  padding: "8px 10px", fontSize: "13px",
+                  backgroundColor: "#fff", color: "#111827",
+                }}
+              />
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "13px" }}>
                 <button
                   type="button"
-                  onClick={() => setConfirmarSaltoVisita(false)}
+                  onClick={() => {
+                    setConfirmarSaltoVisita(false);
+                    setFechaRevisitaManual("");
+                    setMotivoRevisita("");
+                  }}
                   style={{
-                    minHeight: "46px",
-                    border: "1px solid #94a3b8",
-                    borderRadius: "9px",
-                    backgroundColor: "#334155",
-                    color: "#fff",
-                    fontSize: "12px",
-                    fontWeight: "900",
-                    cursor: "pointer",
+                    minHeight: "48px", border: "1px solid #94a3b8",
+                    borderRadius: "9px", backgroundColor: "#334155",
+                    color: "#fff", fontSize: "12px", fontWeight: "900", cursor: "pointer",
                   }}
                 >
                   ← NO, VOLVER
@@ -1357,19 +1454,18 @@ useEffect(() => {
 
                 <button
                   type="button"
-                  onClick={() => finalizarTieneStock(true)}
+                  onClick={() => finalizarTieneStock(true, fechaRevisitaManual)}
+                  disabled={!fechaRevisitaManual}
                   style={{
-                    minHeight: "46px",
-                    border: "2px solid #facc15",
-                    borderRadius: "9px",
-                    backgroundColor: "#a16207",
-                    color: "#fff",
-                    fontSize: "12px",
-                    fontWeight: "900",
-                    cursor: "pointer",
+                    minHeight: "48px",
+                    border: "2px solid #facc15", borderRadius: "9px",
+                    backgroundColor: fechaRevisitaManual ? "#a16207" : "#475569",
+                    color: "#fff", fontSize: "12px", fontWeight: "900",
+                    cursor: fechaRevisitaManual ? "pointer" : "not-allowed",
+                    opacity: fechaRevisitaManual ? 1 : 0.65,
                   }}
                 >
-                  ✓ SÍ, SALTAR
+                  ✓ CONFIRMAR CAMBIO
                 </button>
               </div>
             </div>
@@ -1379,6 +1475,8 @@ useEffect(() => {
             type="button"
             onClick={() => {
               setConfirmarSaltoVisita(false);
+              setFechaRevisitaManual("");
+              setMotivoRevisita("");
               setTieneStockDestino(null);
               setLlegueDestino(tieneStockDestino);
             }}

@@ -194,6 +194,7 @@ const reactivarComercio = async (comercio) => {
   const [pedidosReal, setPedidosReal] = useState([]);
   const [cargandoPedidosReal, setCargandoPedidosReal] = useState(false);
   const [pedidosSupervisor, setPedidosSupervisor] = useState([]);
+  const [visitasSupervisor, setVisitasSupervisor] = useState([]);
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
   const [cargando, setCargando] = useState(true);
   const [perfiles, setPerfiles] = useState([]);
@@ -309,6 +310,38 @@ useEffect(() => {
 
   cargarSolicitudesNoVisitar();
 }, [perfilSupervisor]);
+
+  // 🕐 Cargar visitas y pedidos de la empresa para la ficha operativa
+  useEffect(() => {
+    if (!perfilSupervisor?.empresa_id) return;
+
+    const cargarActividadOperativa = async () => {
+      try {
+        const [visitasResp, pedidosResp] = await Promise.all([
+          supabase
+            .from("visitas")
+            .select("*")
+            .eq("empresa_id", perfilSupervisor.empresa_id)
+            .order("fecha", { ascending: false }),
+          supabase
+            .from("pedidos")
+            .select("*")
+            .eq("empresa_id", perfilSupervisor.empresa_id)
+            .order("created_at", { ascending: false }),
+        ]);
+
+        if (visitasResp.error) throw visitasResp.error;
+        if (pedidosResp.error) throw pedidosResp.error;
+
+        setVisitasSupervisor(visitasResp.data || []);
+        setPedidosSupervisor(pedidosResp.data || []);
+      } catch (error) {
+        console.error("Error cargando actividad operativa:", error);
+      }
+    };
+
+    cargarActividadOperativa();
+  }, [perfilSupervisor?.empresa_id]);
 
   // 💳 Cargar vigencia real del abono de la empresa
   useEffect(() => {
@@ -788,6 +821,38 @@ useEffect(() => {
   const saldoTotalPendiente = (comercios || []).reduce((acc, c) => acc + Math.max(0, Number(c.deuda || 0)), 0);
   const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
   const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
+
+  const actividadComercioDetalle = (() => {
+    if (!comercioDetalleModal?.id) return { visita: null, pedido: null, esHoy: false };
+
+    const idComercio = String(comercioDetalleModal.id);
+    const visitas = (visitasSupervisor || [])
+      .filter(v => String(v.comercio_id) === idComercio)
+      .sort((a, b) => new Date(b.fecha || b.created_at || 0) - new Date(a.fecha || a.created_at || 0));
+
+    const visita = visitas[0] || null;
+    const pedidos = (pedidosSupervisor || [])
+      .filter(p => String(p.comercio_id) === idComercio)
+      .sort((a, b) => new Date(b.created_at || b.fecha || 0) - new Date(a.created_at || a.fecha || 0));
+
+    const pedido = pedidos[0] || null;
+    const fechaVisita = visita?.fecha || visita?.created_at || null;
+    const hoy = new Date();
+    const fv = fechaVisita ? new Date(fechaVisita) : null;
+    const esHoy = !!fv && fv.getFullYear() === hoy.getFullYear() && fv.getMonth() === hoy.getMonth() && fv.getDate() === hoy.getDate();
+
+    return { visita, pedido, esHoy };
+  })();
+
+  const estiloResultadoVisita = (resultado) => {
+    const r = String(resultado || "").toLowerCase();
+    if (r.includes("venta") || r.includes("pedido")) return { icono: "💰", fondo: "#f0fdf4", borde: "#86efac", color: "#166534" };
+    if (r.includes("stock")) return { icono: "📦", fondo: "#eff6ff", borde: "#93c5fd", color: "#1d4ed8" };
+    if (r.includes("cerrado")) return { icono: "🔒", fondo: "#fff7ed", borde: "#fdba74", color: "#9a3412" };
+    if (r.includes("no estaba")) return { icono: "🚪", fondo: "#fefce8", borde: "#fde047", color: "#854d0e" };
+    if (r.includes("interes")) return { icono: "❌", fondo: "#fef2f2", borde: "#fca5a5", color: "#991b1b" };
+    return { icono: "📍", fondo: "#f8fafc", borde: "#cbd5e1", color: "#334155" };
+  };
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -1479,6 +1544,103 @@ useEffect(() => {
                     <div style={{ fontWeight: "600", color: "#0f172a" }}>📍 {comercioDetalleModal.domicilio_fiscal || comercioDetalleModal.direccion || "Sin dirección"}</div>
                   </div>
                 </div>
+
+                {/* ÚLTIMA VISITA / VISITA DE HOY */}
+                {actividadComercioDetalle.visita && (() => {
+                  const visita = actividadComercioDetalle.visita;
+                  const pedido = actividadComercioDetalle.pedido;
+                  const estilo = estiloResultadoVisita(visita.resultado);
+                  const fechaVisita = visita.fecha || visita.created_at;
+                  const esVenta = String(visita.resultado || "").toLowerCase().includes("venta") || String(visita.resultado || "").toLowerCase().includes("pedido");
+                  const omiteFecha = comercioDetalleModal.omitir_visita_fecha;
+
+                  return (
+                    <div style={{ background: estilo.fondo, border: `2px solid ${estilo.borde}`, borderRadius: "8px", padding: "10px" }}>
+                      <div style={{ fontSize: "11px", fontWeight: "900", color: estilo.color, marginBottom: "3px" }}>
+                        🕐 {actividadComercioDetalle.esHoy ? "VISITA DE HOY" : "ÚLTIMA VISITA"}
+                      </div>
+                      <div style={{ fontSize: "12px", fontWeight: "900", color: "#15803d", marginBottom: "7px" }}>
+                        ✅ VISITA REALIZADA CON ÉXITO
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: "15px", fontWeight: "900", color: estilo.color }}>
+                            {estilo.icono} {String(visita.resultado || "Visita registrada").toUpperCase()}
+                          </div>
+                          <div style={{ marginTop: "4px", fontSize: "11px", color: "#475569" }}>
+                            👤 {visita.preventista || comercioDetalleModal.preventista || "Sin informar"}
+                            {fechaVisita ? ` · 🕒 ${new Date(fechaVisita).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}
+                          </div>
+                          {visita.observacion &&
+                            !(omiteFecha || comercioDetalleModal.revisita_fecha) && (
+                              <div style={{ marginTop: "4px", fontSize: "11px", color: "#111827", fontWeight: "700" }}>
+                                📝 {visita.observacion}
+                              </div>
+                            )}
+                        </div>
+                        {esVenta && pedido && (
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: "14px", fontWeight: "900", color: "#15803d", marginBottom: "5px" }}>
+                              $ {Number(pedido.total || pedido.total_pedido || 0).toLocaleString("es-AR")}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => { window.location.href = `/pedidos?pedido=${encodeURIComponent(pedido.id)}`; }}
+                              style={{ border: "none", borderRadius: "6px", background: "#2563eb", color: "#fff", padding: "7px 10px", fontSize: "11px", fontWeight: "900", cursor: "pointer" }}
+                            >
+                              🧾 VER PEDIDO #{pedido.numero_pedido != null
+                                ? String(pedido.numero_pedido).padStart(6, "0")
+                                : "SIN NÚMERO"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {(omiteFecha || comercioDetalleModal.revisita_fecha) && (
+                        <div
+                          style={{
+                            marginTop: "10px",
+                            padding: "11px",
+                            borderRadius: "8px",
+                            background: "#fff7ed",
+                            border: "2px solid #f59e0b",
+                          }}
+                        >
+                          <div style={{ fontSize: "12px", fontWeight: "900", color: "#9a3412", marginBottom: "8px" }}>
+                            ⚠️ CAMBIO EXCEPCIONAL DE VISITA
+                          </div>
+
+                          {omiteFecha && (
+                            <div style={{ background: "#ffedd5", border: "1px solid #fdba74", borderRadius: "6px", padding: "7px 8px", marginBottom: "7px" }}>
+                              <div style={{ fontSize: "10px", fontWeight: "900", color: "#9a3412" }}>
+                                ⏭️ VISITA HABITUAL SALTADA
+                              </div>
+                              <div style={{ fontSize: "13px", fontWeight: "900", color: "#7c2d12", marginTop: "2px" }}>
+                                {new Date(`${omiteFecha}T12:00:00`).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}
+                              </div>
+                            </div>
+                          )}
+
+                          {comercioDetalleModal.revisita_fecha && (
+                            <div style={{ background: "#dcfce7", border: "2px solid #22c55e", borderRadius: "6px", padding: "8px" }}>
+                              <div style={{ fontSize: "10px", fontWeight: "900", color: "#166534" }}>
+                                📅 RE-VISITAR
+                              </div>
+                              <div style={{ fontSize: "15px", fontWeight: "900", color: "#14532d", marginTop: "2px", textTransform: "uppercase" }}>
+                                {new Date(`${comercioDetalleModal.revisita_fecha}T12:00:00`).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}
+                              </div>
+                            </div>
+                          )}
+
+                          {comercioDetalleModal.revisita_motivo && (
+                            <div style={{ marginTop: "7px", fontSize: "11px", color: "#7c2d12", lineHeight: "1.4" }}>
+                              📝 <strong>Motivo:</strong> {comercioDetalleModal.revisita_motivo}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* AUDIO */}
                 <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "10px" }}>
