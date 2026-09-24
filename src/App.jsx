@@ -754,6 +754,64 @@ useEffect(() => {
     alert("❌ No se pudo guardar el cambio.");
   }
 };
+const eliminarCapturaVirgen = async (comercio) => {
+  if (!comercio?.id) return;
+
+  try {
+    // Una captura deja de ser "virgen" en cuanto tiene una visita o un pedido.
+    const [visitasResp, pedidosResp] = await Promise.all([
+      supabase
+        .from("visitas")
+        .select("id", { count: "exact", head: true })
+        .eq("comercio_id", comercio.id),
+      supabase
+        .from("pedidos")
+        .select("id", { count: "exact", head: true })
+        .eq("comercio_id", comercio.id),
+    ]);
+
+    if (visitasResp.error) throw visitasResp.error;
+    if (pedidosResp.error) throw pedidosResp.error;
+
+    const cantidadVisitas = visitasResp.count || 0;
+    const cantidadPedidos = pedidosResp.count || 0;
+
+    if (cantidadVisitas > 0 || cantidadPedidos > 0) {
+      alert(
+        "⚠️ Este registro ya es un cliente con movimientos.\n\n" +
+        "No se puede eliminar como captura. Si no debe visitarse más, usá la solicitud al supervisor."
+      );
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `🗑️ ¿Eliminar la captura "${comercio.nombre || "sin nombre"}"?\n\n` +
+      "No tiene visitas ni pedidos. Esta acción eliminará solamente esta captura."
+    );
+
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("comercios")
+      .delete()
+      .eq("id", comercio.id);
+
+    if (error) throw error;
+
+    setComercios((prev) =>
+      (prev || []).filter((c) => String(c.id) !== String(comercio.id))
+    );
+    setEditandoUbicacion(false);
+    setPosicionEdicionUbicacion(null);
+    setComercioSeleccionado(null);
+
+    alert("✅ Captura eliminada.");
+  } catch (error) {
+    console.error("Error eliminando captura:", error);
+    alert("❌ No se pudo eliminar la captura: " + (error.message || "error desconocido"));
+  }
+};
+
 const solicitarNoVisitar = async (comercio) => {
   if (!comercio) return;
 
@@ -801,6 +859,13 @@ const solicitarNoVisitar = async (comercio) => {
   const [destinoMapa, setDestinoMapa] = useState(null);
   const [llegueDestino, setLlegueDestino] = useState(null);
   const [tieneStockDestino, setTieneStockDestino] = useState(null);
+
+  // 📍 Cada comercio empieza su corrección de ubicación desde SU propio punto.
+  // Evita que quede visible la posición usada al editar el comercio anterior.
+  useEffect(() => {
+    setEditandoUbicacion(false);
+    setPosicionEdicionUbicacion(null);
+  }, [comercioSeleccionado?.id]);
 
   // Lista filtrada de comercios por búsqueda y orden
   
@@ -1796,7 +1861,11 @@ if (comercioSeleccionado) {
         }}
       >
         <button
-          onClick={() => setComercioSeleccionado(null)}
+          onClick={() => {
+            setEditandoUbicacion(false);
+            setPosicionEdicionUbicacion(null);
+            setComercioSeleccionado(null);
+          }}
           style={{
             background: "transparent",
             border: "none",
@@ -2308,6 +2377,33 @@ onChange={(e) =>
           >
             {guardandoEdicion ? "Guardando..." : "💾 Guardar Cambios"}
           </button>
+          <button
+            type="button"
+            onClick={() => eliminarCapturaVirgen(comercioSeleccionado)}
+            style={{
+              width: "100%",
+              padding: "12px",
+              marginTop: "12px",
+              backgroundColor: "#7f1d1d",
+              color: "#fff",
+              border: "1px solid #ef4444",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            🗑️ ELIMINAR CAPTURA
+          </button>
+          <div
+            style={{
+              marginTop: "6px",
+              fontSize: "11px",
+              color: "#94a3b8",
+              textAlign: "center",
+            }}
+          >
+            Solo se elimina si todavía no tiene visitas ni pedidos.
+          </div>
         </div>
       </div>
     </div>
