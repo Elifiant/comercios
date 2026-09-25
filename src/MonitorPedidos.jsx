@@ -10,6 +10,7 @@ export default function MonitorPedidos() {
     const [pedidos, setPedidos] = useState([]);
   const [cargandoPedidos, setCargandoPedidos] = useState(true);
   const [preventistasReales, setPreventistasReales] = useState(["Todos"]);
+  const [datosCabecera, setDatosCabecera] = useState({ empresa: "", abonado_hasta: null });
 
   const cargarPedidosReales = async () => {
     try {
@@ -28,6 +29,18 @@ export default function MonitorPedidos() {
       if (errorPerfil) throw errorPerfil;
       if (!perfil?.empresa_id) throw new Error("El usuario no tiene empresa_id asignado.");
 
+      // Datos visuales para repetir la cabecera real del Supervisor
+      const { data: empresaCabecera } = await supabase
+        .from("empresas")
+        .select("nombre, abonado_hasta")
+        .eq("id", perfil.empresa_id)
+        .maybeSingle();
+
+      setDatosCabecera({
+        empresa: empresaCabecera?.nombre || "",
+        abonado_hasta: empresaCabecera?.abonado_hasta || null
+      });
+
       // 2. Preventistas de SU empresa, aunque todavía no tengan pedidos
       const { data: perfilesEmpresa, error: errorPerfiles } = await supabase
         .from("perfiles")
@@ -44,49 +57,48 @@ export default function MonitorPedidos() {
         .eq("empresa_id", perfil.empresa_id)
         .order("created_at", { ascending: false });
 
-      if (error) throw error;
-
-      // 4. Traer los renglones reales de pedido_items
-      const idsPedidos = (data || []).map(p => p.id).filter(Boolean);
-      let itemsPorPedido = {};
-
-      if (idsPedidos.length > 0) {
-        const { data: itemsData, error: errorItems } = await supabase
-          .from("pedido_items")
-          .select("pedido_id, producto_id, producto_nombre, codigo, cantidad, precio_unitario, subtotal")
-          .in("pedido_id", idsPedidos);
-
-        if (errorItems) throw errorItems;
-
-        (itemsData || []).forEach(it => {
-          if (!itemsPorPedido[it.pedido_id]) itemsPorPedido[it.pedido_id] = [];
-          itemsPorPedido[it.pedido_id].push({
-            producto_id: it.producto_id,
-            codigo: it.codigo || "",
-            nombre: it.producto_nombre || it.codigo || "Artículo",
-            cant: Number(it.cantidad || 0),
-            p_unit: Number(it.precio_unitario || 0),
-            subtotal: Number(it.subtotal || 0)
-          });
-        });
-      }
-
       let listaConsolidada = [];
-      if (data && data.length > 0) {
-        listaConsolidada = data.map(p => {
-          const itemsReales = itemsPorPedido[p.id] || [];
-          const unidades = itemsReales.reduce((acc, it) => acc + Number(it.cant || 0), 0);
+      if (!error && data && data.length > 0) {
+        // Los renglones reales están en pedido_items y se relacionan por pedido_id.
+        const idsPedidos = data.map(p => p.id).filter(Boolean);
+        let itemsPorPedido = {};
 
+        if (idsPedidos.length > 0) {
+          const { data: itemsData, error: errorItems } = await supabase
+            .from("pedido_items")
+            .select("pedido_id, producto_id, producto_nombre, codigo, cantidad, precio_unitario, subtotal")
+            .in("pedido_id", idsPedidos);
+
+          if (errorItems) {
+            console.error("Error cargando pedido_items:", errorItems);
+          } else {
+            (itemsData || []).forEach(it => {
+              const clave = String(it.pedido_id);
+              if (!itemsPorPedido[clave]) itemsPorPedido[clave] = [];
+              itemsPorPedido[clave].push({
+                producto_id: it.producto_id,
+                nombre: it.producto_nombre || it.codigo || "Producto",
+                codigo: it.codigo || "",
+                cant: Number(it.cantidad || 0),
+                p_unit: Number(it.precio_unitario || 0),
+                subtotal: Number(it.subtotal || 0)
+              });
+            });
+          }
+        }
+
+        listaConsolidada = data.map(p => {
+          const itemsReales = itemsPorPedido[String(p.id)] || [];
           return {
             id: p.id || ("PED-" + String(p.created_at || Date.now()).slice(-4)),
-            numeroPedido: p.numero_pedido || null,
+            numeroVisible: String(p.numero_pedido || "").padStart(6, "0"),
             hora: p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "En curso",
             preventista: p.preventista || p.vendedor || "Walter",
             ruta: p.ruta || "Ruta de Visita",
             cliente: p.cliente || p.comercio_nombre || ("Comercio #" + (p.comercio_id || "")),
             direccion: p.direccion || "En recorrido",
             condicion: p.condicion || "Consumidor Final",
-            bultos: unidades,
+            bultos: p.bultos || itemsReales.reduce((acc, it) => acc + Number(it.cant || 0), 0) || 1,
             total: Number(p.total || p.total_pedido || 0),
             estado: p.estado || "Ingresado",
             items: itemsReales,
@@ -174,58 +186,66 @@ export default function MonitorPedidos() {
 
   
 
+  const estadoAbono = (() => {
+    const nombreEmpresa = String(datosCabecera?.empresa || "").trim().toUpperCase();
+    if (nombreEmpresa === "DEMO S.A." || nombreEmpresa === "DEMO SA") return { texto: "Cuenta DEMO", color: "#2563eb", icono: "🧪" };
+    if (!datosCabecera?.abonado_hasta) return { texto: "Vencimiento no informado", color: "#64748b", icono: "🗓️" };
+    const partes = String(datosCabecera.abonado_hasta).split("-").map(Number);
+    const vencimiento = new Date(partes[0], partes[1] - 1, partes[2]);
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    vencimiento.setHours(0, 0, 0, 0);
+    const dias = Math.ceil((vencimiento - hoy) / 86400000);
+    if (dias < 0) return { texto: "Abono vencido", color: "#dc2626", icono: "🔴" };
+    if (dias === 0) return { texto: "Vence hoy", color: "#dc2626", icono: "🔴" };
+    if (dias <= 5) return { texto: `${dias} día${dias === 1 ? "" : "s"} restante${dias === 1 ? "" : "s"}`, color: "#d97706", icono: "⚠️" };
+    return { texto: `${dias} días restantes`, color: "#16a34a", icono: "🗓️" };
+  })();
+
+  const cerrarSesionSupervisor = async () => {
+    try {
+      await supabase.auth.signOut();
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (e) {}
+    window.location.href = "/";
+  };
+
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: esMovil ? "column" : "row", background: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif", color: "#0f172a" }}>
-      {/* SIDEBAR PARA ESCRITORIO (Mac) O MENÚ MÓVIL DESPLEGABLE */}
-      
-        <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      {/* BARRA SUPERIOR UNIFICADA CON LOS 3 PILARES EXACTOS */}
-      <header style={{ backgroundColor: "#0f172a", borderBottom: "1px solid #334155", padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "22px" }}>📦</span>
+    <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <img src="/logo.svg" alt="RutaComercio" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
           <div>
-            <h1 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#fff", letterSpacing: "-0.5px" }}>RutaComercio · Pedidos en Vivo</h1>
-            <p style={{ margin: 0, fontSize: "11px", color: "#94a3b8" }}>Despacho y Gestión de Comandas de Campo</p>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <h1 style={{ margin: 0, fontSize: "17px", fontWeight: "800", letterSpacing: "-0.5px", color: "#0f172a" }}>RutaComercio Web</h1>
+              <span style={{ backgroundColor: "#dcfce7", color: "#15803d", fontSize: "11px", fontWeight: "700", padding: "1px 6px", borderRadius: "10px" }}>● En Vivo</span>
+            </div>
+            <p style={{ margin: 0, fontSize: "12px", color: "#64748b" }}>Panel de Control y Supervisión Territorial</p>
           </div>
         </div>
 
-        {/* NAVEGACIÓN SUPERIOR: SÓLO LOS 3 PILARES QUE IMPORTAN */}
-        <nav style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-          <a href="/supervisor" style={{ padding: "7px 14px", borderRadius: "6px", backgroundColor: "#1e293b", color: "#cbd5e1", textDecoration: "none", fontSize: "12px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px", transition: "all 0.2s" }}>
-            <span>📡</span> Monitoreo en Vivo
-          </a>
-          <a href="/supervisor" style={{ padding: "7px 14px", borderRadius: "6px", backgroundColor: "#1e293b", color: "#cbd5e1", textDecoration: "none", fontSize: "12px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px", transition: "all 0.2s" }}>
-            <span>🗓️</span> Diseñador Hojas de Ruta
-          </a>
-          <span style={{ padding: "7px 14px", borderRadius: "6px", backgroundColor: "#2563eb", color: "#fff", fontSize: "12px", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px", boxShadow: "0 2px 8px rgba(37,99,235,0.4)" }}>
-            <span>📦</span> Pedidos en Vivo
-          </span>
-          <a href="/supervisor" style={{ marginLeft: "12px", padding: "7px 14px", borderRadius: "6px", backgroundColor: "#ef4444", color: "#fff", textDecoration: "none", fontSize: "12px", fontWeight: "700" }}>
-            ✕ Salir
-          </a>
-        </nav>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", backgroundColor: "#f8fafc", border: "1px solid #cbd5e1", padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "700", color: "#334155" }}>
+            <span>{estadoAbono.icono}</span>
+            <span>Abono: <strong style={{ color: estadoAbono.color }}>{estadoAbono.texto}</strong></span>
+          </div>
+          <a href="/pagos" style={{ display: "inline-flex", alignItems: "center", gap: "6px", backgroundColor: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", padding: "7px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "700", textDecoration: "none" }}><span>💳</span> Pagos & Suscripción</a>
+          <button type="button" onClick={cerrarSesionSupervisor} style={{ backgroundColor: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", padding: "7px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "700", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}><span>✕</span> Salir</button>
+        </div>
       </header>
 
-      {/* CONTENIDO PRINCIPAL */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <header style={{ background: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 100 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            {esMovil && (
-              <button onClick={() => setMenuAbierto(true)} style={{ background: "#0f172a", color: "#fff", border: "none", padding: "6px 10px", borderRadius: "6px", fontSize: "16px", cursor: "pointer" }}>
-                ☰
-              </button>
-            )}
-            <div>
-              <h1 style={{ fontSize: esMovil ? "15px" : "18px", fontWeight: "800", margin: 0, color: "#0f172a" }}>Monitor de Pedidos</h1>
-              <p style={{ fontSize: "11px", color: "#64748b", margin: 0 }}>Ventas en tiempo real</p>
-            </div>
-          </div>
-          <a href="/supervisor" style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", padding: "6px 12px", borderRadius: "6px", textDecoration: "none", fontSize: "12px", fontWeight: "700" }}>
-            🗺️ Mapa
-          </a>
-        </header>
+      <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px", overflowX: "auto", whiteSpace: "nowrap" }}>
+        <a href="/supervisor" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>📡 Monitoreo en Vivo</a>
+        <a href="/supervisor" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🗓️ Diseñador Hojas de Ruta (Semanal)</a>
+        <span style={{ padding: "12px 0", borderBottom: "2px solid #2563eb", color: "#2563eb", fontWeight: "700", fontSize: "13px" }}>📦 Pedidos</span>
+        <a href="/supervisor" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💳 Estado de Cuenta</a>
+        <a href="/supervisor" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🚫 Solicitudes</a>
+        <a href="/supervisor" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🟡 Altas provisorias</a>
+      </div>
 
-        <main style={{ padding: "12px", maxWidth: "1200px", width: "100%", boxSizing: "border-box" }}>
+      <div style={{ width: "100%" }}>
+        <main style={{ padding: "16px 24px", maxWidth: "1500px", width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
           {/* Métricas Resumen */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "8px", marginBottom: "12px" }}>
             <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
@@ -268,33 +288,25 @@ export default function MonitorPedidos() {
               <div style={{ fontSize: "11px", fontWeight: "800", color: "#475569", marginBottom: "8px", textTransform: "uppercase" }}>
                 Comandas Activas ({listaFiltrada.length})
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {listaFiltrada.map(p => {
                   const b = getBadgeColor(p.estado);
                   const activo = pedidoActivo && pedidoActivo.id === p.id;
                   return (
-                    <div key={p.id} onClick={() => setPedidoActivo(p)} style={{
-                        background: activo ? "#dbeafe" : (listaFiltrada.indexOf(p) % 2 === 0 ? "#eef2f7" : "#dde5ee"),
-                        border: activo ? "2px solid #2563eb" : "1px solid #b8c4d1",
-                        borderRadius: "7px",
-                        padding: "5px 8px",
-                        cursor: "pointer",
-                        boxShadow: activo ? "0 1px 4px rgba(37,99,235,0.12)" : "none"
-                      }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1px" }}>
+                    <div key={p.id} onClick={() => setPedidoActivo(p)} style={{ background: activo ? "#eff6ff" : "#fff", border: activo ? "2px solid #2563eb" : "1px solid #e2e8f0", borderRadius: "8px", padding: "10px", cursor: "pointer" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                         <div>
-                          <span style={{ fontWeight: "800", fontSize: "12px", color: "#2563eb" }}>
-                            {p.numeroPedido ? `Pedido #${String(p.numeroPedido).padStart(6, "0")}` : "Pedido"}
-                          </span>
+                          <span style={{ fontWeight: "800", fontSize: "12px", color: "#2563eb" }}>Pedido #{p.numeroVisible}</span>
                           <span style={{ fontSize: "10px", color: "#64748b", marginLeft: "4px" }}>{p.hora}</span>
                         </div>
                         <span style={{ background: b.bg, color: b.text, border: "1px solid " + b.border, fontSize: "9px", fontWeight: "800", padding: "2px 6px", borderRadius: "10px" }}>
                           {p.estado}
                         </span>
                       </div>
-                      <div style={{ fontWeight: "850", fontSize: "13px", color: "#172033", marginTop: "2px" }}>{p.cliente}</div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "3px", paddingTop: "3px", borderTop: "1px solid #b8c4d1" }}>
-                        <span style={{ fontSize: "10px", color: "#475569" }}>👤 <strong>{p.preventista}</strong> ({p.bultos} unidades)</span>
+                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>{p.cliente}</div>
+                      <div style={{ fontSize: "10px", color: "#64748b", marginTop: "1px" }}>📍 {p.direccion}</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "6px", borderTop: "1px solid #f1f5f9" }}>
+                        <span style={{ fontSize: "10px", color: "#475569" }}>👤 <strong>{p.preventista}</strong> ({p.bultos} bultos)</span>
                         <span style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>${p.total.toLocaleString("es-AR")}</span>
                       </div>
                     </div>
@@ -304,60 +316,47 @@ export default function MonitorPedidos() {
             </div>
 
             {pedidoActivo && (
-              <div style={{ width: esMovil ? "100%" : "45%", background: "#f8fafc", borderRadius: "9px", border: "1px solid #cbd5e1", padding: "10px", position: esMovil ? "static" : "sticky", top: "70px", marginTop: esMovil ? "10px" : 0 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "6px", marginBottom: "6px" }}>
+              <div style={{ width: esMovil ? "100%" : "45%", background: "#fff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "12px", position: esMovil ? "static" : "sticky", top: "70px", marginTop: esMovil ? "10px" : 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", marginBottom: "10px" }}>
                   <div>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: "7px", flexWrap: "wrap" }}>
-                       <span style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>DETALLE DEL PEDIDO ·</span>
-                       <span style={{ fontSize: "14px", fontWeight: "900", color: "#172033" }}>{pedidoActivo.cliente}</span>
-                     </div>
-                     <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "800", marginTop: "2px" }}>
-                       {pedidoActivo.numeroPedido ? `Pedido #${String(pedidoActivo.numeroPedido).padStart(6, "0")}` : "Pedido"} · {pedidoActivo.hora}
-                     </div>
+                    <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "700" }}>DETALLE SELECCIONADO</div>
+                    <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Pedido #{pedidoActivo.numeroVisible} · {pedidoActivo.cliente}</div>
                   </div>
                   <span style={{ background: "#dcfce7", color: "#15803d", fontSize: "10px", fontWeight: "800", padding: "3px 6px", borderRadius: "4px" }}>
                     {pedidoActivo.lista}
                   </span>
                 </div>
 
-                <div style={{ fontSize: "10px", color: "#475569", marginBottom: "8px", lineHeight: 1.35 }}>
-                  <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
-                    <span>👤 <strong>{pedidoActivo.preventista}</strong></span>
-                    <span>💳 {String(pedidoActivo.nota || "").replace(/^Medio de pago:\s*/i, "")}</span>
-                  </div>
+                <div style={{ fontSize: "11px", color: "#475569", marginBottom: "10px", lineHeight: 1.4 }}>
+                  <div>📍 <strong>Dirección:</strong> {pedidoActivo.direccion}</div>
+                  <div>👤 <strong>Preventista:</strong> {pedidoActivo.preventista} ({pedidoActivo.ruta})</div>
+                  <div>📝 <strong>Nota:</strong> <em>"{pedidoActivo.nota}"</em></div>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginBottom: "8px" }}>
+
+                <div style={{ fontSize: "11px", fontWeight: "800", color: "#0f172a", marginBottom: "6px" }}>MERCADERÍA ({pedidoActivo.items.length} ítems)</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "12px" }}>
                   {pedidoActivo.items.map((it, idx) => (
-                    <div key={idx} style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "4px 7px",
-                      background: idx % 2 === 0 ? "#e2e8f0" : "#f1f5f9",
-                      border: "1px solid #c5cfdb",
-                      borderRadius: "5px",
-                      fontSize: "9.5px"
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
-                        <span style={{ fontWeight: "750", color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.nombre}</span>
-                        <span style={{ color: "#526176", fontSize: "9px", whiteSpace: "nowrap" }}>{it.cant} × ${it.p_unit.toLocaleString("es-AR")}</span>
+                    <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px", background: "#f8fafc", borderRadius: "6px", fontSize: "11px" }}>
+                      <div>
+                        <div style={{ fontWeight: "700", color: "#0f172a" }}>{it.nombre}</div>
+                        <div style={{ color: "#64748b", fontSize: "10px" }}>{it.cant} × ${it.p_unit.toLocaleString("es-AR")}</div>
                       </div>
-                      <div style={{ fontWeight: "850", color: "#0f172a", marginLeft: "8px", whiteSpace: "nowrap" }}>${it.subtotal.toLocaleString("es-AR")}</div>
+                      <div style={{ fontWeight: "800", color: "#0f172a" }}>${it.subtotal.toLocaleString("es-AR")}</div>
                     </div>
                   ))}
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", background: "#e8f0ff", border: "1px solid #c7d7f5", borderRadius: "6px", marginBottom: "8px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px", background: "#eff6ff", borderRadius: "6px", marginBottom: "10px" }}>
                   <div>
                     <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "700" }}>TOTAL PEDIDO</div>
-                    <div style={{ fontSize: "10px", color: "#64748b" }}>{pedidoActivo.bultos} unidades</div>
+                    <div style={{ fontSize: "10px", color: "#64748b" }}>{pedidoActivo.bultos} bultos</div>
                   </div>
-                  <div style={{ fontSize: "16px", fontWeight: "900", color: "#1d4ed8" }}>
+                  <div style={{ fontSize: "18px", fontWeight: "900", color: "#1d4ed8" }}>
                     ${pedidoActivo.total.toLocaleString("es-AR")}
                   </div>
                 </div>
 
-                <button onClick={() => alert("Comanda despachada al depósito.")} style={{ width: "100%", background: "#2563eb", color: "#fff", border: "none", padding: "8px", borderRadius: "6px", fontSize: "11px", fontWeight: "800", cursor: "pointer" }}>
+                <button onClick={() => alert("Comanda despachada al depósito.")} style={{ width: "100%", background: "#2563eb", color: "#fff", border: "none", padding: "10px", borderRadius: "6px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>
                   📦 Pasar a Depósito
                 </button>
               </div>
@@ -365,7 +364,6 @@ export default function MonitorPedidos() {
           </div>
         </main>
       </div>
-    </div>
     </div>
   );
 }
