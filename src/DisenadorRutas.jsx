@@ -111,6 +111,17 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
   }, [perfilSupervisor?.empresa_id, preventista]);
 
 
+  const moverParada = (index, direccion) => {
+    setParadas(prev => {
+      const nuevoIndex = index + direccion;
+      if (nuevoIndex < 0 || nuevoIndex >= prev.length) return prev;
+      const copia = [...prev];
+      [copia[index], copia[nuevoIndex]] = [copia[nuevoIndex], copia[index]];
+      return copia;
+    });
+    setMensaje("Cambios sin guardar");
+  };
+
   const soltarEn = destino => {
     if (dragIndex === null || dragIndex === destino) return setDragIndex(null);
     setParadas(prev => {
@@ -237,7 +248,7 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
                  <span title="Arrastrar" style={{fontSize:20,color:"#94a3b8",cursor:"grab"}}>☰</span>
                  <span style={{width:25,height:25,borderRadius:"50%",background:"#2563eb",color:"#fff",
                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,flexShrink:0}}>{i+1}</span>
-                 <div style={{minWidth:0}}>
+                 <div style={{minWidth:0,flex:1}}>
                    <div style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                      {c.nombre || `Comercio #${c.id}`}
                    </div>
@@ -245,6 +256,10 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
                      {c.direccion || "Sin dirección"}
                    </div>
                  </div>
+                  <div style={{display:"flex",gap:5,flexShrink:0}} onClick={e=>e.stopPropagation()}>
+                    <button type="button" onClick={()=>moverParada(i,-1)} disabled={i===0} style={{width:34,height:34,borderRadius:7,border:"1px solid #cbd5e1",background:i===0?"#f1f5f9":"#fff",fontSize:15,fontWeight:800}}>▲</button>
+                    <button type="button" onClick={()=>moverParada(i,1)} disabled={i===paradas.length-1} style={{width:34,height:34,borderRadius:7,border:"1px solid #cbd5e1",background:i===paradas.length-1?"#f1f5f9":"#fff",fontSize:15,fontWeight:800}}>▼</button>
+                  </div>
                </div>
              ))}
            </div>}
