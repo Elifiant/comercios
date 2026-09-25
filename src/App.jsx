@@ -976,6 +976,16 @@ const solicitarNoVisitar = async (comercio) => {
           console.warn("La empresa no tiene una lista activa predeterminada:", nuevo.empresa);
         }
 
+        // En Modo Manejo no mostramos ventanas que obliguen al preventista a tocar la pantalla.
+        if (!modoManejo) {
+          alert(
+            "✅ Cliente registrado\n\n" +
+            "Ya podés cargar sus datos y tomar pedidos inmediatamente.\n\n" +
+            "🟡 La validación administrativa del cliente queda pendiente para el supervisor.\n" +
+            "Los pedidos NO necesitan aprobación."
+          );
+        }
+
         setTimeout(() => setTextoBotonAgregar("➕ AGREGAR COMERCIO"), 1800);
       } catch (err) {
         console.error("Error al registrar en Supabase:", err);
@@ -1793,6 +1803,11 @@ useEffect(() => {
         setTomandoPedido(false);
         setResultadoVisita("Venta");
         setObservacionVisita("");
+        alert(
+          comercioSeleccionado?.estado_alta === "provisorio"
+            ? "🚀 Pedido enviado correctamente.\n\nNo requiere aprobación del supervisor.\nEl alta del cliente continúa en validación administrativa."
+            : "🚀 Pedido enviado correctamente.\n\nNo requiere aprobación del supervisor."
+        );
         await registrarVisitaCheckIn(comercioSeleccionado, "Venta");
       }}
     />

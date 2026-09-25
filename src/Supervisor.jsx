@@ -822,6 +822,100 @@ useEffect(() => {
   const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
   const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
 
+  // 🟡 Comercios dados de alta por preventistas que esperan aprobación del supervisor
+  const altasProvisorias = (comercios || []).filter(c => c.estado_alta === "provisorio");
+
+  const aprobarAltaProvisoria = async (comercio) => {
+    if (!comercio?.id || !perfilSupervisor?.empresa_id) return;
+    const confirmar = window.confirm(`✅ ¿Aprobar el alta de "${comercio.nombre || "este comercio"}"?`);
+    if (!confirmar) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("comercios")
+        .update({ estado_alta: "aprobado" })
+        .eq("id", comercio.id)
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .select("id, estado_alta")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) throw new Error("El comercio no fue actualizado en Supabase.");
+
+      setComercios(prev => (prev || []).map(c =>
+        c.id === comercio.id ? { ...c, estado_alta: "aprobado" } : c
+      ));
+      alert("✅ Alta aprobada. El comercio quedó confirmado.");
+    } catch (error) {
+      console.error("Error aprobando alta provisoria:", error);
+      alert("❌ No se pudo aprobar el alta: " + (error.message || "Verifique conexión"));
+    }
+  };
+
+  const aprobarTodasAltasProvisorias = async () => {
+    if (!perfilSupervisor?.empresa_id || altasProvisorias.length === 0) return;
+
+    const cantidad = altasProvisorias.length;
+    const confirmar = window.confirm(
+      `✅ ¿Aprobar las ${cantidad} altas provisorias pendientes?\n\nSe confirmarán todos los comercios provisorios de esta empresa. No se borrará ningún pedido ni venta.`
+    );
+    if (!confirmar) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("comercios")
+        .update({ estado_alta: "aprobado" })
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .eq("estado_alta", "provisorio")
+        .select("id");
+
+      if (error) throw error;
+
+      const idsAprobados = new Set((data || []).map(item => String(item.id)));
+      if (idsAprobados.size === 0) {
+        throw new Error("No se actualizó ninguna alta provisoria en Supabase.");
+      }
+
+      setComercios(prev => (prev || []).map(c =>
+        idsAprobados.has(String(c.id)) ? { ...c, estado_alta: "aprobado" } : c
+      ));
+
+      alert(`✅ ${idsAprobados.size} alta${idsAprobados.size === 1 ? "" : "s"} aprobada${idsAprobados.size === 1 ? "" : "s"} correctamente.`);
+    } catch (error) {
+      console.error("Error aprobando todas las altas provisorias:", error);
+      alert("❌ No se pudieron aprobar todas las altas: " + (error.message || "Verifique conexión"));
+    }
+  };
+
+  const rechazarAltaProvisoria = async (comercio) => {
+    if (!comercio?.id || !perfilSupervisor?.empresa_id) return;
+    const confirmar = window.confirm(
+      `❌ ¿Rechazar el alta de "${comercio.nombre || "este comercio"}"?\n\nEl comercio NO se borrará y sus pedidos/ventas se conservarán.`
+    );
+    if (!confirmar) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("comercios")
+        .update({ estado_alta: "rechazado" })
+        .eq("id", comercio.id)
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .select("id, estado_alta")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) throw new Error("El comercio no fue actualizado en Supabase.");
+
+      setComercios(prev => (prev || []).map(c =>
+        c.id === comercio.id ? { ...c, estado_alta: "rechazado" } : c
+      ));
+      alert("❌ Alta rechazada. El comercio y sus ventas quedaron conservados.");
+    } catch (error) {
+      console.error("Error rechazando alta provisoria:", error);
+      alert("❌ No se pudo rechazar el alta: " + (error.message || "Verifique conexión"));
+    }
+  };
+
   const actividadComercioDetalle = (() => {
     if (!comercioDetalleModal?.id) return { visita: null, pedido: null, esHoy: false };
 
@@ -969,6 +1063,12 @@ useEffect(() => {
         >
           🚫 Solicitudes{solicitudesPendientes.length > 0 ? ` (${solicitudesPendientes.length})` : ""}
         </button>
+        <button
+          onClick={() => setSeccionActiva("altasProvisorias")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "altasProvisorias" ? "2px solid #d97706" : "2px solid transparent", color: seccionActiva === "altasProvisorias" ? "#b45309" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          🟡 Altas provisorias{altasProvisorias.length > 0 ? ` (${altasProvisorias.length})` : ""}
+        </button>
       </div>
 
       <main style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
@@ -1028,6 +1128,58 @@ useEffect(() => {
             perfilSupervisor={perfilSupervisor}
             perfiles={perfiles}
           />
+         ) : seccionActiva === "altasProvisorias" ? (
+          <div>
+            <div style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>🟡 Altas provisorias</h2>
+                <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>Comercios capturados por preventistas. Pueden vender inmediatamente y el supervisor confirma el alta después.</p>
+              </div>
+              {altasProvisorias.length > 0 && (
+                <button
+                  type="button"
+                  onClick={aprobarTodasAltasProvisorias}
+                  style={{ padding: "9px 14px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: "900", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  ✅ APROBAR TODAS ({altasProvisorias.length})
+                </button>
+              )}
+            </div>
+
+            {altasProvisorias.length === 0 ? (
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "24px", color: "#64748b", fontSize: "13px" }}>
+                ✅ No hay altas provisorias pendientes.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: "12px" }}>
+                {altasProvisorias.map((comercio) => {
+                  const pedidosComercio = (pedidosSupervisor || []).filter(p => String(p.comercio_id) === String(comercio.id));
+                  return (
+                    <div key={comercio.id} style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "12px", padding: "14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start", flexWrap: "wrap" }}>
+                        <div style={{ flex: "1 1 320px" }}>
+                          <div style={{ fontWeight: "900", fontSize: "15px", color: "#0f172a" }}>🏪 {comercio.nombre || "Comercio sin nombre"}</div>
+                          <div style={{ fontSize: "12px", color: "#475569", marginTop: "5px" }}>👤 Preventista: <strong>{comercio.preventista || "Sin informar"}</strong></div>
+                          {comercio.direccion && <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>📍 {comercio.direccion}</div>}
+                          {comercio.contacto && <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>🙋 Contacto: {comercio.contacto}</div>}
+                          {(comercio.telefono || comercio.whatsapp) && <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>📞 {comercio.whatsapp || comercio.telefono}</div>}
+                          <div style={{ fontSize: "11px", color: "#92400e", marginTop: "7px", fontWeight: "800" }}>🟡 Alta provisoria · ID {comercio.id}</div>
+                          <div style={{ fontSize: "11px", color: pedidosComercio.length > 0 ? "#166534" : "#64748b", marginTop: "3px", fontWeight: pedidosComercio.length > 0 ? "800" : "600" }}>
+                            {pedidosComercio.length > 0 ? `💰 Tiene ${pedidosComercio.length} pedido${pedidosComercio.length === 1 ? "" : "s"} registrado${pedidosComercio.length === 1 ? "" : "s"}` : "📦 Todavía no tiene pedidos registrados"}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                          <button type="button" onClick={() => { setSeccionActiva("monitoreo"); setComercioDetalleModal(comercio); setEditPrevFicha(comercio.preventista || ""); setEditDiaFicha(comercio.dia_visita ? String(comercio.dia_visita).trim().toUpperCase() : ""); }} style={{ padding: "8px 12px", background: "#fff", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "7px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>👁️ VER FICHA</button>
+                          <button type="button" onClick={() => aprobarAltaProvisoria(comercio)} style={{ padding: "8px 12px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "7px", fontSize: "12px", fontWeight: "900", cursor: "pointer" }}>✅ APROBAR ALTA</button>
+                          <button type="button" onClick={() => rechazarAltaProvisoria(comercio)} style={{ padding: "8px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "7px", fontSize: "12px", fontWeight: "900", cursor: "pointer" }}>❌ RECHAZAR</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
          ) : seccionActiva === "solicitudes" ? (
           <div>
             <div style={{ marginBottom: "16px" }}>
