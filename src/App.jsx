@@ -2059,7 +2059,7 @@ if (comercioSeleccionado) {
           padding: "14px 16px",
           backgroundColor: "#0f172a",
           borderBottom: "1px solid #1e293b",
-          position: "sticky",
+          position: "relative",
           top: 0,
           zIndex: 10,
         }}
