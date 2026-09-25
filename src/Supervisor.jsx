@@ -950,10 +950,74 @@ useEffect(() => {
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <style>{`
+        .rc-supervisor-tabs {
+          scrollbar-width: thin;
+          -webkit-overflow-scrolling: touch;
+        }
+        @media (max-width: 700px) {
+          .rc-supervisor-header {
+            padding: 10px 12px !important;
+            align-items: stretch !important;
+          }
+          .rc-supervisor-header-left {
+            width: 100%;
+          }
+          .rc-supervisor-header-actions {
+            width: 100%;
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 7px !important;
+          }
+          .rc-supervisor-header-actions > :first-child {
+            grid-column: 1 / -1;
+            justify-content: center;
+          }
+          .rc-supervisor-header-actions a,
+          .rc-supervisor-header-actions button {
+            justify-content: center !important;
+            text-align: center;
+            padding: 8px 7px !important;
+            font-size: 11px !important;
+          }
+          .rc-supervisor-tabs {
+            padding: 0 12px !important;
+            gap: 16px !important;
+            overflow-x: auto;
+            flex-wrap: nowrap !important;
+          }
+          .rc-supervisor-tabs > button {
+            flex: 0 0 auto;
+            white-space: nowrap;
+            min-height: 44px;
+          }
+          .rc-supervisor-main {
+            padding: 12px !important;
+            width: 100%;
+            box-sizing: border-box;
+            overflow-x: hidden;
+          }
+          .rc-supervisor-main input,
+          .rc-supervisor-main select,
+          .rc-supervisor-main button {
+            max-width: 100%;
+          }
+          .rc-supervisor-two-columns {
+            grid-template-columns: 1fr !important;
+          }
+          .rc-supervisor-map {
+            height: 360px !important;
+          }
+          .rc-supervisor-modal-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
+
       {/* CABECERA PRINCIPAL */}
-      <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+      <header className="rc-supervisor-header" style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         {/* IZQUIERDA: MARCA Y LOGO OFICIAL */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div className="rc-supervisor-header-left" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <img src="/logo.svg" alt="RutaComercio" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -969,7 +1033,7 @@ useEffect(() => {
         </div>
 
         {/* DERECHA: ESTADO ABONO + PAGOS + SALIR */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div className="rc-supervisor-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           {/* CARTEL DE VIGENCIA DE ABONO */}
           <div style={{
             display: "inline-flex",
@@ -1032,7 +1096,7 @@ useEffect(() => {
       </header>
 
       {/* PESTAÑAS */}
-      <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px" }}>
+      <div className="rc-supervisor-tabs" style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px" }}>
         <button
           onClick={() => setSeccionActiva("monitoreo")}
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "monitoreo" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "monitoreo" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
@@ -1047,7 +1111,7 @@ useEffect(() => {
         </button>
         <button
           onClick={() => window.location.href = "/pedidos"}
-          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "pedidos" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "pedidos" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
           📦 Pedidos
         </button>
@@ -1071,7 +1135,7 @@ useEffect(() => {
         </button>
       </div>
 
-      <main style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
+      <main className="rc-supervisor-main" style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
         {modalImportacionCuenta && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "18px" }}>
             <div style={{ width: "min(760px, 96vw)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: "14px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", padding: "18px" }}>
@@ -1412,7 +1476,7 @@ useEffect(() => {
       )}
 
         {/* CUERPO PRINCIPAL: SECUENCIADOR COMPACTO A LA IZQUIERDA + MAPA A LA DERECHA */}
-        <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: "16px", alignItems: "start" }}>
+        <div className="rc-supervisor-two-columns" style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: "16px", alignItems: "start" }}>
           
           {/* COLUMNA IZQUIERDA: LISTADO DE PARADAS Y ORDENADOR */}
           <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "12px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
@@ -1524,7 +1588,7 @@ useEffect(() => {
               </div>
             </div>
 
-            <div style={{ height: "480px", width: "100%", borderRadius: "8px", overflow: "hidden", border: "1px solid #cbd5e1" }}>
+            <div className="rc-supervisor-map" style={{ height: "480px", width: "100%", borderRadius: "8px", overflow: "hidden", border: "1px solid #cbd5e1" }}>
               <MapContainer center={centroMapa} zoom={14} style={{ height: "100%", width: "100%" }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : null} />
@@ -1639,6 +1703,12 @@ useEffect(() => {
               </div>
 
               <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                {comercioDetalleModal.estado_alta === "provisorio" && (
+                  <div style={{ background: "#fffbeb", border: "2px solid #facc15", borderRadius: "8px", padding: "10px 12px", color: "#854d0e" }}>
+                    <div style={{ fontSize: "12px", fontWeight: "900" }}>🟡 ALTA PROVISORIA</div>
+                    <div style={{ fontSize: "11px", fontWeight: "700", marginTop: "3px" }}>Pendiente de validación del supervisor.</div>
+                  </div>
+                )}
                 {comercioDetalleModal.no_visitar === true && (
   <div
     style={{
@@ -1681,7 +1751,7 @@ useEffect(() => {
                 {/* DATOS FISCALES */}
                 <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
                   <div style={{ fontSize: "11px", fontWeight: "bold", color: "#1e293b", marginBottom: "6px" }}>🏢 DATOS FISCALES</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "11px" }}>
+                  <div className="rc-supervisor-modal-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "11px" }}>
                     <div style={{ background: "#fff", padding: "6px", borderRadius: "4px", border: "1px solid #cbd5e1" }}>
                       <div style={{ color: "#64748b", fontSize: "9px", fontWeight: "bold" }}>CUIT / CUIL</div>
                       <div style={{ fontWeight: "800", color: "#0f172a" }}>{comercioDetalleModal.cuit || "No informado"}</div>
@@ -1834,7 +1904,7 @@ useEffect(() => {
                 <div style={{ fontSize: "11px", fontWeight: "800", color: "#0f172a", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                   ⚙️ Reasignar Preventista y Ruta
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <div className="rc-supervisor-modal-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                   <div>
                     <label style={{ display: "block", fontSize: "10px", fontWeight: "bold", color: "#64748b", marginBottom: "3px" }}>👤 Preventista Asignado</label>
                     <select
@@ -1900,7 +1970,7 @@ useEffect(() => {
           </div>
         )}
               {seccionActiva === "pedidos" && (
-          <div style={{ padding: "16px", maxWidth: "1200px", margin: "0 auto" }}>
+          <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>📦 Monitor de Comandas y Pedidos en Vivo</h2>
