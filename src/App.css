@@ -422,3 +422,17 @@ h1 {
 .listas-precios h2 {
   color: black !important;
 }
+/* Corrección de altura para Safari / navegadores móviles */
+@supports (height: 100dvh) {
+  .app,
+  .modo-manejo,
+  .pantalla-mapa,
+  .pantalla-ficha,
+  .pantalla-editor-ubicacion {
+    min-height: 100dvh;
+  }
+
+  .mapa {
+    min-height: calc(100dvh - 80px);
+  }
+}
