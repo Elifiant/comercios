@@ -202,6 +202,12 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
 
   return (
     <div style={{ background:"#f8fafc", borderRadius:12 }}>
+      <style>{`
+        @media (max-width: 700px) {
+          .rc-disenador-layout { grid-template-columns: 1fr !important; }
+          .rc-disenador-mapa { height: 360px !important; }
+        }
+      `}</style>
       <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:10, padding:12, marginBottom:14 }}>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
           <strong style={{fontSize:14}}>🗓️ Diseñador de Hojas de Ruta</strong>
@@ -222,7 +228,7 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"minmax(320px,420px) 1fr",gap:16}}>
+      <div className="rc-disenador-layout" style={{display:"grid",gridTemplateColumns:"minmax(320px,420px) 1fr",gap:16}}>
         <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:10,padding:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <div>
@@ -279,7 +285,7 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
               <span style={{color:"#2563eb"}}>- - Pendiente</span>
             </div>
           </div>
-          <div style={{height:520,borderRadius:8,overflow:"hidden"}}>
+          <div className="rc-disenador-mapa" style={{height:520,borderRadius:8,overflow:"hidden"}}>
             <MapContainer center={centro} zoom={14} style={{height:"100%",width:"100%"}}>
               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
               <AjustarMapa puntos={puntos}/>

@@ -643,6 +643,18 @@ useEffect(() => {
 
   const nombrePrevActivo = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado?.nombre : (preventistaSeleccionado || "");
 
+  const posicionPreventistaSeleccionado = (() => {
+    const targetNom = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
+    if (!targetNom) return null;
+    const pVivo = (perfiles || []).find(p => {
+      const n = String(p.nombre || p.email || "").toLowerCase().trim();
+      return n === targetNom || n.includes(targetNom) || targetNom.includes(n);
+    });
+    const lat = parseFloat(pVivo?.latitud);
+    const lng = parseFloat(pVivo?.longitud);
+    return lat && lng && !isNaN(lat) && !isNaN(lng) ? [lat, lng] : null;
+  })();
+
   const normalizarCodigoCliente = (valor) => String(valor ?? "").trim().toUpperCase();
 
   const leerArchivoEstadoCuenta = async (event) => {
@@ -1011,6 +1023,27 @@ useEffect(() => {
           .rc-supervisor-modal-grid {
             grid-template-columns: 1fr !important;
           }
+          .rc-cuenta-header { display: none !important; }
+          .rc-cuenta-row {
+            grid-template-columns: 1fr 1fr !important;
+            gap: 7px 10px !important;
+            padding: 10px !important;
+          }
+          .rc-cuenta-row > :first-child { grid-column: 1 / -1; }
+          .rc-cuenta-row > :nth-child(4) { text-align: left !important; }
+          .rc-solicitud-historial {
+            grid-template-columns: 1fr !important;
+            gap: 3px !important;
+            padding: 9px 4px !important;
+          }
+          .rc-alta-card { padding: 9px !important; border-radius: 9px !important; }
+          .rc-alta-info { flex: 1 1 100% !important; }
+          .rc-alta-actions { width: 100%; gap: 5px !important; }
+          .rc-alta-actions button {
+            flex: 1 1 auto;
+            padding: 7px 6px !important;
+            font-size: 10px !important;
+          }
         }
       `}</style>
 
@@ -1219,9 +1252,9 @@ useEffect(() => {
                 {altasProvisorias.map((comercio) => {
                   const pedidosComercio = (pedidosSupervisor || []).filter(p => String(p.comercio_id) === String(comercio.id));
                   return (
-                    <div key={comercio.id} style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "12px", padding: "14px" }}>
+                    <div key={comercio.id} className="rc-alta-card" style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "12px", padding: "14px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start", flexWrap: "wrap" }}>
-                        <div style={{ flex: "1 1 320px" }}>
+                        <div className="rc-alta-info" style={{ flex: "1 1 320px" }}>
                           <div style={{ fontWeight: "900", fontSize: "15px", color: "#0f172a" }}>🏪 {comercio.nombre || "Comercio sin nombre"}</div>
                           <div style={{ fontSize: "12px", color: "#475569", marginTop: "5px" }}>👤 Preventista: <strong>{comercio.preventista || "Sin informar"}</strong></div>
                           {comercio.direccion && <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>📍 {comercio.direccion}</div>}
@@ -1232,7 +1265,7 @@ useEffect(() => {
                             {pedidosComercio.length > 0 ? `💰 Tiene ${pedidosComercio.length} pedido${pedidosComercio.length === 1 ? "" : "s"} registrado${pedidosComercio.length === 1 ? "" : "s"}` : "📦 Todavía no tiene pedidos registrados"}
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        <div className="rc-alta-actions" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                           <button type="button" onClick={() => { setSeccionActiva("monitoreo"); setComercioDetalleModal(comercio); setEditPrevFicha(comercio.preventista || ""); setEditDiaFicha(comercio.dia_visita ? String(comercio.dia_visita).trim().toUpperCase() : ""); }} style={{ padding: "8px 12px", background: "#fff", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "7px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>👁️ VER FICHA</button>
                           <button type="button" onClick={() => aprobarAltaProvisoria(comercio)} style={{ padding: "8px 12px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "7px", fontSize: "12px", fontWeight: "900", cursor: "pointer" }}>✅ APROBAR ALTA</button>
                           <button type="button" onClick={() => rechazarAltaProvisoria(comercio)} style={{ padding: "8px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "7px", fontSize: "12px", fontWeight: "900", cursor: "pointer" }}>❌ RECHAZAR</button>
@@ -1274,7 +1307,7 @@ useEffect(() => {
               {solicitudesHistorial.length === 0 ? (
                 <div style={{ padding: "20px 8px", color: "#64748b", fontSize: "12px" }}>Todavía no hay solicitudes resueltas.</div>
               ) : solicitudesHistorial.map((solicitud) => (
-                <div key={solicitud.id} style={{ display: "grid", gridTemplateColumns: "minmax(180px,2fr) minmax(130px,1fr) minmax(180px,2fr) 110px", gap: "8px", alignItems: "center", padding: "9px 4px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
+                <div key={solicitud.id} className="rc-solicitud-historial" style={{ display: "grid", gridTemplateColumns: "minmax(180px,2fr) minmax(130px,1fr) minmax(180px,2fr) 110px", gap: "8px", alignItems: "center", padding: "9px 4px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
                   <div><strong>{solicitud.comercio_nombre}</strong></div>
                   <div style={{ color: "#475569" }}>{solicitud.preventista || "Sin informar"}</div>
                   <div style={{ color: "#64748b" }}>{solicitud.motivo || "Sin motivo"}</div>
@@ -1336,7 +1369,7 @@ useEffect(() => {
             </div>
 
             <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>
+              <div className="rc-cuenta-header" style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>
                 <div>Cliente</div><div>Código</div><div>Preventista</div><div style={{ textAlign: "right" }}>Saldo</div><div>Actualizado</div>
               </div>
               {comerciosEstadoCuenta.length === 0 ? (
@@ -1345,7 +1378,7 @@ useEffect(() => {
                 const deuda = Number(c.deuda || 0);
                 const conSaldo = deuda > 0;
                 return (
-                  <div key={c.id} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
+                  <div key={c.id} className="rc-cuenta-row" style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: "800", color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nombre || `Comercio #${c.id}`}</div>
                       <div style={{ fontSize: "10px", color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.direccion || "Sin dirección"}</div>
@@ -1591,7 +1624,7 @@ useEffect(() => {
             <div className="rc-supervisor-map" style={{ height: "480px", width: "100%", borderRadius: "8px", overflow: "hidden", border: "1px solid #cbd5e1" }}>
               <MapContainer center={centroMapa} zoom={14} style={{ height: "100%", width: "100%" }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : null} />
+                <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : posicionPreventistaSeleccionado} />
 
                 {rutaRecorrida.length > 1 && (
                   <Polyline positions={rutaRecorrida} pathOptions={{ color: "#16a34a", weight: 4, opacity: 0.85 }} />
