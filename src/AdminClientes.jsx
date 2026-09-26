@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase, supabaseRegistro } from "./supabase";
 
 export default function AdminClientes() {
@@ -34,6 +34,8 @@ export default function AdminClientes() {
     "Mayorista San Martín Golosinas": { dia: "10", estado: "Por Vencer", color: "#f59e0b", cupo: 3 }
   });
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
+  const [guardandoPago, setGuardandoPago] = useState(false);
+  const guardandoPagoRef = useRef(false);
   const [empresaPago, setEmpresaPago] = useState("");
   const [montoPago, setMontoPago] = useState("");
   const [monedaPago, setMonedaPago] = useState("ARS");
@@ -218,7 +220,6 @@ export default function AdminClientes() {
         moneda: monedaEditada,
         modelo_cobro: tipoTarifaEditada,
         tarifa_pactada: Number(tarifaEditada) || 0,
-        cupo_preventistas: Number(cupoEditado) || 5,
         dia_cobro: Number(diaCobroModal) || 5
       };
       const { error } = await supabase.from("empresas").update(cambios).eq("id", empresaDB.id);
@@ -281,6 +282,9 @@ export default function AdminClientes() {
   
   const guardarPago = async (e) => {
     e.preventDefault();
+    if (guardandoPagoRef.current) return;
+    guardandoPagoRef.current = true;
+    setGuardandoPago(true);
     try {
       const empresaDB = empresasRegistros.find(e => e.nombre === empresaPago);
       if (!empresaDB?.id) throw new Error("No encontré la empresa en Supabase");
@@ -328,6 +332,9 @@ export default function AdminClientes() {
       alert("✅ Movimiento registrado en Supabase. Por ahora queda asentado en el historial; todavía no modifica automáticamente el abono ni el cupo de la empresa.");
     } catch (err) {
       alert("Error al registrar movimiento: " + (err.message || "Error desconocido"));
+    } finally {
+      guardandoPagoRef.current = false;
+      setGuardandoPago(false);
     }
   };
 
@@ -632,7 +639,7 @@ export default function AdminClientes() {
                         👁️ Ficha 360°
                       </button>
                       <button type="button" onClick={() => abrirRegistrarPago(emp)} style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
-                        💳 Cobro
+                        💳 Abonos
                       </button>
                       <button type="button" onClick={() => abrirEditarEmpresa(emp)} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "600", marginRight: "6px" }}>
                         ✏️ Editar
@@ -763,8 +770,10 @@ export default function AdminClientes() {
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Moneda<input value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Modelo de cobro<select value={tipoTarifaEditada} onChange={(e) => setTipoTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px" }}><option value="preventista">Por preventista</option><option value="plana">Tarifa plana</option></select></label>
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Tarifa<input type="number" value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Cupo preventistas<input type="number" value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Día de cobro<input type="number" min="1" max="31" value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+            </div>
+            <div style={{ marginTop: "14px", padding: "10px 12px", borderRadius: "8px", backgroundColor: "#0f172a", border: "1px solid #334155", color: "#94a3b8", fontSize: "12px", lineHeight: 1.45 }}>
+              ℹ️ El cupo de preventistas se modifica desde <strong style={{ color: "#cbd5e1" }}>💳 Abonos</strong>, para que el cambio quede registrado en el historial comercial.
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
               <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
@@ -931,6 +940,16 @@ export default function AdminClientes() {
                     {tipoMovimientoPago === "ampliacion" ? "Cantidad a agregar" : "Cantidad a reducir"}
                     <input type="number" min="1" value={cambioPreventistasPago} onChange={(e) => setCambioPreventistasPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#111827", color: "#fff", boxSizing: "border-box" }} />
                   </label>
+                  {(() => {
+                    const actual = Number(empresasRegistros.find(e => e.nombre === empresaPago)?.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0);
+                    const cantidad = Math.abs(Number(cambioPreventistasPago) || 0);
+                    const nuevo = tipoMovimientoPago === "ampliacion" ? actual + cantidad : Math.max(0, actual - cantidad);
+                    return (
+                      <div style={{ marginTop: "10px", padding: "9px 11px", borderRadius: "8px", backgroundColor: "rgba(56,189,248,0.10)", border: "1px solid #0ea5e9", color: "#bae6fd", fontSize: "12px" }}>
+                        Nuevo cupo: <strong style={{ color: "#fff", fontSize: "14px" }}>{nuevo} preventistas</strong>
+                      </div>
+                    );
+                  })()}
                   <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", color: "#cbd5e1", fontSize: "12px", cursor: "pointer" }}>
                     <input type="checkbox" checked={cambioTemporalPago} onChange={(e) => setCambioTemporalPago(e.target.checked)} />
                     Cambio temporal (si lo marcás, indicá las fechas de vigencia arriba)
@@ -984,7 +1003,7 @@ export default function AdminClientes() {
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap" }}>
                 <button type="button" onClick={() => setMostrarModalPago(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer" }}>Cancelar</button>
-                <button type="submit" style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "800" }}>✓ Registrar movimiento</button>
+                <button type="submit" disabled={guardandoPago} style={{ backgroundColor: guardandoPago ? "#475569" : "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: guardandoPago ? "not-allowed" : "pointer", fontWeight: "800", opacity: guardandoPago ? 0.8 : 1 }}>{guardandoPago ? "⏳ Registrando..." : "✓ Registrar movimiento"}</button>
               </div>
             </form>
           </div>
