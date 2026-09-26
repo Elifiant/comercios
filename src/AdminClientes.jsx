@@ -306,6 +306,15 @@ export default function AdminClientes() {
       if ((esAmpliacion || esReduccion) && cambioIngresado < 1) {
         throw new Error("Indicá cuántos preventistas querés agregar o reducir.");
       }
+      if (esReduccion) {
+        const preventistasAsignados = preventistas.filter(p =>
+          (p.empresa || "").toLowerCase() === (empresaPago || "").toLowerCase() &&
+          p.rol === "preventista"
+        ).length;
+        if (cupoResultante < preventistasAsignados) {
+          throw new Error(`No es posible reducir el cupo a ${cupoResultante}. Actualmente hay ${preventistasAsignados} preventistas asignados.`);
+        }
+      }
 
       const conceptoFinal = conceptoPago || (tipoMovimientoPago === "primer_abono" ? "Alta / Primer abono" : tipoMovimientoPago === "renovacion" ? "Renovación de abono" : tipoMovimientoPago === "bonificacion" ? "Abono excepcional / bonificación" : tipoMovimientoPago === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
       const cambioPermanente = (esAmpliacion || esReduccion) && !cambioTemporalPago;
@@ -793,8 +802,8 @@ export default function AdminClientes() {
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>País<input value={paisEditado} onChange={(e) => setPaisEditado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Moneda<input value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Modelo de cobro<select value={tipoTarifaEditada} onChange={(e) => setTipoTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px" }}><option value="preventista">Por preventista</option><option value="plana">Tarifa plana</option></select></label>
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Tarifa<input type="number" value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Día de cobro<input type="number" min="1" max="31" value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Tarifa<input type="number" onWheel={(e) => e.currentTarget.blur()} value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Día de cobro<input type="number" min="1" max="31" onWheel={(e) => e.currentTarget.blur()} value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
             </div>
             <div style={{ marginTop: "14px", padding: "10px 12px", borderRadius: "8px", backgroundColor: "#0f172a", border: "1px solid #334155", color: "#94a3b8", fontSize: "12px", lineHeight: 1.45 }}>
               ℹ️ El cupo de preventistas se modifica desde <strong style={{ color: "#cbd5e1" }}>💳 Abonos</strong>, para que el cambio quede registrado en el historial comercial.
@@ -861,7 +870,7 @@ export default function AdminClientes() {
                 </div>
                 <div>
                   <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Cupo Preventistas</label>
-                  <input type="number" value={cupoLimite} onChange={(e) => setCupoLimite(e.target.value)} required placeholder="Ej. 5" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  <input type="number" onWheel={(e) => e.currentTarget.blur()} value={cupoLimite} onChange={(e) => setCupoLimite(e.target.value)} required placeholder="Ej. 5" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
                 </div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
@@ -874,7 +883,7 @@ export default function AdminClientes() {
                 </div>
                 <div>
                   <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Valor ({monedaEmpresa})</label>
-                  <input type="number" value={tarifaValor} onChange={(e) => setTarifaValor(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  <input type="number" onWheel={(e) => e.currentTarget.blur()} value={tarifaValor} onChange={(e) => setTarifaValor(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
                 </div>
               </div>
               <div style={{ marginBottom: "16px" }}>
@@ -962,16 +971,28 @@ export default function AdminClientes() {
                   </div>
                   <label style={{ display: "block", color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>
                     {tipoMovimientoPago === "ampliacion" ? "Cantidad a agregar" : "Cantidad a reducir"}
-                    <input type="number" min="1" value={cambioPreventistasPago} onChange={(e) => setCambioPreventistasPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#111827", color: "#fff", boxSizing: "border-box" }} />
+                    <input type="number" min="1" onWheel={(e) => e.currentTarget.blur()} value={cambioPreventistasPago} onChange={(e) => setCambioPreventistasPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#111827", color: "#fff", boxSizing: "border-box" }} />
                   </label>
                   {(() => {
                     const actual = Number(empresasRegistros.find(e => e.nombre === empresaPago)?.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0);
                     const cantidad = Math.abs(Number(cambioPreventistasPago) || 0);
                     const nuevo = tipoMovimientoPago === "ampliacion" ? actual + cantidad : Math.max(0, actual - cantidad);
+                    const asignados = preventistas.filter(p =>
+                      (p.empresa || "").toLowerCase() === (empresaPago || "").toLowerCase() &&
+                      p.rol === "preventista"
+                    ).length;
+                    const reduccionInvalida = tipoMovimientoPago === "reduccion" && nuevo < asignados;
                     return (
-                      <div style={{ marginTop: "10px", padding: "9px 11px", borderRadius: "8px", backgroundColor: "rgba(56,189,248,0.10)", border: "1px solid #0ea5e9", color: "#bae6fd", fontSize: "12px" }}>
-                        Nuevo cupo: <strong style={{ color: "#fff", fontSize: "14px" }}>{nuevo} preventistas</strong>
-                      </div>
+                      <>
+                        <div style={{ marginTop: "10px", padding: "9px 11px", borderRadius: "8px", backgroundColor: reduccionInvalida ? "rgba(239,68,68,0.12)" : "rgba(56,189,248,0.10)", border: reduccionInvalida ? "1px solid #ef4444" : "1px solid #0ea5e9", color: reduccionInvalida ? "#fecaca" : "#bae6fd", fontSize: "12px" }}>
+                          Nuevo cupo: <strong style={{ color: "#fff", fontSize: "14px" }}>{nuevo} preventistas</strong>
+                        </div>
+                        {reduccionInvalida && (
+                          <div style={{ marginTop: "8px", color: "#fca5a5", fontSize: "12px", fontWeight: "800" }}>
+                            ⚠️ No es posible: actualmente hay {asignados} preventistas asignados.
+                          </div>
+                        )}
+                      </>
                     );
                   })()}
                   <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", color: "#cbd5e1", fontSize: "12px", cursor: "pointer" }}>
@@ -990,7 +1011,7 @@ export default function AdminClientes() {
               {tipoMovimientoPago !== "bonificacion" && (
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px", marginBottom: "12px" }}>
                   <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>💰 Importe pactado / recibido
-                    <input type="number" min="0" step="any" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", fontWeight: "800" }} />
+                    <input type="number" min="0" step="any" onWheel={(e) => e.currentTarget.blur()} value={montoPago} onChange={(e) => setMontoPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", fontWeight: "800" }} />
                   </label>
                   <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Moneda
                     <select value={monedaPago} onChange={(e) => setMonedaPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
@@ -1027,7 +1048,15 @@ export default function AdminClientes() {
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap" }}>
                 <button type="button" onClick={() => setMostrarModalPago(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer" }}>Cancelar</button>
-                <button type="submit" disabled={guardandoPago} style={{ backgroundColor: guardandoPago ? "#475569" : "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: guardandoPago ? "not-allowed" : "pointer", fontWeight: "800", opacity: guardandoPago ? 0.8 : 1 }}>{guardandoPago ? "⏳ Registrando..." : "✓ Registrar movimiento"}</button>
+                {(() => {
+                  const actual = Number(empresasRegistros.find(e => e.nombre === empresaPago)?.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0);
+                  const cantidad = Math.abs(Number(cambioPreventistasPago) || 0);
+                  const nuevo = tipoMovimientoPago === "reduccion" ? Math.max(0, actual - cantidad) : actual + cantidad;
+                  const asignados = preventistas.filter(p => (p.empresa || "").toLowerCase() === (empresaPago || "").toLowerCase() && p.rol === "preventista").length;
+                  const reduccionInvalida = tipoMovimientoPago === "reduccion" && nuevo < asignados;
+                  const bloqueado = guardandoPago || reduccionInvalida;
+                  return <button type="submit" disabled={bloqueado} style={{ backgroundColor: bloqueado ? "#475569" : "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: bloqueado ? "not-allowed" : "pointer", fontWeight: "800", opacity: bloqueado ? 0.8 : 1 }}>{guardandoPago ? "⏳ Registrando..." : reduccionInvalida ? "⚠️ Cupo inválido" : "✓ Registrar movimiento"}</button>;
+                })()}
               </div>
             </form>
           </div>
