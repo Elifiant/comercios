@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { supabase } from "./supabase";
+import { supabase, supabaseRegistro } from "./supabase";
 
 export default function AdminClientes() {
   const [empresas, setEmpresas] = useState([]);
@@ -290,7 +290,7 @@ export default function AdminClientes() {
         return;
       }
       // 1. Creamos la cuenta real de login en Supabase Authentication
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
+      const { data: authData, error: authErr } = await supabaseRegistro.auth.signUp({
         email: (nuevoEmail || '').trim().toLowerCase(),
         password: nuevoPassword,
         options: {
@@ -305,7 +305,10 @@ export default function AdminClientes() {
         throw authErr;
       }
 
-      const uid = authData?.user?.id || (typeof crypto !== "undefined" ? crypto.randomUUID() : "prev-" + Date.now());
+      const uid = authData?.user?.id;
+      if (!uid) {
+        throw new Error("Authentication no devolvió el ID del nuevo usuario.");
+      }
 
       // 2. Guardamos o vinculamos en la tabla perfiles
       const nuevo = {
@@ -319,7 +322,7 @@ export default function AdminClientes() {
       };
 
       const { error: perfilErr } = await supabase.from("perfiles").upsert([nuevo]);
-      if (perfilErr) console.warn("Aviso en perfiles:", perfilErr.message);
+      if (perfilErr) throw new Error("La cuenta se creó en Authentication, pero falló el perfil: " + perfilErr.message);
 
       setPreventistas(prev => [...prev.filter(p => p.email !== nuevo.email), nuevo]);
       setNuevoNombre("");

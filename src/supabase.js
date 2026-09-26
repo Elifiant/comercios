@@ -10,3 +10,11 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     detectSessionInUrl: true
   }
 })
+// Cliente auxiliar para crear usuarios sin cambiar la sesión del SuperAdmin
+export const supabaseRegistro = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
+  }
+})
