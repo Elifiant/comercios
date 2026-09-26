@@ -39,6 +39,13 @@ export default function AdminClientes() {
   const [monedaPago, setMonedaPago] = useState("ARS");
   const [comprobantePago, setComprobantePago] = useState("");
   const [metodoPago, setMetodoPago] = useState("Transferencia CBU");
+  const [tipoMovimientoPago, setTipoMovimientoPago] = useState("renovacion");
+  const [conceptoPago, setConceptoPago] = useState("");
+  const [bonificadoPago, setBonificadoPago] = useState(false);
+  const [periodoDesdePago, setPeriodoDesdePago] = useState("");
+  const [periodoHastaPago, setPeriodoHastaPago] = useState("");
+  const [cambioPreventistasPago, setCambioPreventistasPago] = useState("");
+  const [cambioTemporalPago, setCambioTemporalPago] = useState(false);
   const [historialPagos, setHistorialPagos] = useState([]);
   const [empresaDetalleModal, setEmpresaDetalleModal] = useState(null);
   const [mostrarModalEditar, setMostrarModalEditar] = useState(false);
@@ -228,9 +235,17 @@ export default function AdminClientes() {
     setEmpresaPago(emp);
     const t = tarifasMap[emp] || {};
     setMonedaPago(t.moneda || "ARS");
-    const prevs = preventistas.filter(p => p.empresa === emp).length;
+    const prevs = preventistas.filter(p => p.empresa === emp && p.rol !== "supervisor" && p.rol !== "superadmin").length;
     const val = Number(t.valor || t.tarifa || 10000);
     setMontoPago(t.tipo === "plana" ? String(val) : String(prevs * val || val));
+    setTipoMovimientoPago("renovacion");
+    setConceptoPago("Renovación de abono");
+    setBonificadoPago(false);
+    setPeriodoDesdePago("");
+    setPeriodoHastaPago("");
+    setCambioPreventistasPago("");
+    setCambioTemporalPago(false);
+    setComprobantePago("");
     setMostrarModalPago(true);
   };
 
@@ -264,21 +279,52 @@ export default function AdminClientes() {
   const guardarPago = async (e) => {
     e.preventDefault();
     try {
+      const empresaDB = empresasRegistros.find(e => e.nombre === empresaPago);
+      if (!empresaDB?.id) throw new Error("No encontré la empresa en Supabase");
+
+      const cupoActual = Number(empresaDB.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0);
+      const cambioIngresado = Math.abs(Number(cambioPreventistasPago) || 0);
+      const esAmpliacion = tipoMovimientoPago === "ampliacion";
+      const esReduccion = tipoMovimientoPago === "reduccion";
+      const cambioFirmado = esAmpliacion ? cambioIngresado : esReduccion ? -cambioIngresado : null;
+      const cupoResultante = cambioFirmado === null ? null : Math.max(0, cupoActual + cambioFirmado);
+      const esBonificado = tipoMovimientoPago === "bonificacion" || bonificadoPago;
+
+      if ((tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (!periodoDesdePago || !periodoHastaPago)) {
+        throw new Error("Completá las fechas Desde y Hasta.");
+      }
+      if (periodoDesdePago && periodoHastaPago && periodoHastaPago < periodoDesdePago) {
+        throw new Error("La fecha Hasta no puede ser anterior a la fecha Desde.");
+      }
+      if ((esAmpliacion || esReduccion) && cambioIngresado < 1) {
+        throw new Error("Indicá cuántos preventistas querés agregar o reducir.");
+      }
+
       const { error } = await supabase.from("pagos_empresas").insert([{
         empresa: empresaPago,
-        monto: Number(montoPago) || 0,
+        empresa_id: empresaDB.id,
+        monto: esBonificado ? 0 : (Number(montoPago) || 0),
         moneda: monedaPago,
-        metodo: metodoPago,
+        metodo: esBonificado ? "Bonificado" : metodoPago,
         comprobante: comprobantePago || null,
-        fecha: new Date().toISOString()
+        fecha: new Date().toISOString(),
+        tipo_movimiento: tipoMovimientoPago,
+        concepto: conceptoPago || (tipoMovimientoPago === "renovacion" ? "Renovación de abono" : tipoMovimientoPago === "bonificacion" ? "Abono excepcional / bonificación" : tipoMovimientoPago === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas"),
+        bonificado: esBonificado,
+        periodo_desde: periodoDesdePago || null,
+        periodo_hasta: periodoHastaPago || null,
+        cambio_preventistas: cambioFirmado,
+        cupo_resultante: cupoResultante,
+        cambio_temporal: (esAmpliacion || esReduccion) ? cambioTemporalPago : false
       }]);
       if (error) throw error;
+
       await cargarDatos();
       setMostrarModalPago(false);
       setComprobantePago("");
-      alert("✅ Pago registrado en Supabase.");
+      alert("✅ Movimiento registrado en Supabase. Por ahora queda asentado en el historial; todavía no modifica automáticamente el abono ni el cupo de la empresa.");
     } catch (err) {
-      alert("Error al registrar pago: " + (err.message || "Error desconocido"));
+      alert("Error al registrar movimiento: " + (err.message || "Error desconocido"));
     }
   };
 
@@ -823,6 +869,118 @@ export default function AdminClientes() {
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
                 <button type="button" onClick={() => setMostrarModalPreventista(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
                 <button type="submit" style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Crear y Activar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL GESTIÓN DE ABONO */}
+      {mostrarModalPago && empresaPago && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 30000, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "14px", padding: "22px", width: "100%", maxWidth: "620px", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box", boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "12px" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "18px", color: "#f8fafc" }}>💳 Gestión de Abono</h3>
+                <div style={{ color: "#38bdf8", fontWeight: "800", marginTop: "3px" }}>{empresaPago}</div>
+              </div>
+              <button type="button" onClick={() => setMostrarModalPago(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}>✕</button>
+            </div>
+
+            <form onSubmit={guardarPago}>
+              <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Tipo de operación</label>
+              <select value={tipoMovimientoPago} onChange={(e) => {
+                const v = e.target.value;
+                setTipoMovimientoPago(v);
+                setBonificadoPago(v === "bonificacion");
+                setConceptoPago(v === "renovacion" ? "Renovación de abono" : v === "bonificacion" ? "Abono excepcional / bonificación" : v === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
+                if (v === "bonificacion") setMontoPago("0");
+              }} style={{ width: "100%", padding: "11px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "14px", boxSizing: "border-box" }}>
+                <option value="renovacion">🔄 Renovar abono</option>
+                <option value="bonificacion">🎁 Abono excepcional / Bonificación</option>
+                <option value="ampliacion">➕ Ampliar preventistas</option>
+                <option value="reduccion">➖ Reducir preventistas</option>
+              </select>
+
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Concepto / detalle</label>
+                <input type="text" value={conceptoPago} onChange={(e) => setConceptoPago(e.target.value)} placeholder="Ej. Renovación semestral / acuerdo especial" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+
+              {(tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "14px" }}>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Desde
+                    <input type="date" value={periodoDesdePago} onChange={(e) => setPeriodoDesdePago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Hasta
+                    <input type="date" value={periodoHastaPago} onChange={(e) => setPeriodoHastaPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                </div>
+              )}
+
+              {(tipoMovimientoPago === "ampliacion" || tipoMovimientoPago === "reduccion") && (
+                <div style={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "10px", padding: "13px", marginBottom: "14px" }}>
+                  <div style={{ color: "#cbd5e1", fontSize: "12px", marginBottom: "8px" }}>
+                    Cupo actual: <strong style={{ color: "#fff" }}>{Number(empresasRegistros.find(e => e.nombre === empresaPago)?.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0)} preventistas</strong>
+                  </div>
+                  <label style={{ display: "block", color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>
+                    {tipoMovimientoPago === "ampliacion" ? "Cantidad a agregar" : "Cantidad a reducir"}
+                    <input type="number" min="1" value={cambioPreventistasPago} onChange={(e) => setCambioPreventistasPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#111827", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", color: "#cbd5e1", fontSize: "12px", cursor: "pointer" }}>
+                    <input type="checkbox" checked={cambioTemporalPago} onChange={(e) => setCambioTemporalPago(e.target.checked)} />
+                    Cambio temporal (si lo marcás, indicá las fechas de vigencia arriba)
+                  </label>
+                </div>
+              )}
+
+              {tipoMovimientoPago === "bonificacion" && (
+                <div style={{ backgroundColor: "rgba(16,185,129,0.12)", border: "1px solid #10b981", borderRadius: "9px", padding: "10px 12px", color: "#6ee7b7", fontSize: "12px", fontWeight: "700", marginBottom: "14px" }}>
+                  🎁 Bonificado: se registrará con importe $0 y medio de pago “Bonificado”.
+                </div>
+              )}
+
+              {tipoMovimientoPago !== "bonificacion" && (
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>💰 Importe pactado / recibido
+                    <input type="number" min="0" step="any" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", fontWeight: "800" }} />
+                  </label>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Moneda
+                    <select value={monedaPago} onChange={(e) => setMonedaPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                      <option value="ARS">ARS</option><option value="USD">USD</option><option value="USDT">USDT</option><option value="BCH">BCH</option>
+                    </select>
+                  </label>
+                </div>
+              )}
+
+              {tipoMovimientoPago !== "bonificacion" && (
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Medio de pago</label>
+                  <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                    <option value="Transferencia CBU">🏦 Transferencia CBU</option>
+                    <option value="Transferencia CVU">📲 Transferencia CVU</option>
+                    <option value="Tarjeta de crédito">💳 Tarjeta de crédito</option>
+                    <option value="Tarjeta de débito">💳 Tarjeta de débito</option>
+                    <option value="BCH">🟢 Bitcoin Cash (BCH)</option>
+                    <option value="USDT / Crypto">🪙 USDT / Otra cripto</option>
+                    <option value="Efectivo">💵 Efectivo</option>
+                    <option value="Cheque / eCheq">📑 Cheque / eCheq</option>
+                  </select>
+                </div>
+              )}
+
+              <div style={{ marginBottom: "18px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Comprobante / Hash / Referencia (opcional)</label>
+                <input type="text" value={comprobantePago} onChange={(e) => setComprobantePago(e.target.value)} placeholder="Ej. TXID BCH / transferencia #..." style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "14px", lineHeight: 1.45 }}>
+                🔒 En esta primera etapa el movimiento queda registrado en el historial. No cambia automáticamente el cupo ni bloquea/habilita cuentas.
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap" }}>
+                <button type="button" onClick={() => setMostrarModalPago(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "800" }}>✓ Registrar movimiento</button>
               </div>
             </form>
           </div>
