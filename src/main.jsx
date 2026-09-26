@@ -126,9 +126,17 @@ function EnrutadorSeguro() {
   }
 
   // Con sesión activa: derivamos según rol y ruta
-  // Rutas directas accesibles
-  if (ruta.startsWith("/admin")) return <AdminClientes />;
-  if (ruta.startsWith("/promotores")) return <AdminPromotores />;
+const rol = (perfil?.rol || "").toLowerCase();
+
+// El panel Admin solo puede abrirlo el SuperAdmin
+if (ruta.startsWith("/admin")) {
+  if (rol === "superadmin") return <AdminClientes />;
+  window.location.replace("/");
+  return null;
+}
+
+// Rutas directas accesibles
+if (ruta.startsWith("/promotores")) return <AdminPromotores />;
   if (ruta.startsWith("/pedidos")) return <MonitorPedidos />;
   if (ruta.startsWith("/pagos")) {
     if (typeof PortalPagos !== "undefined") return <PortalPagos />;
@@ -136,7 +144,7 @@ function EnrutadorSeguro() {
     return null;
   }
 
-  const rol = (perfil?.rol || "").toLowerCase();
+  
 
   if (rol === "superadmin") {
     if (ruta.startsWith("/supervisor")) return <Supervisor />;
