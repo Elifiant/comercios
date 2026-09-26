@@ -194,7 +194,6 @@ const reactivarComercio = async (comercio) => {
   const [pedidosReal, setPedidosReal] = useState([]);
   const [cargandoPedidosReal, setCargandoPedidosReal] = useState(false);
   const [pedidosSupervisor, setPedidosSupervisor] = useState([]);
-  const [visitasSupervisor, setVisitasSupervisor] = useState([]);
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
   const [cargando, setCargando] = useState(true);
   const [perfiles, setPerfiles] = useState([]);
@@ -217,6 +216,7 @@ const reactivarComercio = async (comercio) => {
   const [reproduciendoAudio, setReproduciendoAudio] = useState(false);
   const [audioActivoObj, setAudioActivoObj] = useState(null);
   const [datosAbono, setDatosAbono] = useState(null);
+  const [visitasHoy, setVisitasHoy] = useState([]);
   const [filtroEstadoCuenta, setFiltroEstadoCuenta] = useState("todos");
   const [filtroPreventistaCuenta, setFiltroPreventistaCuenta] = useState("TODOS");
   const [busquedaCuenta, setBusquedaCuenta] = useState("");
@@ -257,7 +257,7 @@ const reactivarComercio = async (comercio) => {
         // 2) Cargar solamente los perfiles de SU empresa
         const { data: perfilesData, error: errorPerfiles } = await supabase
           .from("perfiles")
-          .select("id, nombre, email, empresa, rol, latitud, longitud, ultima_posicion_at")
+          .select("id, nombre, email, empresa, rol, latitud, longitud, ultima_posicion_at, ultima_conexion, activo_hoy")
           .eq("empresa_id", pData.empresa_id);
 
         if (errorPerfiles) throw errorPerfiles;
@@ -283,6 +283,36 @@ const reactivarComercio = async (comercio) => {
 
     inicializarSupervisor();
   }, []);
+
+  // 📍 Cargar visitas reales de hoy y mantenerlas actualizadas
+  useEffect(() => {
+    if (!perfilSupervisor?.empresa_id) return;
+
+    const cargarVisitasHoy = async () => {
+      const inicioHoy = new Date();
+      inicioHoy.setHours(0, 0, 0, 0);
+      const inicioManana = new Date(inicioHoy);
+      inicioManana.setDate(inicioManana.getDate() + 1);
+
+      const { data, error } = await supabase
+        .from("visitas")
+        .select("*")
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .gte("fecha", inicioHoy.toISOString())
+        .lt("fecha", inicioManana.toISOString())
+        .order("fecha", { ascending: false });
+
+      if (error) {
+        console.error("Error cargando visitas de hoy:", error);
+        return;
+      }
+      setVisitasHoy(data || []);
+    };
+
+    cargarVisitasHoy();
+    const timer = setInterval(cargarVisitasHoy, 15000);
+    return () => clearInterval(timer);
+  }, [perfilSupervisor?.empresa_id]);
 
   // 🚫 Cargar solicitudes pendientes de NO VISITAR MÁS
 useEffect(() => {
@@ -310,38 +340,6 @@ useEffect(() => {
 
   cargarSolicitudesNoVisitar();
 }, [perfilSupervisor]);
-
-  // 🕐 Cargar visitas y pedidos de la empresa para la ficha operativa
-  useEffect(() => {
-    if (!perfilSupervisor?.empresa_id) return;
-
-    const cargarActividadOperativa = async () => {
-      try {
-        const [visitasResp, pedidosResp] = await Promise.all([
-          supabase
-            .from("visitas")
-            .select("*")
-            .eq("empresa_id", perfilSupervisor.empresa_id)
-            .order("fecha", { ascending: false }),
-          supabase
-            .from("pedidos")
-            .select("*")
-            .eq("empresa_id", perfilSupervisor.empresa_id)
-            .order("created_at", { ascending: false }),
-        ]);
-
-        if (visitasResp.error) throw visitasResp.error;
-        if (pedidosResp.error) throw pedidosResp.error;
-
-        setVisitasSupervisor(visitasResp.data || []);
-        setPedidosSupervisor(pedidosResp.data || []);
-      } catch (error) {
-        console.error("Error cargando actividad operativa:", error);
-      }
-    };
-
-    cargarActividadOperativa();
-  }, [perfilSupervisor?.empresa_id]);
 
   // 💳 Cargar vigencia real del abono de la empresa
   useEffect(() => {
@@ -538,22 +536,43 @@ useEffect(() => {
   const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
   const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
 
-  // Telemetría de flota
+  // Telemetría de flota basada en actividad REAL del preventista
   const hoyStr = new Date().toISOString().slice(0, 10);
+  const normalizarNombrePrev = (v) => String(v || "").trim().toLowerCase();
   const telemetriaFlota = listaPreventistas.map((prev, idx) => {
-    const cPrev = comercios.filter(c => (c.preventista || "").toUpperCase().includes(prev.toUpperCase()));
-    const cHoy = cPrev.filter(c => String(c.fecha || c.created_at || "").includes(hoyStr));
-    const activoHoy = cHoy.length > 0;
+    const nombrePrev = normalizarNombrePrev(prev);
+    const perfilPrev = (perfiles || []).find(p => {
+      const n = normalizarNombrePrev(p.nombre || p.email);
+      return n === nombrePrev || n.includes(nombrePrev) || nombrePrev.includes(n);
+    });
+    const cPrev = comercios.filter(c => normalizarNombrePrev(c.preventista) === nombrePrev);
+    const visitasPrevHoy = (visitasHoy || []).filter(v => {
+      const n = normalizarNombrePrev(v.preventista);
+      return n === nombrePrev || n.includes(nombrePrev) || nombrePrev.includes(n);
+    });
+
+    const ultimaSenal = perfilPrev?.ultima_conexion || perfilPrev?.ultima_posicion_at || null;
+    const minutosDesdeSenal = ultimaSenal ? (Date.now() - new Date(ultimaSenal).getTime()) / 60000 : Infinity;
+    // En ruta si tuvo visita hoy o si el celular reportó actividad en los últimos 20 minutos.
+    const activoHoy = visitasPrevHoy.length > 0 || minutosDesdeSenal <= 20;
+
     return {
       nombre: prev,
       rutaId: "Ruta #" + (idx + 1 < 10 ? "0" + (idx + 1) : idx + 1),
       zona: "Zona Comercial",
       estado: activoHoy ? "En Ruta (Activo)" : "En Base (Standby)",
       paradasTotales: cPrev.length,
-      paradasHoy: cHoy.length,
-      activoHoy: activoHoy,
+      paradasHoy: visitasPrevHoy.length,
+      activoHoy,
+      ultimaSenal,
       proxima: cPrev[0]?.nombre || "Sin comercios asignados"
     };
+  });
+
+  const visitasPreventistaSeleccionado = (visitasHoy || []).filter(v => {
+    const target = normalizarNombrePrev(preventistaSeleccionado?.nombre || preventistaSeleccionado);
+    const nombre = normalizarNombrePrev(v.preventista);
+    return target && (nombre === target || nombre.includes(target) || target.includes(nombre));
   });
 
   const activosEnCalle = telemetriaFlota.filter(p => p.activoHoy).length;
@@ -642,18 +661,6 @@ useEffect(() => {
   };
 
   const nombrePrevActivo = typeof preventistaSeleccionado === "object" ? preventistaSeleccionado?.nombre : (preventistaSeleccionado || "");
-
-  const posicionPreventistaSeleccionado = (() => {
-    const targetNom = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
-    if (!targetNom) return null;
-    const pVivo = (perfiles || []).find(p => {
-      const n = String(p.nombre || p.email || "").toLowerCase().trim();
-      return n === targetNom || n.includes(targetNom) || targetNom.includes(n);
-    });
-    const lat = parseFloat(pVivo?.latitud);
-    const lng = parseFloat(pVivo?.longitud);
-    return lat && lng && !isNaN(lat) && !isNaN(lng) ? [lat, lng] : null;
-  })();
 
   const normalizarCodigoCliente = (valor) => String(valor ?? "").trim().toUpperCase();
 
@@ -834,223 +841,12 @@ useEffect(() => {
   const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
   const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
 
-  // 🟡 Comercios dados de alta por preventistas que esperan aprobación del supervisor
-  const altasProvisorias = (comercios || []).filter(c => c.estado_alta === "provisorio");
-
-  const aprobarAltaProvisoria = async (comercio) => {
-    if (!comercio?.id || !perfilSupervisor?.empresa_id) return;
-    const confirmar = window.confirm(`✅ ¿Aprobar el alta de "${comercio.nombre || "este comercio"}"?`);
-    if (!confirmar) return;
-
-    try {
-      const { data, error } = await supabase
-        .from("comercios")
-        .update({ estado_alta: "aprobado" })
-        .eq("id", comercio.id)
-        .eq("empresa_id", perfilSupervisor.empresa_id)
-        .select("id, estado_alta")
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) throw new Error("El comercio no fue actualizado en Supabase.");
-
-      setComercios(prev => (prev || []).map(c =>
-        c.id === comercio.id ? { ...c, estado_alta: "aprobado" } : c
-      ));
-      alert("✅ Alta aprobada. El comercio quedó confirmado.");
-    } catch (error) {
-      console.error("Error aprobando alta provisoria:", error);
-      alert("❌ No se pudo aprobar el alta: " + (error.message || "Verifique conexión"));
-    }
-  };
-
-  const aprobarTodasAltasProvisorias = async () => {
-    if (!perfilSupervisor?.empresa_id || altasProvisorias.length === 0) return;
-
-    const cantidad = altasProvisorias.length;
-    const confirmar = window.confirm(
-      `✅ ¿Aprobar las ${cantidad} altas provisorias pendientes?\n\nSe confirmarán todos los comercios provisorios de esta empresa. No se borrará ningún pedido ni venta.`
-    );
-    if (!confirmar) return;
-
-    try {
-      const { data, error } = await supabase
-        .from("comercios")
-        .update({ estado_alta: "aprobado" })
-        .eq("empresa_id", perfilSupervisor.empresa_id)
-        .eq("estado_alta", "provisorio")
-        .select("id");
-
-      if (error) throw error;
-
-      const idsAprobados = new Set((data || []).map(item => String(item.id)));
-      if (idsAprobados.size === 0) {
-        throw new Error("No se actualizó ninguna alta provisoria en Supabase.");
-      }
-
-      setComercios(prev => (prev || []).map(c =>
-        idsAprobados.has(String(c.id)) ? { ...c, estado_alta: "aprobado" } : c
-      ));
-
-      alert(`✅ ${idsAprobados.size} alta${idsAprobados.size === 1 ? "" : "s"} aprobada${idsAprobados.size === 1 ? "" : "s"} correctamente.`);
-    } catch (error) {
-      console.error("Error aprobando todas las altas provisorias:", error);
-      alert("❌ No se pudieron aprobar todas las altas: " + (error.message || "Verifique conexión"));
-    }
-  };
-
-  const rechazarAltaProvisoria = async (comercio) => {
-    if (!comercio?.id || !perfilSupervisor?.empresa_id) return;
-    const confirmar = window.confirm(
-      `❌ ¿Rechazar el alta de "${comercio.nombre || "este comercio"}"?\n\nEl comercio NO se borrará y sus pedidos/ventas se conservarán.`
-    );
-    if (!confirmar) return;
-
-    try {
-      const { data, error } = await supabase
-        .from("comercios")
-        .update({ estado_alta: "rechazado" })
-        .eq("id", comercio.id)
-        .eq("empresa_id", perfilSupervisor.empresa_id)
-        .select("id, estado_alta")
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) throw new Error("El comercio no fue actualizado en Supabase.");
-
-      setComercios(prev => (prev || []).map(c =>
-        c.id === comercio.id ? { ...c, estado_alta: "rechazado" } : c
-      ));
-      alert("❌ Alta rechazada. El comercio y sus ventas quedaron conservados.");
-    } catch (error) {
-      console.error("Error rechazando alta provisoria:", error);
-      alert("❌ No se pudo rechazar el alta: " + (error.message || "Verifique conexión"));
-    }
-  };
-
-  const actividadComercioDetalle = (() => {
-    if (!comercioDetalleModal?.id) return { visita: null, pedido: null, esHoy: false };
-
-    const idComercio = String(comercioDetalleModal.id);
-    const visitas = (visitasSupervisor || [])
-      .filter(v => String(v.comercio_id) === idComercio)
-      .sort((a, b) => new Date(b.fecha || b.created_at || 0) - new Date(a.fecha || a.created_at || 0));
-
-    const visita = visitas[0] || null;
-    const pedidos = (pedidosSupervisor || [])
-      .filter(p => String(p.comercio_id) === idComercio)
-      .sort((a, b) => new Date(b.created_at || b.fecha || 0) - new Date(a.created_at || a.fecha || 0));
-
-    const pedido = pedidos[0] || null;
-    const fechaVisita = visita?.fecha || visita?.created_at || null;
-    const hoy = new Date();
-    const fv = fechaVisita ? new Date(fechaVisita) : null;
-    const esHoy = !!fv && fv.getFullYear() === hoy.getFullYear() && fv.getMonth() === hoy.getMonth() && fv.getDate() === hoy.getDate();
-
-    return { visita, pedido, esHoy };
-  })();
-
-  const estiloResultadoVisita = (resultado) => {
-    const r = String(resultado || "").toLowerCase();
-    if (r.includes("venta") || r.includes("pedido")) return { icono: "💰", fondo: "#f0fdf4", borde: "#86efac", color: "#166534" };
-    if (r.includes("stock")) return { icono: "📦", fondo: "#eff6ff", borde: "#93c5fd", color: "#1d4ed8" };
-    if (r.includes("cerrado")) return { icono: "🔒", fondo: "#fff7ed", borde: "#fdba74", color: "#9a3412" };
-    if (r.includes("no estaba")) return { icono: "🚪", fondo: "#fefce8", borde: "#fde047", color: "#854d0e" };
-    if (r.includes("interes")) return { icono: "❌", fondo: "#fef2f2", borde: "#fca5a5", color: "#991b1b" };
-    return { icono: "📍", fondo: "#f8fafc", borde: "#cbd5e1", color: "#334155" };
-  };
-
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <style>{`
-        .rc-supervisor-tabs {
-          scrollbar-width: thin;
-          -webkit-overflow-scrolling: touch;
-        }
-        @media (max-width: 700px) {
-          .rc-supervisor-header {
-            padding: 10px 12px !important;
-            align-items: stretch !important;
-          }
-          .rc-supervisor-header-left {
-            width: 100%;
-          }
-          .rc-supervisor-header-actions {
-            width: 100%;
-            display: grid !important;
-            grid-template-columns: 1fr 1fr !important;
-            gap: 7px !important;
-          }
-          .rc-supervisor-header-actions > :first-child {
-            grid-column: 1 / -1;
-            justify-content: center;
-          }
-          .rc-supervisor-header-actions a,
-          .rc-supervisor-header-actions button {
-            justify-content: center !important;
-            text-align: center;
-            padding: 8px 7px !important;
-            font-size: 11px !important;
-          }
-          .rc-supervisor-tabs {
-            padding: 0 12px !important;
-            gap: 16px !important;
-            overflow-x: auto;
-            flex-wrap: nowrap !important;
-          }
-          .rc-supervisor-tabs > button {
-            flex: 0 0 auto;
-            white-space: nowrap;
-            min-height: 44px;
-          }
-          .rc-supervisor-main {
-            padding: 12px !important;
-            width: 100%;
-            box-sizing: border-box;
-            overflow-x: hidden;
-          }
-          .rc-supervisor-main input,
-          .rc-supervisor-main select,
-          .rc-supervisor-main button {
-            max-width: 100%;
-          }
-          .rc-supervisor-two-columns {
-            grid-template-columns: 1fr !important;
-          }
-          .rc-supervisor-map {
-            height: 360px !important;
-          }
-          .rc-supervisor-modal-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .rc-cuenta-header { display: none !important; }
-          .rc-cuenta-row {
-            grid-template-columns: 1fr 1fr !important;
-            gap: 7px 10px !important;
-            padding: 10px !important;
-          }
-          .rc-cuenta-row > :first-child { grid-column: 1 / -1; }
-          .rc-cuenta-row > :nth-child(4) { text-align: left !important; }
-          .rc-solicitud-historial {
-            grid-template-columns: 1fr !important;
-            gap: 3px !important;
-            padding: 9px 4px !important;
-          }
-          .rc-alta-card { padding: 9px !important; border-radius: 9px !important; }
-          .rc-alta-info { flex: 1 1 100% !important; }
-          .rc-alta-actions { width: 100%; gap: 5px !important; }
-          .rc-alta-actions button {
-            flex: 1 1 auto;
-            padding: 7px 6px !important;
-            font-size: 10px !important;
-          }
-        }
-      `}</style>
-
       {/* CABECERA PRINCIPAL */}
-      <header className="rc-supervisor-header" style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+      <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         {/* IZQUIERDA: MARCA Y LOGO OFICIAL */}
-        <div className="rc-supervisor-header-left" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <img src="/logo.svg" alt="RutaComercio" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -1066,7 +862,7 @@ useEffect(() => {
         </div>
 
         {/* DERECHA: ESTADO ABONO + PAGOS + SALIR */}
-        <div className="rc-supervisor-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           {/* CARTEL DE VIGENCIA DE ABONO */}
           <div style={{
             display: "inline-flex",
@@ -1129,7 +925,7 @@ useEffect(() => {
       </header>
 
       {/* PESTAÑAS */}
-      <div className="rc-supervisor-tabs" style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px" }}>
+      <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px" }}>
         <button
           onClick={() => setSeccionActiva("monitoreo")}
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "monitoreo" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "monitoreo" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
@@ -1144,7 +940,7 @@ useEffect(() => {
         </button>
         <button
           onClick={() => window.location.href = "/pedidos"}
-          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "pedidos" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "pedidos" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
           📦 Pedidos
         </button>
@@ -1160,15 +956,9 @@ useEffect(() => {
         >
           🚫 Solicitudes{solicitudesPendientes.length > 0 ? ` (${solicitudesPendientes.length})` : ""}
         </button>
-        <button
-          onClick={() => setSeccionActiva("altasProvisorias")}
-          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "altasProvisorias" ? "2px solid #d97706" : "2px solid transparent", color: seccionActiva === "altasProvisorias" ? "#b45309" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
-        >
-          🟡 Altas provisorias{altasProvisorias.length > 0 ? ` (${altasProvisorias.length})` : ""}
-        </button>
       </div>
 
-      <main className="rc-supervisor-main" style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
+      <main style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
         {modalImportacionCuenta && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "18px" }}>
             <div style={{ width: "min(760px, 96vw)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: "14px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", padding: "18px" }}>
@@ -1225,58 +1015,6 @@ useEffect(() => {
             perfilSupervisor={perfilSupervisor}
             perfiles={perfiles}
           />
-         ) : seccionActiva === "altasProvisorias" ? (
-          <div>
-            <div style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>🟡 Altas provisorias</h2>
-                <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>Comercios capturados por preventistas. Pueden vender inmediatamente y el supervisor confirma el alta después.</p>
-              </div>
-              {altasProvisorias.length > 0 && (
-                <button
-                  type="button"
-                  onClick={aprobarTodasAltasProvisorias}
-                  style={{ padding: "9px 14px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: "900", cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  ✅ APROBAR TODAS ({altasProvisorias.length})
-                </button>
-              )}
-            </div>
-
-            {altasProvisorias.length === 0 ? (
-              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "24px", color: "#64748b", fontSize: "13px" }}>
-                ✅ No hay altas provisorias pendientes.
-              </div>
-            ) : (
-              <div style={{ display: "grid", gap: "12px" }}>
-                {altasProvisorias.map((comercio) => {
-                  const pedidosComercio = (pedidosSupervisor || []).filter(p => String(p.comercio_id) === String(comercio.id));
-                  return (
-                    <div key={comercio.id} className="rc-alta-card" style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "12px", padding: "14px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start", flexWrap: "wrap" }}>
-                        <div className="rc-alta-info" style={{ flex: "1 1 320px" }}>
-                          <div style={{ fontWeight: "900", fontSize: "15px", color: "#0f172a" }}>🏪 {comercio.nombre || "Comercio sin nombre"}</div>
-                          <div style={{ fontSize: "12px", color: "#475569", marginTop: "5px" }}>👤 Preventista: <strong>{comercio.preventista || "Sin informar"}</strong></div>
-                          {comercio.direccion && <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>📍 {comercio.direccion}</div>}
-                          {comercio.contacto && <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>🙋 Contacto: {comercio.contacto}</div>}
-                          {(comercio.telefono || comercio.whatsapp) && <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>📞 {comercio.whatsapp || comercio.telefono}</div>}
-                          <div style={{ fontSize: "11px", color: "#92400e", marginTop: "7px", fontWeight: "800" }}>🟡 Alta provisoria · ID {comercio.id}</div>
-                          <div style={{ fontSize: "11px", color: pedidosComercio.length > 0 ? "#166534" : "#64748b", marginTop: "3px", fontWeight: pedidosComercio.length > 0 ? "800" : "600" }}>
-                            {pedidosComercio.length > 0 ? `💰 Tiene ${pedidosComercio.length} pedido${pedidosComercio.length === 1 ? "" : "s"} registrado${pedidosComercio.length === 1 ? "" : "s"}` : "📦 Todavía no tiene pedidos registrados"}
-                          </div>
-                        </div>
-                        <div className="rc-alta-actions" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                          <button type="button" onClick={() => { setSeccionActiva("monitoreo"); setComercioDetalleModal(comercio); setEditPrevFicha(comercio.preventista || ""); setEditDiaFicha(comercio.dia_visita ? String(comercio.dia_visita).trim().toUpperCase() : ""); }} style={{ padding: "8px 12px", background: "#fff", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "7px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>👁️ VER FICHA</button>
-                          <button type="button" onClick={() => aprobarAltaProvisoria(comercio)} style={{ padding: "8px 12px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "7px", fontSize: "12px", fontWeight: "900", cursor: "pointer" }}>✅ APROBAR ALTA</button>
-                          <button type="button" onClick={() => rechazarAltaProvisoria(comercio)} style={{ padding: "8px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "7px", fontSize: "12px", fontWeight: "900", cursor: "pointer" }}>❌ RECHAZAR</button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
          ) : seccionActiva === "solicitudes" ? (
           <div>
             <div style={{ marginBottom: "16px" }}>
@@ -1307,7 +1045,7 @@ useEffect(() => {
               {solicitudesHistorial.length === 0 ? (
                 <div style={{ padding: "20px 8px", color: "#64748b", fontSize: "12px" }}>Todavía no hay solicitudes resueltas.</div>
               ) : solicitudesHistorial.map((solicitud) => (
-                <div key={solicitud.id} className="rc-solicitud-historial" style={{ display: "grid", gridTemplateColumns: "minmax(180px,2fr) minmax(130px,1fr) minmax(180px,2fr) 110px", gap: "8px", alignItems: "center", padding: "9px 4px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
+                <div key={solicitud.id} style={{ display: "grid", gridTemplateColumns: "minmax(180px,2fr) minmax(130px,1fr) minmax(180px,2fr) 110px", gap: "8px", alignItems: "center", padding: "9px 4px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
                   <div><strong>{solicitud.comercio_nombre}</strong></div>
                   <div style={{ color: "#475569" }}>{solicitud.preventista || "Sin informar"}</div>
                   <div style={{ color: "#64748b" }}>{solicitud.motivo || "Sin motivo"}</div>
@@ -1369,7 +1107,7 @@ useEffect(() => {
             </div>
 
             <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>
-              <div className="rc-cuenta-header" style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", padding: "9px 12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: "10px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>
                 <div>Cliente</div><div>Código</div><div>Preventista</div><div style={{ textAlign: "right" }}>Saldo</div><div>Actualizado</div>
               </div>
               {comerciosEstadoCuenta.length === 0 ? (
@@ -1378,7 +1116,7 @@ useEffect(() => {
                 const deuda = Number(c.deuda || 0);
                 const conSaldo = deuda > 0;
                 return (
-                  <div key={c.id} className="rc-cuenta-row" style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
+                  <div key={c.id} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 2fr) 100px minmax(140px, 1fr) 140px 140px", gap: "8px", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: "12px" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: "800", color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nombre || `Comercio #${c.id}`}</div>
                       <div style={{ fontSize: "10px", color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.direccion || "Sin dirección"}</div>
@@ -1451,6 +1189,9 @@ useEffect(() => {
                     <div style={{ fontSize: "11px", color: prev.activoHoy ? "#16a34a" : "#64748b", marginTop: "2px", fontWeight: "600" }}>
                       {prev.activoHoy ? "🟢 En ruta" : "💤 Standby"}
                     </div>
+                    <div style={{ fontSize: "10px", color: "#64748b", marginTop: "2px" }}>
+                      {prev.paradasHoy} visita{prev.paradasHoy === 1 ? "" : "s"} hoy
+                    </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <div style={{ fontSize: "14px", fontWeight: "800", color: "#2563eb" }}>{prev.paradasTotales || 0}</div>
@@ -1461,6 +1202,33 @@ useEffect(() => {
             })}
           </div>
         </div>
+
+        {preventistaSeleccionado && (
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "12px 14px", marginBottom: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <div style={{ fontSize: "12px", fontWeight: "800", color: "#0f172a" }}>
+                📍 Visitas de hoy — {nombrePrevActivo}
+              </div>
+              <div style={{ fontSize: "11px", fontWeight: "800", color: "#2563eb" }}>{visitasPreventistaSeleccionado.length}</div>
+            </div>
+            {visitasPreventistaSeleccionado.length === 0 ? (
+              <div style={{ fontSize: "11px", color: "#64748b", padding: "8px 0" }}>Todavía no hay visitas registradas hoy.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" }}>
+                {visitasPreventistaSeleccionado.map((v, i) => (
+                  <div key={v.id || i} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "7px", padding: "8px 10px", fontSize: "11px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
+                      <strong style={{ color: "#0f172a" }}>🏪 {v.comercio_nombre || v.nombre_comercio || (v.comercio_id ? `Comercio #${v.comercio_id}` : "Actividad")}</strong>
+                      <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>🕐 {v.hora || (v.created_at ? new Date(v.created_at).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) : "")}</span>
+                    </div>
+                    {(v.resultado || v.tipo) && <div style={{ marginTop: "3px", color: "#475569" }}>✅ {v.resultado || v.tipo}</div>}
+                    {(v.observacion || v.observaciones || v.notas) && <div style={{ marginTop: "3px", color: "#475569" }}>💬 {v.observacion || v.observaciones || v.notas}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* SELECTOR DE DÍAS (ULTRA COMPACTO) */}
         {seccionActiva === "planificador" && (
@@ -1509,7 +1277,7 @@ useEffect(() => {
       )}
 
         {/* CUERPO PRINCIPAL: SECUENCIADOR COMPACTO A LA IZQUIERDA + MAPA A LA DERECHA */}
-        <div className="rc-supervisor-two-columns" style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: "16px", alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: "16px", alignItems: "start" }}>
           
           {/* COLUMNA IZQUIERDA: LISTADO DE PARADAS Y ORDENADOR */}
           <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "12px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
@@ -1621,10 +1389,10 @@ useEffect(() => {
               </div>
             </div>
 
-            <div className="rc-supervisor-map" style={{ height: "480px", width: "100%", borderRadius: "8px", overflow: "hidden", border: "1px solid #cbd5e1" }}>
+            <div style={{ height: "480px", width: "100%", borderRadius: "8px", overflow: "hidden", border: "1px solid #cbd5e1" }}>
               <MapContainer center={centroMapa} zoom={14} style={{ height: "100%", width: "100%" }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : posicionPreventistaSeleccionado} />
+                <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : null} />
 
                 {rutaRecorrida.length > 1 && (
                   <Polyline positions={rutaRecorrida} pathOptions={{ color: "#16a34a", weight: 4, opacity: 0.85 }} />
@@ -1736,12 +1504,6 @@ useEffect(() => {
               </div>
 
               <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "12px" }}>
-                {comercioDetalleModal.estado_alta === "provisorio" && (
-                  <div style={{ background: "#fffbeb", border: "2px solid #facc15", borderRadius: "8px", padding: "10px 12px", color: "#854d0e" }}>
-                    <div style={{ fontSize: "12px", fontWeight: "900" }}>🟡 ALTA PROVISORIA</div>
-                    <div style={{ fontSize: "11px", fontWeight: "700", marginTop: "3px" }}>Pendiente de validación del supervisor.</div>
-                  </div>
-                )}
                 {comercioDetalleModal.no_visitar === true && (
   <div
     style={{
@@ -1784,7 +1546,7 @@ useEffect(() => {
                 {/* DATOS FISCALES */}
                 <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
                   <div style={{ fontSize: "11px", fontWeight: "bold", color: "#1e293b", marginBottom: "6px" }}>🏢 DATOS FISCALES</div>
-                  <div className="rc-supervisor-modal-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "11px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "11px" }}>
                     <div style={{ background: "#fff", padding: "6px", borderRadius: "4px", border: "1px solid #cbd5e1" }}>
                       <div style={{ color: "#64748b", fontSize: "9px", fontWeight: "bold" }}>CUIT / CUIL</div>
                       <div style={{ fontWeight: "800", color: "#0f172a" }}>{comercioDetalleModal.cuit || "No informado"}</div>
@@ -1799,103 +1561,6 @@ useEffect(() => {
                     <div style={{ fontWeight: "600", color: "#0f172a" }}>📍 {comercioDetalleModal.domicilio_fiscal || comercioDetalleModal.direccion || "Sin dirección"}</div>
                   </div>
                 </div>
-
-                {/* ÚLTIMA VISITA / VISITA DE HOY */}
-                {actividadComercioDetalle.visita && (() => {
-                  const visita = actividadComercioDetalle.visita;
-                  const pedido = actividadComercioDetalle.pedido;
-                  const estilo = estiloResultadoVisita(visita.resultado);
-                  const fechaVisita = visita.fecha || visita.created_at;
-                  const esVenta = String(visita.resultado || "").toLowerCase().includes("venta") || String(visita.resultado || "").toLowerCase().includes("pedido");
-                  const omiteFecha = comercioDetalleModal.omitir_visita_fecha;
-
-                  return (
-                    <div style={{ background: estilo.fondo, border: `2px solid ${estilo.borde}`, borderRadius: "8px", padding: "10px" }}>
-                      <div style={{ fontSize: "11px", fontWeight: "900", color: estilo.color, marginBottom: "3px" }}>
-                        🕐 {actividadComercioDetalle.esHoy ? "VISITA DE HOY" : "ÚLTIMA VISITA"}
-                      </div>
-                      <div style={{ fontSize: "12px", fontWeight: "900", color: "#15803d", marginBottom: "7px" }}>
-                        ✅ VISITA REALIZADA CON ÉXITO
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }}>
-                        <div>
-                          <div style={{ fontSize: "15px", fontWeight: "900", color: estilo.color }}>
-                            {estilo.icono} {String(visita.resultado || "Visita registrada").toUpperCase()}
-                          </div>
-                          <div style={{ marginTop: "4px", fontSize: "11px", color: "#475569" }}>
-                            👤 {visita.preventista || comercioDetalleModal.preventista || "Sin informar"}
-                            {fechaVisita ? ` · 🕒 ${new Date(fechaVisita).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}
-                          </div>
-                          {visita.observacion &&
-                            !(omiteFecha || comercioDetalleModal.revisita_fecha) && (
-                              <div style={{ marginTop: "4px", fontSize: "11px", color: "#111827", fontWeight: "700" }}>
-                                📝 {visita.observacion}
-                              </div>
-                            )}
-                        </div>
-                        {esVenta && pedido && (
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: "14px", fontWeight: "900", color: "#15803d", marginBottom: "5px" }}>
-                              $ {Number(pedido.total || pedido.total_pedido || 0).toLocaleString("es-AR")}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => { window.location.href = `/pedidos?pedido=${encodeURIComponent(pedido.id)}`; }}
-                              style={{ border: "none", borderRadius: "6px", background: "#2563eb", color: "#fff", padding: "7px 10px", fontSize: "11px", fontWeight: "900", cursor: "pointer" }}
-                            >
-                              🧾 VER PEDIDO #{pedido.numero_pedido != null
-                                ? String(pedido.numero_pedido).padStart(6, "0")
-                                : "SIN NÚMERO"}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      {(omiteFecha || comercioDetalleModal.revisita_fecha) && (
-                        <div
-                          style={{
-                            marginTop: "10px",
-                            padding: "11px",
-                            borderRadius: "8px",
-                            background: "#fff7ed",
-                            border: "2px solid #f59e0b",
-                          }}
-                        >
-                          <div style={{ fontSize: "12px", fontWeight: "900", color: "#9a3412", marginBottom: "8px" }}>
-                            ⚠️ CAMBIO EXCEPCIONAL DE VISITA
-                          </div>
-
-                          {omiteFecha && (
-                            <div style={{ background: "#ffedd5", border: "1px solid #fdba74", borderRadius: "6px", padding: "7px 8px", marginBottom: "7px" }}>
-                              <div style={{ fontSize: "10px", fontWeight: "900", color: "#9a3412" }}>
-                                ⏭️ VISITA HABITUAL SALTADA
-                              </div>
-                              <div style={{ fontSize: "13px", fontWeight: "900", color: "#7c2d12", marginTop: "2px" }}>
-                                {new Date(`${omiteFecha}T12:00:00`).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}
-                              </div>
-                            </div>
-                          )}
-
-                          {comercioDetalleModal.revisita_fecha && (
-                            <div style={{ background: "#dcfce7", border: "2px solid #22c55e", borderRadius: "6px", padding: "8px" }}>
-                              <div style={{ fontSize: "10px", fontWeight: "900", color: "#166534" }}>
-                                📅 RE-VISITAR
-                              </div>
-                              <div style={{ fontSize: "15px", fontWeight: "900", color: "#14532d", marginTop: "2px", textTransform: "uppercase" }}>
-                                {new Date(`${comercioDetalleModal.revisita_fecha}T12:00:00`).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}
-                              </div>
-                            </div>
-                          )}
-
-                          {comercioDetalleModal.revisita_motivo && (
-                            <div style={{ marginTop: "7px", fontSize: "11px", color: "#7c2d12", lineHeight: "1.4" }}>
-                              📝 <strong>Motivo:</strong> {comercioDetalleModal.revisita_motivo}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
 
                 {/* AUDIO */}
                 <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "10px" }}>
@@ -1937,7 +1602,7 @@ useEffect(() => {
                 <div style={{ fontSize: "11px", fontWeight: "800", color: "#0f172a", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                   ⚙️ Reasignar Preventista y Ruta
                 </div>
-                <div className="rc-supervisor-modal-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                   <div>
                     <label style={{ display: "block", fontSize: "10px", fontWeight: "bold", color: "#64748b", marginBottom: "3px" }}>👤 Preventista Asignado</label>
                     <select
@@ -2003,7 +1668,7 @@ useEffect(() => {
           </div>
         )}
               {seccionActiva === "pedidos" && (
-          <div>
+          <div style={{ padding: "16px", maxWidth: "1200px", margin: "0 auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>📦 Monitor de Comandas y Pedidos en Vivo</h2>

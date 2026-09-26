@@ -227,7 +227,25 @@ console.log("🚗 APP SE ESTÁ RENDERIZANDO");
       alert('Comercio guardado con éxito');
     } catch (err) {
       console.error('Error al guardar comercio:', err);
-      alert('Error al guardar: ' + (err.message || 'Verifique conexión'));
+
+      const mensajeError = String(err?.message || err || '').toLowerCase();
+      const pareceFallaConexion =
+        mensajeError.includes('load failed') ||
+        mensajeError.includes('failed to fetch') ||
+        mensajeError.includes('network') ||
+        mensajeError.includes('fetch');
+
+      if (pareceFallaConexion) {
+        alert(
+          '⚠️ No se pudo sincronizar con RutaComercio.\n\n' +
+          'Tus datos siguen en pantalla. Revisá la conexión e intentá “💾 Guardar Cambios” nuevamente.'
+        );
+      } else {
+        alert(
+          '❌ No se pudo guardar en RutaComercio.\n\n' +
+          (err?.message || 'Revisá la conexión e intentá nuevamente.')
+        );
+      }
     } finally {
       setGuardandoEdicion(false);
     }
@@ -2599,7 +2617,7 @@ onChange={(e) =>
                     color: "#94a3b8",
                   }}
                 >
-                  Después tocá “💾 Guardar Cambios” para dejarla guardada en Supabase.
+                  Después tocá “💾 Guardar Cambios” para dejarla guardada en RutaComercio.
                 </div>
               </div>
             )}
@@ -2920,8 +2938,11 @@ onChange={(e) =>
                   <button
                     type="button"
                     onClick={() => {
-                      setObservacionVisita("");
-                      setResultadoVisita("Visitado");
+                      const ultimaVisita = (visitasMapa || []).find(
+                        (v) => String(v.comercio_id) === String(proximoDestino.id)
+                      );
+                      setObservacionVisita(ultimaVisita?.observacion || "");
+                      setResultadoVisita(ultimaVisita?.resultado || "Visitado");
                       setComercioSeleccionado(proximoDestino);
                     }}
                     style={{
@@ -3035,8 +3056,11 @@ onChange={(e) =>
                 <div
                   key={c.id}
                   onClick={() => {
-                    setObservacionVisita('');
-                    setResultadoVisita('Visitado');
+                    const ultimaVisita = (visitasMapa || []).find(
+                      (v) => String(v.comercio_id) === String(c.id)
+                    );
+                    setObservacionVisita(ultimaVisita?.observacion || '');
+                    setResultadoVisita(ultimaVisita?.resultado || 'Visitado');
                     setComercioSeleccionado(c);
                   }}
                   style={{

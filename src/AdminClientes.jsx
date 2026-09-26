@@ -704,6 +704,27 @@ export default function AdminClientes() {
         </div>
       )}
 
+      {/* MODAL EDITAR EMPRESA */}
+      {mostrarModalEditar && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20000, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "480px", boxSizing: "border-box" }}>
+            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px", color: "#f8fafc" }}>✏️ Editar Empresa — {empresaAEditar}</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>País<input value={paisEditado} onChange={(e) => setPaisEditado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Moneda<input value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Modelo de cobro<select value={tipoTarifaEditada} onChange={(e) => setTipoTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px" }}><option value="preventista">Por preventista</option><option value="plana">Tarifa plana</option></select></label>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Tarifa<input type="number" value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Cupo preventistas<input type="number" value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Día de cobro<input type="number" min="1" max="31" value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
+              <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
+              <button type="button" onClick={guardarEdicionEmpresa} style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Guardar cambios</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL 4: ALTA EMPRESA */}
       {mostrarModalEmpresa && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20000, padding: "16px" }}>
