@@ -238,8 +238,11 @@ export default function AdminClientes() {
     const prevs = preventistas.filter(p => p.empresa === emp && p.rol !== "supervisor" && p.rol !== "superadmin").length;
     const val = Number(t.valor || t.tarifa || 10000);
     setMontoPago(t.tipo === "plana" ? String(val) : String(prevs * val || val));
-    setTipoMovimientoPago("renovacion");
-    setConceptoPago("Renovación de abono");
+    const tieneAbonosPrevios = historialPagos.some(p =>
+      p.empresa_id === t.id && ["alta", "primer_abono", "renovacion"].includes(p.tipo_movimiento)
+    );
+    setTipoMovimientoPago(tieneAbonosPrevios ? "renovacion" : "primer_abono");
+    setConceptoPago(tieneAbonosPrevios ? "Renovación de abono" : "Alta / Primer abono");
     setBonificadoPago(false);
     setPeriodoDesdePago("");
     setPeriodoHastaPago("");
@@ -290,7 +293,7 @@ export default function AdminClientes() {
       const cupoResultante = cambioFirmado === null ? null : Math.max(0, cupoActual + cambioFirmado);
       const esBonificado = tipoMovimientoPago === "bonificacion" || bonificadoPago;
 
-      if ((tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (!periodoDesdePago || !periodoHastaPago)) {
+      if ((tipoMovimientoPago === "primer_abono" || tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (!periodoDesdePago || !periodoHastaPago)) {
         throw new Error("Completá las fechas Desde y Hasta.");
       }
       if (periodoDesdePago && periodoHastaPago && periodoHastaPago < periodoDesdePago) {
@@ -309,7 +312,7 @@ export default function AdminClientes() {
         comprobante: comprobantePago || null,
         fecha: new Date().toISOString(),
         tipo_movimiento: tipoMovimientoPago,
-        concepto: conceptoPago || (tipoMovimientoPago === "renovacion" ? "Renovación de abono" : tipoMovimientoPago === "bonificacion" ? "Abono excepcional / bonificación" : tipoMovimientoPago === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas"),
+        concepto: conceptoPago || (tipoMovimientoPago === "primer_abono" ? "Alta / Primer abono" : tipoMovimientoPago === "renovacion" ? "Renovación de abono" : tipoMovimientoPago === "bonificacion" ? "Abono excepcional / bonificación" : tipoMovimientoPago === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas"),
         bonificado: esBonificado,
         periodo_desde: periodoDesdePago || null,
         periodo_hasta: periodoHastaPago || null,
@@ -893,9 +896,10 @@ export default function AdminClientes() {
                 const v = e.target.value;
                 setTipoMovimientoPago(v);
                 setBonificadoPago(v === "bonificacion");
-                setConceptoPago(v === "renovacion" ? "Renovación de abono" : v === "bonificacion" ? "Abono excepcional / bonificación" : v === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
+                setConceptoPago(v === "primer_abono" ? "Alta / Primer abono" : v === "renovacion" ? "Renovación de abono" : v === "bonificacion" ? "Abono excepcional / bonificación" : v === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
                 if (v === "bonificacion") setMontoPago("0");
               }} style={{ width: "100%", padding: "11px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "14px", boxSizing: "border-box" }}>
+                <option value="primer_abono">🆕 Alta / Primer abono</option>
                 <option value="renovacion">🔄 Renovar abono</option>
                 <option value="bonificacion">🎁 Abono excepcional / Bonificación</option>
                 <option value="ampliacion">➕ Ampliar preventistas</option>
@@ -907,7 +911,7 @@ export default function AdminClientes() {
                 <input type="text" value={conceptoPago} onChange={(e) => setConceptoPago(e.target.value)} placeholder="Ej. Renovación semestral / acuerdo especial" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
               </div>
 
-              {(tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (
+              {(tipoMovimientoPago === "primer_abono" || tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "14px" }}>
                   <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Desde
                     <input type="date" value={periodoDesdePago} onChange={(e) => setPeriodoDesdePago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
