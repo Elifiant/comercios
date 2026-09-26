@@ -65,6 +65,9 @@ export default function AdminClientes() {
   const [nuevoEmail, setNuevoEmail] = useState("");
   const [nuevoPassword, setNuevoPassword] = useState("");
   const [empresaSeleccionada, setEmpresaSeleccionada] = useState("Elifiant");
+  const [tipoNuevoPreventista, setTipoNuevoPreventista] = useState("permanente");
+  const [temporalDesdeNuevo, setTemporalDesdeNuevo] = useState("");
+  const [temporalHastaNuevo, setTemporalHastaNuevo] = useState("");
 
   useEffect(() => { cargarDatos(); }, []);
 
@@ -378,6 +381,31 @@ export default function AdminClientes() {
         alert("Por favor completá email y contraseña");
         return;
       }
+
+      const esPreventista = (nuevoRolEmpleado || "preventista") === "preventista";
+      const esTemporal = esPreventista && tipoNuevoPreventista === "temporal";
+      if (esTemporal && (!temporalDesdeNuevo || !temporalHastaNuevo)) {
+        alert("Completá las fechas Desde y Hasta del preventista temporal.");
+        return;
+      }
+      if (esTemporal && temporalHastaNuevo < temporalDesdeNuevo) {
+        alert("La fecha Hasta no puede ser anterior a la fecha Desde.");
+        return;
+      }
+
+      if (esPreventista) {
+        const empresaDB = empresasRegistros.find(e => e.nombre === empresaSeleccionada);
+        const cupo = Number(empresaDB?.cupo_preventistas ?? tarifasMap[empresaSeleccionada]?.cupo ?? 0);
+        const asignados = preventistas.filter(p =>
+          (p.empresa || "").toLowerCase() === (empresaSeleccionada || "").toLowerCase() &&
+          p.rol === "preventista" && p.activo !== false
+        ).length;
+        if (asignados >= cupo) {
+          alert(`No hay cupo disponible. ${empresaSeleccionada} tiene ${asignados} preventistas activos sobre un cupo de ${cupo}.`);
+          return;
+        }
+      }
+
       // 1. Creamos la cuenta real de login en Supabase Authentication
       const { data: authData, error: authErr } = await supabaseRegistro.auth.signUp({
         email: (nuevoEmail || '').trim().toLowerCase(),
@@ -407,6 +435,9 @@ export default function AdminClientes() {
         empresa: empresaSeleccionada,
         empresa_id: empresasRegistros.find(e => e.nombre === empresaSeleccionada)?.id || null,
         rol: nuevoRolEmpleado || "preventista",
+        tipo_preventista: (nuevoRolEmpleado || "preventista") === "preventista" ? tipoNuevoPreventista : "permanente",
+        temporal_desde: (nuevoRolEmpleado || "preventista") === "preventista" && tipoNuevoPreventista === "temporal" ? temporalDesdeNuevo : null,
+        temporal_hasta: (nuevoRolEmpleado || "preventista") === "preventista" && tipoNuevoPreventista === "temporal" ? temporalHastaNuevo : null,
         activo: true
       };
 
@@ -417,6 +448,9 @@ export default function AdminClientes() {
       setNuevoNombre("");
       setNuevoEmail("");
       setNuevoPassword("");
+      setTipoNuevoPreventista("permanente");
+      setTemporalDesdeNuevo("");
+      setTemporalHastaNuevo("");
       setMostrarModalPreventista(false);
       alert(nuevoRolEmpleado === "supervisor" ? "🎉 Supervisor creado con éxito." : "🎉 Preventista creado con éxito. Ya puede ingresar desde la app móvil.");
     } catch (err) {
@@ -767,8 +801,19 @@ export default function AdminClientes() {
                     preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "preventista").map(prev => (
                       <div key={prev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "10px 14px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                         <div>
-                          <div style={{ fontWeight: "700", color: "#0f172a", fontSize: "13px" }}>👤 {prev.nombre}</div>
-                          <div style={{ fontSize: "11px", color: "#64748b" }}>✉️ {prev.email}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <div style={{ fontWeight: "700", color: "#0f172a", fontSize: "13px" }}>👤 {prev.nombre}</div>
+                            {prev.tipo_preventista === "temporal" ? (
+                              <span style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #f59e0b", borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: "800" }}>
+                                ⏱️ TEMPORAL{prev.temporal_hasta ? ` · hasta ${new Date(prev.temporal_hasta + "T00:00:00").toLocaleDateString("es-AR")}` : ""}
+                              </span>
+                            ) : (
+                              <span style={{ backgroundColor: "#dcfce7", color: "#166534", border: "1px solid #86efac", borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: "800" }}>
+                                👤 PERMANENTE
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>✉️ {prev.email}</div>
                         </div>
                         <div style={{ display: "flex", gap: "6px" }}>
                           <button onClick={() => setModalResetClave({ usuario: prev, nuevoPass: "" })} style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🔑 Clave</button>
@@ -908,6 +953,25 @@ export default function AdminClientes() {
               <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Walter)" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
               <input type="email" value={nuevoEmail} onChange={(e) => setNuevoEmail(e.target.value)} placeholder="Email de login" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
               <input type="password" value={nuevoPassword} onChange={(e) => setNuevoPassword(e.target.value)} placeholder="Contraseña temporal" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
+              {nuevoRolEmpleado === "preventista" && (
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Tipo de preventista</label>
+                  <select value={tipoNuevoPreventista} onChange={(e) => { setTipoNuevoPreventista(e.target.value); if (e.target.value === "permanente") { setTemporalDesdeNuevo(""); setTemporalHastaNuevo(""); } }} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="permanente">👤 Permanente</option>
+                    <option value="temporal">⏱️ Temporal</option>
+                  </select>
+                </div>
+              )}
+              {nuevoRolEmpleado === "preventista" && tipoNuevoPreventista === "temporal" && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px" }}>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Desde
+                    <input type="date" value={temporalDesdeNuevo} onChange={(e) => setTemporalDesdeNuevo(e.target.value)} required style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Hasta
+                    <input type="date" min={temporalDesdeNuevo || undefined} value={temporalHastaNuevo} onChange={(e) => setTemporalHastaNuevo(e.target.value)} required style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                </div>
+              )}
               <div style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#cbd5e1", marginBottom: "20px", boxSizing: "border-box", fontSize: "13px" }}>
                 Empresa: <strong style={{ color: "#fff" }}>{empresaSeleccionada}</strong>
               </div>
