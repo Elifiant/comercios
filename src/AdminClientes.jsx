@@ -236,7 +236,7 @@ export default function AdminClientes() {
     setEmpresaPago(emp);
     const t = tarifasMap[emp] || {};
     setMonedaPago(t.moneda || "ARS");
-    const prevs = preventistas.filter(p => p.empresa === emp && p.rol !== "supervisor" && p.rol !== "superadmin").length;
+    const prevs = preventistas.filter(p => p.empresa === emp && p.rol === "preventista").length;
     const val = Number(t.valor || t.tarifa || 10000);
     setMontoPago(t.tipo === "plana" ? String(val) : String(prevs * val || val));
     const tieneAbonosPrevios = historialPagos.some(p =>
@@ -307,29 +307,53 @@ export default function AdminClientes() {
         throw new Error("Indicá cuántos preventistas querés agregar o reducir.");
       }
 
-      const { error } = await supabase.from("pagos_empresas").insert([{
-        empresa: empresaPago,
-        empresa_id: empresaDB.id,
-        monto: esBonificado ? 0 : (Number(montoPago) || 0),
-        moneda: monedaPago,
-        metodo: esBonificado ? "Bonificado" : metodoPago,
-        comprobante: comprobantePago || null,
-        fecha: new Date().toISOString(),
-        tipo_movimiento: tipoMovimientoPago,
-        concepto: conceptoPago || (tipoMovimientoPago === "primer_abono" ? "Alta / Primer abono" : tipoMovimientoPago === "renovacion" ? "Renovación de abono" : tipoMovimientoPago === "bonificacion" ? "Abono excepcional / bonificación" : tipoMovimientoPago === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas"),
-        bonificado: esBonificado,
-        periodo_desde: periodoDesdePago || null,
-        periodo_hasta: periodoHastaPago || null,
-        cambio_preventistas: cambioFirmado,
-        cupo_resultante: cupoResultante,
-        cambio_temporal: (esAmpliacion || esReduccion) ? cambioTemporalPago : false
-      }]);
-      if (error) throw error;
+      const conceptoFinal = conceptoPago || (tipoMovimientoPago === "primer_abono" ? "Alta / Primer abono" : tipoMovimientoPago === "renovacion" ? "Renovación de abono" : tipoMovimientoPago === "bonificacion" ? "Abono excepcional / bonificación" : tipoMovimientoPago === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
+      const cambioPermanente = (esAmpliacion || esReduccion) && !cambioTemporalPago;
+
+      if (cambioPermanente) {
+        const { error } = await supabase.rpc("registrar_cambio_cupo", {
+          p_empresa_id: empresaDB.id,
+          p_empresa: empresaPago,
+          p_tipo_movimiento: tipoMovimientoPago,
+          p_concepto: conceptoFinal,
+          p_cambio_preventistas: cambioFirmado,
+          p_nuevo_cupo: cupoResultante,
+          p_monto: Number(montoPago) || 0,
+          p_moneda: monedaPago,
+          p_metodo: metodoPago,
+          p_comprobante: comprobantePago || null,
+          p_cambio_temporal: false,
+          p_periodo_desde: periodoDesdePago || null,
+          p_periodo_hasta: periodoHastaPago || null
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("pagos_empresas").insert([{
+          empresa: empresaPago,
+          empresa_id: empresaDB.id,
+          monto: esBonificado ? 0 : (Number(montoPago) || 0),
+          moneda: monedaPago,
+          metodo: esBonificado ? "Bonificado" : metodoPago,
+          comprobante: comprobantePago || null,
+          fecha: new Date().toISOString(),
+          tipo_movimiento: tipoMovimientoPago,
+          concepto: conceptoFinal,
+          bonificado: esBonificado,
+          periodo_desde: periodoDesdePago || null,
+          periodo_hasta: periodoHastaPago || null,
+          cambio_preventistas: cambioFirmado,
+          cupo_resultante: cupoResultante,
+          cambio_temporal: (esAmpliacion || esReduccion) ? cambioTemporalPago : false
+        }]);
+        if (error) throw error;
+      }
 
       await cargarDatos();
       setMostrarModalPago(false);
       setComprobantePago("");
-      alert("✅ Movimiento registrado en Supabase. Por ahora queda asentado en el historial; todavía no modifica automáticamente el abono ni el cupo de la empresa.");
+      alert(cambioPermanente
+        ? `✅ Movimiento registrado y cupo actualizado a ${cupoResultante} preventistas.`
+        : "✅ Movimiento registrado en Supabase. Los cambios temporales todavía no modifican automáticamente el cupo de la empresa.");
     } catch (err) {
       alert("Error al registrar movimiento: " + (err.message || "Error desconocido"));
     } finally {
@@ -405,7 +429,7 @@ export default function AdminClientes() {
     const t = tarifasMap[emp] || {};
     const cInfo = diasCorteMap[emp] || {};
     const diaCorte = Number(t.diaCobro || t.dia_cobro || cInfo.dia || 5);
-    const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase()).length;
+    const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase() && p.rol === "preventista").length;
     const valor = Number(t.valor || t.tarifa || (t.moneda === "ARS" ? 10000 : 50));
     const moneda = t.moneda || "ARS";
     const total = (t.tipo === "plana" ? valor : (prevsCount * valor || valor));
@@ -594,7 +618,7 @@ export default function AdminClientes() {
                 const colorBadge = esAlDia ? "#10b981" : esPorVencer ? "#f59e0b" : "#ef4444";
                 const bgBadge = esAlDia ? "rgba(16, 185, 129, 0.15)" : esPorVencer ? "rgba(245, 158, 11, 0.15)" : "rgba(239, 68, 68, 0.15)";
                 
-                const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase()).length;
+                const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase() && p.rol === "preventista").length;
                 const cupoMax = Number(t.cupo || cInfoRaw.cupo || 5);
                 const moneda = t.moneda || "ARS";
                 const valor = t.valor || t.tarifa || (moneda === "ARS" ? "10000" : "50");
@@ -717,7 +741,7 @@ export default function AdminClientes() {
                       🚶 PREVENTISTAS EN CALLE
                     </h4>
                     <span style={{ fontSize: "12px", color: "#64748b" }}>
-                      {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol !== "supervisor" && p.rol !== "superadmin").length} activos en zona
+                      {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "preventista").length} activos en zona
                     </span>
                   </div>
                   <button onClick={() => { setEmpresaSeleccionada(empresaDetalleModal); setNuevoRolEmpleado("preventista"); setNuevoNombre(""); setNuevoEmail(""); setNuevoPassword(""); setMostrarModalPreventista(true); }} style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
@@ -726,12 +750,12 @@ export default function AdminClientes() {
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol !== "supervisor" && p.rol !== "superadmin").length === 0 ? (
+                  {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "preventista").length === 0 ? (
                     <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px", backgroundColor: "#fff", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
                       No hay preventistas registrados en esta empresa.
                     </div>
                   ) : (
-                    preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol !== "supervisor" && p.rol !== "superadmin").map(prev => (
+                    preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "preventista").map(prev => (
                       <div key={prev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "10px 14px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                         <div>
                           <div style={{ fontWeight: "700", color: "#0f172a", fontSize: "13px" }}>👤 {prev.nombre}</div>
