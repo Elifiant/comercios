@@ -2,7 +2,8 @@
 import * as XLSX from "xlsx";
 import { supabase } from "./supabase";
 import DisenadorRutas from "./DisenadorRutas";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap,
+  useMapEvents} from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -227,6 +228,18 @@ const reactivarComercio = async (comercio) => {
   const [importandoCuenta, setImportandoCuenta] = useState(false);
   const inputArchivoCuentaRef = useRef(null);
 
+  // 📥 Importación masiva de clientes — PASO 1: solo lectura y vista previa
+  const [modalImportacionClientes, setModalImportacionClientes] = useState(false);
+  const [archivoClientesNombre, setArchivoClientesNombre] = useState("");
+  const [vistaPreviaClientes, setVistaPreviaClientes] = useState(null);
+  const [archivoClientesTieneEncabezados, setArchivoClientesTieneEncabezados] = useState(true);
+  const [probandoGeo, setProbandoGeo] = useState(false);
+  const [resultadoGeo, setResultadoGeo] = useState(null);
+  const [revisionMapa, setRevisionMapa] = useState(null);
+  const [preConfirmacionImportacion, setPreConfirmacionImportacion] = useState(false);
+  const [importandoClientes, setImportandoClientes] = useState(false);
+  const inputArchivoClientesRef = useRef(null);
+
   // Inicialización de supervisor y datos
   useEffect(() => {
     async function inicializarSupervisor() {
@@ -257,7 +270,7 @@ const reactivarComercio = async (comercio) => {
         // 2) Cargar solamente los perfiles de SU empresa
         const { data: perfilesData, error: errorPerfiles } = await supabase
           .from("perfiles")
-          .select("id, nombre, email, empresa, rol, latitud, longitud, ultima_posicion_at, ultima_conexion, activo_hoy")
+          .select("id, nombre, email, empresa, empresa_id, rol, activo, latitud, longitud, ultima_posicion_at, ultima_conexion, activo_hoy")
           .eq("empresa_id", pData.empresa_id);
 
         if (errorPerfiles) throw errorPerfiles;
@@ -536,6 +549,18 @@ useEffect(() => {
   const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
   const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
 
+  const textoUltimaSenal = (fecha) => {
+    if (!fecha) return "Sin señal registrada";
+    const minutos = Math.max(0, Math.floor((Date.now() - new Date(fecha).getTime()) / 60000));
+    if (minutos < 1) return "Última señal: ahora";
+    if (minutos < 60) return `Última señal: hace ${minutos} min`;
+    const horas = Math.floor(minutos / 60);
+    const resto = minutos % 60;
+    if (horas < 24) return `Última señal: hace ${horas} h${resto ? ` ${resto} min` : ""}`;
+    const dias = Math.floor(horas / 24);
+    return `Última señal: hace ${dias} día${dias === 1 ? "" : "s"}`;
+  };
+
   // Telemetría de flota basada en actividad REAL del preventista
   const hoyStr = new Date().toISOString().slice(0, 10);
   const normalizarNombrePrev = (v) => String(v || "").trim().toLowerCase();
@@ -553,8 +578,9 @@ useEffect(() => {
 
     const ultimaSenal = perfilPrev?.ultima_conexion || perfilPrev?.ultima_posicion_at || null;
     const minutosDesdeSenal = ultimaSenal ? (Date.now() - new Date(ultimaSenal).getTime()) / 60000 : Infinity;
-    // En ruta si tuvo visita hoy o si el celular reportó actividad en los últimos 20 minutos.
-    const activoHoy = visitasPrevHoy.length > 0 || minutosDesdeSenal <= 20;
+    // En línea si el celular reportó actividad en los últimos 60 minutos.
+    // Las visitas de hoy se muestran aparte, pero no mantienen al preventista "en línea".
+    const activoHoy = minutosDesdeSenal <= 60;
 
     return {
       nombre: prev,
@@ -816,6 +842,348 @@ useEffect(() => {
     }
   };
 
+  // 📥 Leer padrón de clientes desde Excel/CSV — NO guarda nada en Supabase
+  const leerArchivoClientes = async (event) => {
+    const archivo = event.target.files?.[0];
+    if (!archivo) return;
+
+    try {
+      setArchivoClientesNombre(archivo.name);
+      setVistaPreviaClientes(null);
+      setResultadoGeo(null);
+
+      const buffer = await archivo.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const hoja = workbook.Sheets[workbook.SheetNames[0]];
+      const matriz = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: "", raw: false });
+      const filasUtiles = matriz.filter(fila => Array.isArray(fila) && fila.some(celda => String(celda ?? "").trim() !== ""));
+      if (!filasUtiles.length) throw new Error("La planilla está vacía.");
+
+      let filas = [];
+      if (archivoClientesTieneEncabezados) {
+        const encabezados = filasUtiles[0].map(v => String(v ?? "").trim());
+        filas = filasUtiles.slice(1).map(fila =>
+          Object.fromEntries(encabezados.map((enc, i) => [enc, fila[i] ?? ""]))
+        );
+      } else {
+        filas = filasUtiles.map(fila => ({
+          codigo_cliente: fila[0] ?? "",
+          nombre_comercio: fila[1] ?? "",
+          direccion: fila[2] ?? "",
+          localidad: fila[3] ?? "",
+          provincia: fila[4] ?? "",
+          pais: fila[5] ?? "",
+          email_preventista: fila[6] ?? "",
+          latitud: fila[7] ?? "",
+          longitud: fila[8] ?? ""
+        }));
+      }
+
+      const obtenerCampo = (fila, opciones) => {
+        const mapa = Object.fromEntries(
+          Object.entries(fila).map(([k, v]) => [String(k).trim().toLowerCase(), v])
+        );
+        for (const op of opciones) {
+          if (Object.prototype.hasOwnProperty.call(mapa, op)) return mapa[op];
+        }
+        return "";
+      };
+
+      const vistos = new Set();
+      const validos = [];
+      const duplicados = [];
+      const sinNombre = [];
+      const sinDireccion = [];
+      let conCoordenadas = 0;
+      let pendientesGeocodificar = 0;
+
+      filas.forEach((fila, indice) => {
+        const numeroFila = indice + (archivoClientesTieneEncabezados ? 2 : 1);
+        const codigo = String(obtenerCampo(fila, ["codigo_cliente", "código_cliente", "codigo cliente", "código cliente", "codigo", "código"]) || "").trim();
+        const nombre = String(obtenerCampo(fila, ["nombre_comercio", "nombre comercio", "nombre del comercio", "comercio", "cliente", "razon_social", "razón social", "razon social", "nombre"]) || "").trim();
+        const direccion = String(obtenerCampo(fila, ["direccion", "dirección", "domicilio"]) || "").trim();
+        const localidad = String(obtenerCampo(fila, ["localidad", "ciudad"]) || "").trim();
+        const provincia = String(obtenerCampo(fila, ["provincia", "estado", "provincia/estado", "departamento"]) || "").trim();
+        const pais = String(obtenerCampo(fila, ["pais", "país", "country"]) || "").trim();
+        const emailPreventista = String(obtenerCampo(fila, ["email_preventista", "email preventista", "email del preventista", "correo_preventista", "correo preventista", "preventista_email"]) || "").trim().toLowerCase();
+        const latRaw = String(obtenerCampo(fila, ["latitud", "latitude", "lat"]) || "").trim().replace(",", ".");
+        const lngRaw = String(obtenerCampo(fila, ["longitud", "longitude", "lng", "lon"]) || "").trim().replace(",", ".");
+        const latitud = latRaw === "" ? null : Number(latRaw);
+        const longitud = lngRaw === "" ? null : Number(lngRaw);
+        const tieneCoordenadas = Number.isFinite(latitud) && Number.isFinite(longitud);
+
+        if (!nombre) {
+          sinNombre.push({ fila: numeroFila, codigo, motivo: "Falta nombre" });
+          return;
+        }
+
+        const clave = (codigo || `${nombre}|${direccion}|${localidad}`).toUpperCase();
+        if (vistos.has(clave)) {
+          duplicados.push({ fila: numeroFila, codigo, nombre });
+          return;
+        }
+        vistos.add(clave);
+
+        if (!direccion && !tieneCoordenadas) {
+          sinDireccion.push({ fila: numeroFila, codigo, nombre });
+          return;
+        }
+
+        if (tieneCoordenadas) conCoordenadas += 1;
+        else pendientesGeocodificar += 1;
+
+        validos.push({
+          fila: numeroFila,
+          codigo_cliente: codigo,
+          nombre,
+          direccion,
+          localidad,
+          provincia,
+          pais,
+          email_preventista: emailPreventista,
+          latitud: tieneCoordenadas ? latitud : null,
+          longitud: tieneCoordenadas ? longitud : null,
+          estadoUbicacion: tieneCoordenadas ? "Con coordenadas" : "Pendiente de geocodificar"
+        });
+      });
+
+      const validarPreventista = (cliente) => {
+        const email = String(cliente.email_preventista || "").trim().toLowerCase();
+
+        if (!email) {
+          return { ...cliente, preventista_estado: "sin_email", preventista_perfil: null };
+        }
+
+        const perfil = (perfiles || []).find(p =>
+          String(p.email || "").trim().toLowerCase() === email
+        );
+
+        if (!perfil) {
+          return { ...cliente, preventista_estado: "no_reconocido", preventista_perfil: null };
+        }
+
+        if (perfil.rol !== "preventista") {
+          return { ...cliente, preventista_estado: "rol_incorrecto", preventista_perfil: perfil };
+        }
+
+        if (perfil.empresa_id && perfilSupervisor?.empresa_id && perfil.empresa_id !== perfilSupervisor.empresa_id) {
+          return { ...cliente, preventista_estado: "otra_empresa", preventista_perfil: perfil };
+        }
+
+        if (perfil.activo === false) {
+          return { ...cliente, preventista_estado: "inactivo", preventista_perfil: perfil };
+        }
+
+        return {
+          ...cliente,
+          preventista_estado: "ok",
+          preventista_perfil: perfil,
+          preventista_nombre: perfil.nombre || perfil.email
+        };
+      };
+
+      const validosConPreventista = validos.map(validarPreventista);
+
+      setVistaPreviaClientes({
+        totalFilas: filas.length,
+        validos: validosConPreventista,
+        duplicados,
+        sinNombre,
+        sinDireccion,
+        conCoordenadas,
+        pendientesGeocodificar,
+        conPais: validosConPreventista.filter(x => x.pais).length,
+        sinPais: validosConPreventista.filter(x => !x.pais).length,
+        conPreventista: validosConPreventista.filter(x => x.email_preventista).length,
+        sinPreventista: validosConPreventista.filter(x => !x.email_preventista).length,
+        preventistasOk: validosConPreventista.filter(x => x.preventista_estado === "ok").length,
+        preventistasProblema: validosConPreventista.filter(x => !["ok", "sin_email"].includes(x.preventista_estado)).length,
+        preventistasSinEmail: validosConPreventista.filter(x => x.preventista_estado === "sin_email").length
+      });
+    } catch (error) {
+      console.error("Error leyendo padrón de clientes:", error);
+      alert("❌ No se pudo leer la planilla: " + (error.message || "Formato inválido"));
+      setArchivoClientesNombre("");
+      setVistaPreviaClientes(null);
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  // 🌍 Geocodificar TODOS los clientes válidos — todavía NO guarda nada
+  const probarGeoapifyPrimerCliente = async () => {
+    const clientes = vistaPreviaClientes?.validos || [];
+    if (!clientes.length) {
+      alert("⚠️ Primero cargá una planilla con al menos un cliente válido.");
+      return;
+    }
+
+    const apiKey = import.meta.env.VITE_GEOAPIFY_API_KEY;
+    if (!apiKey) {
+      alert("❌ No encuentro VITE_GEOAPIFY_API_KEY en el archivo .env. Reiniciá Vite después de guardarlo.");
+      return;
+    }
+
+    setProbandoGeo(true);
+    setResultadoGeo(null);
+
+    const resultados = [];
+
+    try {
+      for (let i = 0; i < clientes.length; i += 1) {
+        const cliente = clientes[i];
+
+        if (cliente.latitud != null && cliente.longitud != null) {
+          resultados.push({
+            ok: true,
+            revisar: false,
+            origen: "excel",
+            cliente: cliente.nombre,
+            direccion: [cliente.direccion, cliente.localidad, cliente.provincia, "Argentina"].filter(Boolean).join(", "),
+            latitud: cliente.latitud,
+            longitud: cliente.longitud,
+            direccionEncontrada: "Coordenadas provistas por la planilla"
+          });
+          continue;
+        }
+
+        const direccionCompleta = [
+          cliente.direccion,
+          cliente.localidad,
+          cliente.provincia,
+          cliente.pais || "Argentina"
+        ].filter(Boolean).join(", ");
+
+        try {
+          const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(direccionCompleta)}&format=json&limit=1&apiKey=${encodeURIComponent(apiKey)}`;
+          const respuesta = await fetch(url);
+
+          if (!respuesta.ok) throw new Error(`Geoapify respondió ${respuesta.status}`);
+
+          const data = await respuesta.json();
+          const encontrado = data?.results?.[0];
+
+          if (!encontrado) {
+            resultados.push({
+              ok: false,
+              cliente: cliente.nombre,
+              direccion: direccionCompleta,
+              mensaje: "No encontrado"
+            });
+          } else {
+            const confianza = Number(encontrado.rank?.confidence ?? 0);
+            const confianzaCalle = Number(encontrado.rank?.confidence_street_level ?? 0);
+            const tipoResultado = encontrado.result_type || "";
+            const tiposPrecisos = ["building", "amenity"];
+            const revisar = !tiposPrecisos.includes(tipoResultado) || confianza < 0.75;
+
+            resultados.push({
+              ok: true,
+              revisar,
+              origen: "geoapify",
+              cliente: cliente.nombre,
+              direccion: direccionCompleta,
+              latitud: encontrado.lat,
+              longitud: encontrado.lon,
+              direccionEncontrada: encontrado.formatted || "",
+              tipoResultado,
+              confianza,
+              confianzaCalle
+            });
+          }
+        } catch (errorCliente) {
+          resultados.push({
+            ok: false,
+            cliente: cliente.nombre,
+            direccion: direccionCompleta,
+            mensaje: errorCliente.message || "Error consultando Geoapify"
+          });
+        }
+
+        // Pausa pequeña para no disparar consultas todas juntas.
+        if (i < clientes.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+      }
+
+      const confiables = resultados.filter(r => r.ok && !r.revisar).length;
+      const revisar = resultados.filter(r => r.ok && r.revisar).length;
+      const noEncontrados = resultados.filter(r => !r.ok).length;
+
+      setResultadoGeo({
+        multiple: true,
+        total: resultados.length,
+        encontrados: confiables,
+        revisar,
+        noEncontrados,
+        resultados
+      });
+    } catch (error) {
+      console.error("Error general geocodificando clientes:", error);
+      alert("❌ Ocurrió un error durante la geocodificación: " + (error.message || "Error desconocido"));
+    } finally {
+      setProbandoGeo(false);
+    }
+  };
+
+  // 🗺️ Abrir revisión visual de una ubicación dudosa
+  const abrirRevisionMapa = (indiceResultado) => {
+    const r = resultadoGeo?.resultados?.[indiceResultado];
+    if (!r?.ok) return;
+    setRevisionMapa({
+      indice: indiceResultado,
+      cliente: r.cliente,
+      direccion: r.direccion,
+      direccionEncontrada: r.direccionEncontrada,
+      latitud: Number(r.latitud),
+      longitud: Number(r.longitud)
+    });
+  };
+
+  // 📍 Recibir un punto elegido haciendo clic en el mapa
+  function SelectorPuntoRevision() {
+    useMapEvents({
+      click(e) {
+        setRevisionMapa(actual => actual ? {
+          ...actual,
+          latitud: e.latlng.lat,
+          longitud: e.latlng.lng
+        } : actual);
+      }
+    });
+    return null;
+  }
+
+  // ✅ Confirmar la ubicación vista/corregida en el mapa — todavía solo memoria
+  const confirmarRevisionMapa = () => {
+    if (!revisionMapa) return;
+
+    setResultadoGeo(actual => {
+      if (!actual?.multiple) return actual;
+      const resultados = actual.resultados.map((r, i) =>
+        i === revisionMapa.indice
+          ? {
+              ...r,
+              revisar: false,
+              aceptadoManualmente: true,
+              latitud: revisionMapa.latitud,
+              longitud: revisionMapa.longitud
+            }
+          : r
+      );
+
+      return {
+        ...actual,
+        resultados,
+        encontrados: resultados.filter(r => r.ok && !r.revisar).length,
+        revisar: resultados.filter(r => r.ok && r.revisar).length,
+        noEncontrados: resultados.filter(r => !r.ok).length
+      };
+    });
+
+    setRevisionMapa(null);
+  };
+
   // 💳 Estado de Cuenta de clientes
   const comerciosEstadoCuenta = (comercios || []).filter((c) => {
     const deuda = Number(c.deuda || 0);
@@ -840,6 +1208,216 @@ useEffect(() => {
   const saldoTotalPendiente = (comercios || []).reduce((acc, c) => acc + Math.max(0, Number(c.deuda || 0)), 0);
   const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
   const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
+
+  // 💾 Importación REAL de clientes aprobados por el supervisor
+  const confirmarImportacionRealClientes = async () => {
+    if (importandoClientes) return;
+
+    if (!perfilSupervisor?.empresa_id) {
+      alert("❌ No se pudo identificar la empresa del supervisor.");
+      return;
+    }
+
+    const clientes = vistaPreviaClientes?.validos || [];
+    const geos = resultadoGeo?.multiple ? (resultadoGeo.resultados || []) : [];
+
+    if (!clientes.length || geos.length !== clientes.length) {
+      alert("❌ La vista previa o la geolocalización están incompletas. No se importó nada.");
+      return;
+    }
+
+    const pendientes = geos.filter(r => !r?.ok || r?.revisar);
+    if (pendientes.length) {
+      alert(`⚠️ Todavía hay ${pendientes.length} ubicación(es) sin resolver. No se importó nada.`);
+      return;
+    }
+
+    const sinCodigo = clientes.filter(c => !String(c.codigo_cliente || "").trim());
+    if (sinCodigo.length) {
+      alert(`⚠️ Hay ${sinCodigo.length} cliente(s) sin código_cliente. Para esta primera importación real exigimos código para evitar duplicados.`);
+      return;
+    }
+
+    const confirmacion = window.confirm(
+      `⚠️ IMPORTACIÓN REAL\n\nSe van a crear ${clientes.length} cliente(s) en Supabase para ${perfilSupervisor.empresa || "esta empresa"}.\n\nEsta acción SÍ guarda datos.\n\n¿Confirmar importación?`
+    );
+    if (!confirmacion) return;
+
+    setImportandoClientes(true);
+
+    const importados = [];
+    const omitidosExistentes = [];
+    const errores = [];
+
+    const codigoPais = (pais) => {
+      const p = String(pais || "").trim().toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const mapa = {
+        "argentina": "AR",
+        "uruguay": "UY",
+        "paraguay": "PY",
+        "chile": "CL",
+        "brasil": "BR",
+        "brazil": "BR",
+        "bolivia": "BO",
+        "peru": "PE",
+        "ecuador": "EC",
+        "colombia": "CO",
+        "venezuela": "VE",
+        "mexico": "MX",
+        "espana": "ES",
+        "spain": "ES"
+      };
+      return mapa[p] || (p.length === 2 ? p.toUpperCase() : null);
+    };
+
+    try {
+      for (let i = 0; i < clientes.length; i += 1) {
+        const c = clientes[i];
+        const geo = geos[i];
+
+        try {
+          const perfilPrev = c.preventista_perfil || (perfiles || []).find(p =>
+            String(p.email || "").trim().toLowerCase() === String(c.email_preventista || "").trim().toLowerCase() &&
+            String(p.rol || "").trim().toLowerCase() === "preventista" &&
+            p.empresa_id === perfilSupervisor.empresa_id
+          );
+
+          if (!perfilPrev) {
+            throw new Error("No se pudo resolver el preventista.");
+          }
+
+          const codigo = String(c.codigo_cliente || "").trim();
+
+          // Seguridad contra reimportar el mismo código dentro de la misma empresa.
+          const { data: existente, error: errorExistente } = await supabase
+            .from("comercios")
+            .select("id, nombre, codigo_cliente")
+            .eq("empresa_id", perfilSupervisor.empresa_id)
+            .eq("codigo_cliente", codigo)
+            .maybeSingle();
+
+          if (errorExistente) throw errorExistente;
+          if (existente) {
+            omitidosExistentes.push({
+              nombre: c?.nombre || `Fila ${i + 1}`,
+              codigo,
+              id: existente.id
+            });
+            continue;
+          }
+
+          const lat = Number(geo.latitud ?? c.latitud);
+          const lng = Number(geo.longitud ?? c.longitud);
+
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            throw new Error("Coordenadas inválidas.");
+          }
+
+          const nuevo = {
+            nombre: String(c.nombre || "").trim(),
+            codigo_cliente: codigo,
+            empresa: perfilSupervisor.empresa || "",
+            empresa_id: perfilSupervisor.empresa_id,
+            preventista: perfilPrev.nombre || perfilPrev.email,
+            direccion: String(c.direccion || "").trim(),
+            latitud: lat,
+            longitud: lng,
+            ubicacion_exacta_latitud: lat,
+            ubicacion_exacta_longitud: lng,
+            estado_alta: "aprobado",
+            creado_por_preventista: false,
+            codigo_pais: codigoPais(c.pais)
+          };
+
+          const { data: creado, error: errorInsert } = await supabase
+            .from("comercios")
+            .insert(nuevo)
+            .select("*")
+            .single();
+
+          if (errorInsert) throw errorInsert;
+          importados.push(creado);
+
+        } catch (errorCliente) {
+          console.error("Error importando cliente:", c?.nombre, errorCliente);
+          errores.push({
+            nombre: c?.nombre || `Fila ${i + 1}`,
+            codigo: c?.codigo_cliente || "",
+            mensaje: errorCliente?.message || "Error desconocido"
+          });
+        }
+      }
+
+      if (importados.length) {
+        setComercios(prev => [...importados, ...(prev || [])]);
+      }
+
+      const detalleOmitidos = omitidosExistentes.length
+        ? "\n\nYa existentes / omitidos:\n" + omitidosExistentes.slice(0, 8)
+            .map(e => `• ${e.nombre}${e.codigo ? ` (${e.codigo})` : ""}: ya existe${e.id ? ` (ID ${e.id})` : ""}`)
+            .join("\n")
+        : "";
+
+      const detalleErrores = errores.length
+        ? "\n\nErrores reales:\n" + errores.slice(0, 8)
+            .map(e => `• ${e.nombre}${e.codigo ? ` (${e.codigo})` : ""}: ${e.mensaje}`)
+            .join("\n")
+        : "";
+
+      const sinDuplicados = omitidosExistentes.length
+        ? "\n\nℹ️ No se duplicó ningún cliente ya existente."
+        : "";
+
+      alert(
+        `✅ Importación finalizada\n\nNuevos importados: ${importados.length}\nYa existentes / omitidos: ${omitidosExistentes.length}\nErrores reales: ${errores.length}${sinDuplicados}${detalleOmitidos}${detalleErrores}`
+      );
+
+      if (errores.length === 0) {
+        setPreConfirmacionImportacion(false);
+        setModalImportacionClientes(false);
+        setVistaPreviaClientes(null);
+        setResultadoGeo(null);
+        setArchivoClientesNombre("");
+      }
+
+    } catch (error) {
+      console.error("Error general en importación real:", error);
+      alert("❌ Ocurrió un error general durante la importación: " + (error.message || "Error desconocido"));
+    } finally {
+      setImportandoClientes(false);
+    }
+  };
+
+  const resumenImportacionAPB = (() => {
+    if (!vistaPreviaClientes) return null;
+    const vp = vistaPreviaClientes;
+    const geo = resultadoGeo?.multiple ? (resultadoGeo.resultados || []) : [];
+    const geoHecha = geo.length > 0;
+
+    const motivos = [];
+    const noValidos = Number(vp.preventistasProblema || 0);
+    const sinEmail = Number(vp.preventistasSinEmail || 0);
+    const duplicados = vp.duplicados?.length || 0;
+    const problemas = (vp.sinNombre?.length || 0) + (vp.sinDireccion?.length || 0);
+    const pendientesGeo = geoHecha ? 0 : Number(vp.pendientesGeocodificar || 0);
+    const noEncontrados = geoHecha ? geo.filter(r => !r.ok).length : 0;
+    const revisar = geoHecha ? geo.filter(r => r.ok && r.revisar).length : 0;
+
+    if (problemas) motivos.push(`${problemas} cliente(s) con datos obligatorios incompletos`);
+    if (duplicados) motivos.push(`${duplicados} cliente(s) duplicado(s)`);
+    if (noValidos) motivos.push(`${noValidos} email(s) de preventista no reconocido(s)`);
+    if (sinEmail) motivos.push(`${sinEmail} cliente(s) sin email de preventista`);
+    if (pendientesGeo) motivos.push(`${pendientesGeo} cliente(s) todavía sin geolocalizar`);
+    if (noEncontrados) motivos.push(`${noEncontrados} ubicación(es) no encontrada(s)`);
+    if (revisar) motivos.push(`${revisar} ubicación(es) pendientes de revisión en mapa`);
+
+    return {
+      listo: (vp.validos?.length || 0) > 0 && motivos.length === 0,
+      motivos,
+      cantidad: vp.validos?.length || 0
+    };
+  })();
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -945,6 +1523,12 @@ useEffect(() => {
           📦 Pedidos
         </button>
         <button
+          onClick={() => setSeccionActiva("clientes")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "clientes" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "clientes" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          🏪 Clientes
+        </button>
+        <button
           onClick={() => setSeccionActiva("estadoCuenta")}
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "estadoCuenta" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "estadoCuenta" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
@@ -959,6 +1543,325 @@ useEffect(() => {
       </div>
 
       <main style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
+        {preConfirmacionImportacion && vistaPreviaClientes && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.72)", zIndex: 12500, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+            <div style={{ width: "min(900px, 96vw)", maxHeight: "88vh", overflow: "auto", background: "#fff", borderRadius: "14px", padding: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>💾 Confirmación final de importación</h3>
+                  <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Revisá qué se va a crear antes de tocar Supabase.</div>
+                </div>
+                <button type="button" onClick={() => setPreConfirmacionImportacion(false)} style={{ border: "none", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}>✕</button>
+              </div>
+
+              <div style={{ marginTop: "12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "9px", padding: "10px", fontSize: "11px" }}>
+                🏢 Empresa: <strong>{perfilSupervisor?.empresa || "Empresa actual"}</strong><br/>
+                👥 Clientes preparados: <strong>{vistaPreviaClientes.validos.length}</strong><br/>
+                ✅ Alta desde supervisor: <strong>estado aprobado</strong> · creado_por_preventista = <strong>false</strong>
+              </div>
+
+              <div style={{ marginTop: "12px", display: "grid", gap: "7px" }}>
+                {vistaPreviaClientes.validos.map((c, i) => {
+                  const geo = resultadoGeo?.multiple ? resultadoGeo.resultados?.[i] : null;
+                  const perfilPreventista = perfiles.find(p =>
+                    String(p.email || "").trim().toLowerCase() === String(c.email_preventista || "").trim().toLowerCase() &&
+                    String(p.rol || "").trim().toLowerCase() === "preventista"
+                  );
+                  const usuario = perfilPreventista?.nombre || "(sin resolver)";
+                  return (
+                    <div key={i} style={{ border: "1px solid #e2e8f0", borderRadius: "9px", padding: "9px", fontSize: "11px" }}>
+                      <strong>{i + 1}. {c.nombre}</strong> · código: {c.codigo_cliente || "—"}<br/>
+                      📍 {c.direccion}{c.localidad ? `, ${c.localidad}` : ""}{c.provincia ? `, ${c.provincia}` : ""}{c.pais ? `, ${c.pais}` : ""}<br/>
+                      👤 {c.email_preventista} → <strong>{usuario}</strong><br/>
+                      🗺️ {geo?.latitud ?? c.latitud}, {geo?.longitud ?? c.longitud}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ marginTop: "12px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: "9px", padding: "10px", fontSize: "11px", color: "#9a3412" }}>
+                ⚠️ Esta es la última revisión. Al tocar IMPORTAR AHORA aparecerá una confirmación final y, si aceptás, se guardarán los clientes en Supabase.
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "12px" }}>
+                <button type="button" onClick={() => setPreConfirmacionImportacion(false)} style={{ padding: "10px 14px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", cursor: "pointer", fontWeight: "800" }}>Volver</button>
+                <button
+                  type="button"
+                  onClick={confirmarImportacionRealClientes}
+                  disabled={importandoClientes}
+                  style={{
+                    padding: "10px 14px",
+                    border: "none",
+                    borderRadius: "8px",
+                    background: importandoClientes ? "#cbd5e1" : "#16a34a",
+                    color: importandoClientes ? "#64748b" : "#fff",
+                    fontWeight: "900",
+                    cursor: importandoClientes ? "not-allowed" : "pointer"
+                  }}
+                >
+                  {importandoClientes ? "⏳ IMPORTANDO..." : "💾 IMPORTAR AHORA"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {revisionMapa && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", zIndex: 12000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+            <div style={{ width: "min(760px, 96vw)", background: "#fff", borderRadius: "14px", padding: "16px", boxShadow: "0 20px 60px rgba(0,0,0,.35)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "17px" }}>🗺️ Revisar ubicación</h3>
+                  <div style={{ marginTop: "4px", fontWeight: "800" }}>{revisionMapa.cliente}</div>
+                  <div style={{ marginTop: "3px", fontSize: "11px", color: "#64748b" }}>Buscamos: {revisionMapa.direccion}</div>
+                  <div style={{ marginTop: "2px", fontSize: "11px", color: "#64748b" }}>Geoapify: {revisionMapa.direccionEncontrada}</div>
+                </div>
+                <button type="button" onClick={() => setRevisionMapa(null)} style={{ border: "none", background: "#f1f5f9", borderRadius: "8px", padding: "7px 10px", cursor: "pointer", fontWeight: "900" }}>✕</button>
+              </div>
+
+              <div style={{ marginTop: "10px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "8px", fontSize: "11px", color: "#1e3a8a" }}>
+                📍 El marcador muestra la ubicación propuesta. Aunque figure como confiable, podés revisarla. Si está mal, <strong>hacé clic en el lugar correcto del mapa</strong> y el marcador se moverá.
+              </div>
+
+              <div style={{ height: "390px", marginTop: "10px", borderRadius: "10px", overflow: "hidden", border: "1px solid #cbd5e1" }}>
+                <MapContainer
+                  key={`${revisionMapa.cliente}-${revisionMapa.latitud}-${revisionMapa.longitud}`}
+                  center={[revisionMapa.latitud, revisionMapa.longitud]}
+                  zoom={17}
+                  style={{ height: "100%", width: "100%" }}
+                >
+                  <TileLayer
+                    attribution='&copy; OpenStreetMap contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <SelectorPuntoRevision />
+                  <Marker position={[revisionMapa.latitud, revisionMapa.longitud]}>
+                    <Popup>{revisionMapa.cliente}</Popup>
+                  </Marker>
+                </MapContainer>
+              </div>
+
+              <div style={{ marginTop: "8px", fontSize: "11px", color: "#475569", textAlign: "center" }}>
+                📍 {revisionMapa.latitud.toFixed(6)}, {revisionMapa.longitud.toFixed(6)}
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "12px" }}>
+                <button type="button" onClick={() => setRevisionMapa(null)} style={{ padding: "9px 13px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", cursor: "pointer", fontWeight: "800" }}>Cancelar</button>
+                <button type="button" onClick={confirmarRevisionMapa} style={{ padding: "9px 13px", border: "none", borderRadius: "8px", background: "#16a34a", color: "#fff", cursor: "pointer", fontWeight: "900" }}>✅ CONFIRMAR UBICACIÓN</button>
+              </div>
+              <div style={{ marginTop: "8px", fontSize: "10px", color: "#64748b", textAlign: "center" }}>🔒 Sigue siendo una revisión previa: todavía no se guarda nada en Supabase.</div>
+            </div>
+          </div>
+        )}
+
+        {modalImportacionClientes && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "18px" }}>
+            <div style={{ width: "min(820px, 96vw)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: "14px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", padding: "18px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "18px" }}>📥 Importar Clientes</h3>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                    PASO 1 — Lee y revisa el Excel. <strong>No guarda nada todavía.</strong>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setModalImportacionClientes(false)} style={{ border: "none", background: "#f1f5f9", borderRadius: "8px", padding: "7px 10px", cursor: "pointer", fontWeight: "800" }}>✕</button>
+              </div>
+
+              <div style={{ marginTop: "14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "9px", padding: "10px", fontSize: "12px", color: "#1e3a8a" }}>
+                Columnas recomendadas: <strong>codigo_cliente, nombre_comercio, direccion, localidad, provincia/estado, pais, email_preventista</strong>.<br />
+                Opcionales: <strong>latitud, longitud</strong>. Si ya existen, RutaComercio las reconoce.
+                <div style={{ marginTop: "6px", fontWeight: "800" }}>🏪 “nombre_comercio” = nombre del negocio/cliente, NO el nombre del preventista.</div>
+                <div style={{ marginTop: "3px", fontWeight: "800" }}>📧 “email_preventista” = email de login del preventista. No usar su nombre.</div>
+              </div>
+
+              <div style={{ marginTop: "14px", display: "grid", gap: "8px" }}>
+                <label style={{ border: archivoClientesTieneEncabezados ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: "9px", padding: "10px", cursor: "pointer", background: archivoClientesTieneEncabezados ? "#eff6ff" : "#fff" }}>
+                  <input type="radio" name="encabezadosClientes" checked={archivoClientesTieneEncabezados} onChange={() => { setArchivoClientesTieneEncabezados(true); setVistaPreviaClientes(null); }} />
+                  <strong> Mi archivo tiene títulos de columnas</strong>
+                  <div style={{ marginLeft: "22px", marginTop: "3px", fontSize: "11px", color: "#64748b" }}>Ejemplo: codigo_cliente | nombre_comercio | direccion | localidad | provincia/estado | pais | email_preventista</div>
+                </label>
+                <label style={{ border: !archivoClientesTieneEncabezados ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: "9px", padding: "10px", cursor: "pointer", background: !archivoClientesTieneEncabezados ? "#eff6ff" : "#fff" }}>
+                  <input type="radio" name="encabezadosClientes" checked={!archivoClientesTieneEncabezados} onChange={() => { setArchivoClientesTieneEncabezados(false); setVistaPreviaClientes(null); }} />
+                  <strong> Mi archivo NO tiene títulos de columnas</strong>
+                  <div style={{ marginLeft: "22px", marginTop: "3px", fontSize: "11px", color: "#64748b" }}>RutaComercio tomará: código | nombre comercio | dirección | localidad | provincia/estado | país | email preventista | latitud | longitud</div>
+                </label>
+              </div>
+
+              <input ref={inputArchivoClientesRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoClientes} style={{ display: "none" }} />
+              <button type="button" onClick={() => inputArchivoClientesRef.current?.click()} style={{ marginTop: "14px", width: "100%", padding: "11px", border: "1px dashed #2563eb", borderRadius: "9px", background: "#eff6ff", color: "#1d4ed8", fontWeight: "800", cursor: "pointer" }}>
+                📄 ELEGIR ARCHIVO EXCEL / CSV
+              </button>
+              {archivoClientesNombre && <div style={{ fontSize: "11px", color: "#475569", marginTop: "6px" }}>Archivo: <strong>{archivoClientesNombre}</strong></div>}
+
+              {vistaPreviaClientes && (
+                <div style={{ marginTop: "16px" }}>
+                  <div style={{ fontWeight: "800", fontSize: "13px", marginBottom: "8px" }}>Vista previa — Supabase sigue intacto</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: "8px" }}>
+                    <div style={{ background: "#f8fafc", padding: "9px", borderRadius: "8px" }}><small>Filas leídas</small><div style={{ fontWeight: "900" }}>{vistaPreviaClientes.totalFilas}</div></div>
+                    <div style={{ background: "#f0fdf4", padding: "9px", borderRadius: "8px" }}><small>Clientes válidos</small><div style={{ fontWeight: "900", color: "#15803d" }}>{vistaPreviaClientes.validos.length}</div></div>
+                    <div style={{ background: "#ecfeff", padding: "9px", borderRadius: "8px" }}><small>Con coordenadas</small><div style={{ fontWeight: "900", color: "#0e7490" }}>{vistaPreviaClientes.conCoordenadas}</div></div>
+                    <div style={{ background: "#fffbeb", padding: "9px", borderRadius: "8px" }}><small>Pendientes geocodificar</small><div style={{ fontWeight: "900", color: "#b45309" }}>{vistaPreviaClientes.pendientesGeocodificar}</div></div>
+                    <div style={{ background: "#fef2f2", padding: "9px", borderRadius: "8px" }}><small>Duplicados</small><div style={{ fontWeight: "900", color: "#dc2626" }}>{vistaPreviaClientes.duplicados.length}</div></div>
+                    <div style={{ background: "#fef2f2", padding: "9px", borderRadius: "8px" }}><small>Con problemas</small><div style={{ fontWeight: "900", color: "#dc2626" }}>{vistaPreviaClientes.sinNombre.length + vistaPreviaClientes.sinDireccion.length}</div></div>
+                  </div>
+
+                  <div style={{ marginTop: "9px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "8px" }}>
+                    <div style={{ background: "#eef2ff", padding: "9px", borderRadius: "8px", fontSize: "11px" }}>
+                      🌎 País informado: <strong>{vistaPreviaClientes.conPais}</strong> · sin informar: <strong>{vistaPreviaClientes.sinPais}</strong>
+                    </div>
+                    <div style={{ background: "#f5f3ff", padding: "9px", borderRadius: "8px", fontSize: "11px" }}>
+                      📧 Email de preventista informado: <strong>{vistaPreviaClientes.conPreventista}</strong> · sin email: <strong>{vistaPreviaClientes.sinPreventista}</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: "9px", border: "1px solid #cbd5e1", borderRadius: "9px", overflow: "hidden" }}>
+                    <div style={{ background: "#f8fafc", padding: "9px 11px", fontWeight: "900", fontSize: "12px" }}>
+                      📧 ASIGNACIÓN DE PREVENTISTAS — validación real
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1px", background: "#e2e8f0" }}>
+                      <div style={{ background: "#f0fdf4", padding: "9px", textAlign: "center" }}>
+                        <div style={{ fontSize: "10px", color: "#15803d" }}>✅ Reconocidos</div>
+                        <strong style={{ color: "#15803d" }}>{vistaPreviaClientes.preventistasOk}</strong>
+                      </div>
+                      <div style={{ background: "#fef2f2", padding: "9px", textAlign: "center" }}>
+                        <div style={{ fontSize: "10px", color: "#dc2626" }}>⚠️ No válidos</div>
+                        <strong style={{ color: "#dc2626" }}>{vistaPreviaClientes.preventistasProblema}</strong>
+                      </div>
+                      <div style={{ background: "#f8fafc", padding: "9px", textAlign: "center" }}>
+                        <div style={{ fontSize: "10px", color: "#64748b" }}>➖ Sin email</div>
+                        <strong>{vistaPreviaClientes.preventistasSinEmail}</strong>
+                      </div>
+                    </div>
+
+                    {vistaPreviaClientes.validos.some(x => x.preventista_estado !== "ok") && (
+                      <div style={{ padding: "9px 11px", fontSize: "11px", display: "grid", gap: "5px" }}>
+                        {vistaPreviaClientes.validos
+                          .filter(x => x.preventista_estado !== "ok")
+                          .map((x, i) => (
+                            <div key={`${x.codigo_cliente}-${i}`} style={{ color: x.preventista_estado === "sin_email" ? "#64748b" : "#b91c1c" }}>
+                              {x.preventista_estado === "sin_email" && <>➖ <strong>{x.nombre}</strong>: sin email de preventista</>}
+                              {x.preventista_estado === "no_reconocido" && <>❌ <strong>{x.nombre}</strong>: {x.email_preventista} no existe en esta empresa</>}
+                              {x.preventista_estado === "rol_incorrecto" && <>❌ <strong>{x.nombre}</strong>: {x.email_preventista} existe, pero no tiene rol preventista</>}
+                              {x.preventista_estado === "otra_empresa" && <>❌ <strong>{x.nombre}</strong>: el email pertenece a otra empresa</>}
+                              {x.preventista_estado === "inactivo" && <>❌ <strong>{x.nombre}</strong>: {x.email_preventista} está inactivo</>}
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {(vistaPreviaClientes.duplicados.length > 0 || vistaPreviaClientes.sinNombre.length > 0 || vistaPreviaClientes.sinDireccion.length > 0) && (
+                    <div style={{ marginTop: "10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px", padding: "9px", fontSize: "11px", maxHeight: "150px", overflowY: "auto" }}>
+                      {vistaPreviaClientes.duplicados.map((x, i) => <div key={`dup-${i}`}>❌ Fila {x.fila}: {x.codigo || x.nombre} — duplicado</div>)}
+                      {vistaPreviaClientes.sinNombre.map((x, i) => <div key={`nom-${i}`}>❌ Fila {x.fila}: falta nombre</div>)}
+                      {vistaPreviaClientes.sinDireccion.map((x, i) => <div key={`dir-${i}`}>⚠️ Fila {x.fila}: {x.nombre} — sin dirección ni coordenadas</div>)}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: "12px", background: "#f1f5f9", borderRadius: "8px", padding: "10px", fontSize: "12px", color: "#475569" }}>
+                    🔒 Esta primera etapa es solamente de control. <strong>No existe todavía botón de guardar.</strong>
+                  </div>
+
+                  {resumenImportacionAPB && (
+                    <div style={{ marginTop: "12px", border: resumenImportacionAPB.listo ? "1px solid #86efac" : "1px solid #fcd34d", background: resumenImportacionAPB.listo ? "#f0fdf4" : "#fffbeb", borderRadius: "10px", padding: "12px" }}>
+                      <div style={{ fontWeight: "900", fontSize: "13px", color: resumenImportacionAPB.listo ? "#166534" : "#92400e" }}>
+                        {resumenImportacionAPB.listo ? `✅ IMPORTACIÓN LISTA — ${resumenImportacionAPB.cantidad} cliente(s) preparados` : "🔒 IMPORTACIÓN BLOQUEADA — hay cosas por resolver"}
+                      </div>
+                      {!resumenImportacionAPB.listo && (
+                        <div style={{ marginTop: "7px", fontSize: "11px", color: "#92400e" }}>
+                          {resumenImportacionAPB.motivos.map((m, i) => <div key={i} style={{ marginTop: "3px" }}>• {m}</div>)}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        disabled={!resumenImportacionAPB.listo}
+                        onClick={() => setPreConfirmacionImportacion(true)}
+                        style={{ width: "100%", marginTop: "10px", border: "none", borderRadius: "8px", padding: "11px", fontWeight: "900", cursor: resumenImportacionAPB.listo ? "pointer" : "not-allowed", background: resumenImportacionAPB.listo ? "#16a34a" : "#cbd5e1", color: resumenImportacionAPB.listo ? "#fff" : "#64748b" }}
+                      >
+                        💾 PREPARAR IMPORTACIÓN REAL
+                      </button>
+                      <div style={{ marginTop: "7px", textAlign: "center", fontSize: "10px", color: "#64748b" }}>🔎 Primero vas a ver exactamente qué se importaría. Todavía no se guarda nada.</div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={probandoGeo || vistaPreviaClientes.validos.length === 0}
+                    onClick={probarGeoapifyPrimerCliente}
+                    style={{ marginTop: "12px", width: "100%", padding: "11px", border: "none", borderRadius: "9px", background: probandoGeo ? "#94a3b8" : "#7c3aed", color: "#fff", fontWeight: "900", cursor: probandoGeo ? "wait" : "pointer" }}
+                  >
+                    {probandoGeo ? "🌍 GEOLOCALIZANDO CLIENTES..." : `🌍 GEOLOCALIZAR LOS ${vistaPreviaClientes.validos.length} CLIENTES`}
+                  </button>
+
+                  {resultadoGeo?.multiple && (
+                    <div style={{ marginTop: "12px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginBottom: "10px" }}>
+                        <div style={{ background: "#f8fafc", borderRadius: "8px", padding: "9px", textAlign: "center" }}>
+                          <div style={{ fontSize: "11px", color: "#64748b" }}>Procesados</div>
+                          <div style={{ fontSize: "20px", fontWeight: "900" }}>{resultadoGeo.total}</div>
+                        </div>
+                        <div style={{ background: "#f0fdf4", borderRadius: "8px", padding: "9px", textAlign: "center" }}>
+                          <div style={{ fontSize: "11px", color: "#15803d" }}>✅ Confiables</div>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#15803d" }}>{resultadoGeo.encontrados}</div>
+                        </div>
+                        <div style={{ background: "#fffbeb", borderRadius: "8px", padding: "9px", textAlign: "center" }}>
+                          <div style={{ fontSize: "11px", color: "#b45309" }}>⚠️ Revisar</div>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#b45309" }}>{resultadoGeo.revisar}</div>
+                        </div>
+                        <div style={{ background: "#fef2f2", borderRadius: "8px", padding: "9px", textAlign: "center" }}>
+                          <div style={{ fontSize: "11px", color: "#dc2626" }}>❌ No encontrados</div>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#dc2626" }}>{resultadoGeo.noEncontrados}</div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "grid", gap: "8px", maxHeight: "300px", overflowY: "auto" }}>
+                        {resultadoGeo.resultados.map((r, i) => (
+                          <div key={`${r.cliente}-${i}`} style={{ border: `1px solid ${!r.ok ? "#fecaca" : r.revisar ? "#fde68a" : "#86efac"}`, background: !r.ok ? "#fef2f2" : r.revisar ? "#fffbeb" : "#f0fdf4", borderRadius: "9px", padding: "10px", fontSize: "12px" }}>
+                            <div style={{ fontWeight: "900", color: !r.ok ? "#dc2626" : r.revisar ? "#b45309" : "#15803d" }}>
+                              {!r.ok ? "❌" : r.revisar ? "⚠️ REVISAR" : "✅ CONFIABLE"} · {r.cliente}
+                            </div>
+                            <div style={{ marginTop: "4px" }}>🔎 {r.direccion}</div>
+                            {r.ok ? (
+                              <>
+                                <div style={{ marginTop: "3px" }}>📍 {r.latitud}, {r.longitud}</div>
+                                <div style={{ marginTop: "3px" }}>🗺️ {r.direccionEncontrada}</div>
+                                {r.origen === "geoapify" && (
+                                  <div style={{ marginTop: "3px", color: "#64748b" }}>
+                                    Precisión informada: {Math.round((r.confianza || 0) * 100)}% · tipo: {r.tipoResultado || "sin dato"}
+                                  </div>
+                                )}
+                                {r.ok && (
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirRevisionMapa(i)}
+                                    style={{ marginTop: "8px", border: "none", borderRadius: "7px", padding: "7px 10px", background: "#2563eb", color: "#fff", fontSize: "11px", fontWeight: "900", cursor: "pointer" }}
+                                  >
+                                    🗺️ VER / CORREGIR EN MAPA
+                                  </button>
+                                )}
+                                {r.aceptadoManualmente && (
+                                  <div style={{ marginTop: "6px", fontSize: "11px", color: "#15803d", fontWeight: "800" }}>
+                                    👤 Ubicación revisada y aceptada manualmente
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div style={{ marginTop: "3px", color: "#b91c1c" }}>{r.mensaje}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ marginTop: "10px", background: "#f1f5f9", borderRadius: "8px", padding: "9px", fontSize: "11px", color: "#475569" }}>
+                        🔒 Resultado de prueba: <strong>todavía no se guardó ningún cliente ni coordenada en Supabase.</strong>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {modalImportacionCuenta && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "18px" }}>
             <div style={{ width: "min(760px, 96vw)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: "14px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", padding: "18px" }}>
@@ -1015,6 +1918,30 @@ useEffect(() => {
             perfilSupervisor={perfilSupervisor}
             perfiles={perfiles}
           />
+         ) : seccionActiva === "clientes" ? (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>🏪 Clientes</h2>
+                <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>Padrón de comercios de la empresa e importación masiva.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setModalImportacionClientes(true); setVistaPreviaClientes(null); setArchivoClientesNombre(""); setArchivoClientesTieneEncabezados(true); setResultadoGeo(null); }}
+                style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 14px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
+              >
+                📥 IMPORTAR CLIENTES
+              </button>
+            </div>
+
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px" }}>
+              <div style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: "800" }}>Clientes cargados actualmente</div>
+              <div style={{ fontSize: "28px", fontWeight: "900", marginTop: "3px" }}>{comercios.length}</div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "5px" }}>
+                En este primer paso la importación solamente analiza el archivo. Todavía no agrega ni modifica clientes.
+              </div>
+            </div>
+          </div>
          ) : seccionActiva === "solicitudes" ? (
           <div>
             <div style={{ marginBottom: "16px" }}>
@@ -1165,7 +2092,7 @@ useEffect(() => {
               </button>
             )}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "7px" }}>
             {telemetriaFlota.map((prev, idx) => {
               const seleccionado = (preventistaSeleccionado?.nombre || preventistaSeleccionado) === prev.nombre;
               return (
@@ -1185,9 +2112,28 @@ useEffect(() => {
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>👤 {prev.nombre}</div>
-                    <div style={{ fontSize: "11px", color: prev.activoHoy ? "#16a34a" : "#64748b", marginTop: "2px", fontWeight: "600" }}>
-                      {prev.activoHoy ? "🟢 En ruta" : "💤 Standby"}
+                    <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>👤 {prev.nombre}</div>
+                    {(() => {
+                      const minutos = prev.ultimaSenal
+                        ? (Date.now() - new Date(prev.ultimaSenal).getTime()) / 60000
+                        : Infinity;
+                      const estadoSenal =
+                        minutos <= 30
+                          ? { texto: "🟢 En línea", color: "#16a34a" }
+                          : minutos <= 60
+                            ? { texto: "🟡 Señal antigua", color: "#d97706" }
+                            : { texto: "⚫ Sin conexión reciente", color: "#64748b" };
+                      return (
+                        <div style={{ fontSize: "10px", color: estadoSenal.color, marginTop: "2px", fontWeight: "700" }}>
+                          {estadoSenal.texto}
+                        </div>
+                      );
+                    })()}
+                    <div
+                      title={prev.ultimaSenal ? `Fecha y hora exactas: ${new Date(prev.ultimaSenal).toLocaleString("es-AR")}` : "Sin señal registrada"}
+                      style={{ fontSize: "10px", color: "#64748b", marginTop: "2px", cursor: prev.ultimaSenal ? "help" : "default" }}
+                    >
+                      {textoUltimaSenal(prev.ultimaSenal)}
                     </div>
                     <div style={{ fontSize: "10px", color: "#64748b", marginTop: "2px" }}>
                       {prev.paradasHoy} visita{prev.paradasHoy === 1 ? "" : "s"} hoy
