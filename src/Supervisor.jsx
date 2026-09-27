@@ -241,6 +241,23 @@ const reactivarComercio = async (comercio) => {
   const [importandoClientes, setImportandoClientes] = useState(false);
   const inputArchivoClientesRef = useRef(null);
 
+  // 💲 Listas de precios — primera etapa visual, todavía no guarda nada
+  const [numeroListaPrecios, setNumeroListaPrecios] = useState("");
+  const [vigenciaListaPrecios, setVigenciaListaPrecios] = useState("");
+  const [descripcionListaPrecios, setDescripcionListaPrecios] = useState("");
+  const [archivoListaPreciosNombre, setArchivoListaPreciosNombre] = useState("");
+  const [vistaPreviaListaPrecios, setVistaPreviaListaPrecios] = useState(null);
+  const inputArchivoListaPreciosRef = useRef(null);
+  const [listasPreciosEmpresa, setListasPreciosEmpresa] = useState([]);
+  const [listaPreciosSeleccionadaId, setListaPreciosSeleccionadaId] = useState("");
+  const [cargandoListasPrecios, setCargandoListasPrecios] = useState(false);
+  const [comparacionListaPrecios, setComparacionListaPrecios] = useState(null);
+  const [comparandoListaPrecios, setComparandoListaPrecios] = useState(false);
+
+
+
+
+
   // Inicialización de supervisor y datos
   useEffect(() => {
     async function inicializarSupervisor() {
@@ -1467,6 +1484,284 @@ useEffect(() => {
     };
   })();
 
+  const cargarListasPreciosEmpresa = async () => {
+    const empresaId = perfilSupervisor?.empresa_id || sesionSupervisor?.empresa_id || "";
+    const empresaNombre = perfilSupervisor?.empresa || sesionSupervisor?.empresa || "";
+
+    if (!empresaId && !empresaNombre) {
+      setListasPreciosEmpresa([]);
+      return;
+    }
+
+    setCargandoListasPrecios(true);
+    try {
+      let consulta = supabase
+        .from("listas_precios")
+        .select("id,nombre,codigo,descripcion,activo,predeterminada,empresa,empresa_id")
+        .eq("activo", true);
+
+      if (empresaId) consulta = consulta.eq("empresa_id", empresaId);
+      else consulta = consulta.eq("empresa", empresaNombre);
+
+      const { data, error } = await consulta.order("predeterminada", { ascending: false }).order("nombre", { ascending: true });
+      if (error) throw error;
+
+      const listas = data || [];
+      setListasPreciosEmpresa(listas);
+
+      if (!listaPreciosSeleccionadaId && listas.length) {
+        const predeterminada = listas.find(l => l.predeterminada) || listas[0];
+        setListaPreciosSeleccionadaId(predeterminada.id);
+      }
+    } catch (error) {
+      console.error("Error cargando listas de precios:", error);
+      setListasPreciosEmpresa([]);
+    } finally {
+      setCargandoListasPrecios(false);
+    }
+  };
+
+  useEffect(() => {
+    if (seccionActiva === "listasPrecios") {
+      cargarListasPreciosEmpresa();
+    }
+  }, [seccionActiva, perfilSupervisor?.empresa_id, perfilSupervisor?.empresa]);
+
+  const leerArchivoListaPrecios = async (event) => {
+    const archivo = event.target.files?.[0];
+    if (!archivo) return;
+
+    setArchivoListaPreciosNombre(archivo.name);
+    setVistaPreviaListaPrecios(null);
+    setComparacionListaPrecios(null);
+
+    try {
+      const data = await archivo.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const hoja = workbook.Sheets[workbook.SheetNames[0]];
+      const filas = XLSX.utils.sheet_to_json(hoja, { defval: "" });
+
+      const normalizarClave = (valor) =>
+        String(valor || "")
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]/g, "");
+
+      const valorCampo = (fila, nombres) => {
+        const mapa = {};
+        Object.entries(fila || {}).forEach(([k, v]) => {
+          mapa[normalizarClave(k)] = v;
+        });
+        for (const nombre of nombres) {
+          const v = mapa[normalizarClave(nombre)];
+          if (v !== undefined && String(v).trim() !== "") return v;
+        }
+        return "";
+      };
+
+      const productos = filas.map((fila, i) => {
+        const codigo = String(valorCampo(fila, ["codigo", "código", "cod", "codigo producto"]) || "").trim();
+        const gtin = String(valorCampo(fila, ["gtin", "ean", "ean13", "codigo barras", "código de barras"]) || "").trim();
+        const descripcion = String(valorCampo(fila, ["descripcion", "descripción", "producto", "articulo", "artículo"]) || "").trim();
+        const marca = String(valorCampo(fila, ["marca"]) || "").trim();
+        const precioRaw = valorCampo(fila, ["precio", "precio venta", "pvp"]);
+        const precioTexto = String(precioRaw ?? "").trim().replace(/\s/g, "");
+        let precio = Number(precioTexto.replace(/\./g, "").replace(",", "."));
+        if (typeof precioRaw === "number") precio = precioRaw;
+
+        const errores = [];
+        if (!codigo) errores.push("Falta código");
+        if (!descripcion) errores.push("Falta descripción");
+        if (!Number.isFinite(precio) || precio < 0) errores.push("Precio inválido");
+
+        return { fila: i + 2, codigo, gtin, descripcion, marca, precio, errores };
+      });
+
+      const validos = productos.filter(p => p.errores.length === 0);
+      const conProblemas = productos.filter(p => p.errores.length > 0);
+
+      setVistaPreviaListaPrecios({
+        total: productos.length,
+        validos,
+        conProblemas,
+        productos
+      });
+    } catch (error) {
+      console.error("Error leyendo lista de precios:", error);
+      alert("❌ No se pudo leer el archivo. Revisá que sea un Excel o CSV válido.");
+      setArchivoListaPreciosNombre("");
+      setVistaPreviaListaPrecios(null);
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const compararListaPreciosActual = async () => {
+    if (!vistaPreviaListaPrecios || vistaPreviaListaPrecios.conProblemas.length > 0) {
+      alert("⚠️ Primero necesitás un archivo válido, sin filas con problemas.");
+      return;
+    }
+    if (!listaPreciosSeleccionadaId) {
+      alert("⚠️ Elegí la lista actual que querés comparar.");
+      return;
+    }
+
+    setComparandoListaPrecios(true);
+    setComparacionListaPrecios(null);
+
+    try {
+      const { data: filasActuales, error: errorLista } = await supabase
+        .from("lista_productos")
+        .select("id,producto_id,lista_id,codigo_lista,detalle_en_lista,precio,activo")
+        .eq("lista_id", listaPreciosSeleccionadaId)
+        .or("activo.eq.true,activo.is.null");
+
+      if (errorLista) throw errorLista;
+
+      const idsProductos = [...new Set((filasActuales || []).map(x => x.producto_id).filter(Boolean))];
+      let productosMaestros = [];
+
+      if (idsProductos.length > 0) {
+        const { data, error } = await supabase
+          .from("productos")
+          .select("id,codigo_cge,nombre,marca,presentacion,descripcion,gtin,activo")
+          .in("id", idsProductos);
+
+        if (error) throw error;
+        productosMaestros = data || [];
+      }
+
+      const porId = new Map(productosMaestros.map(p => [p.id, p]));
+      const actuales = (filasActuales || []).map(lp => ({
+        ...lp,
+        producto: porId.get(lp.producto_id) || null
+      }));
+
+      const normal = v => String(v ?? "").trim().toLowerCase();
+      const normalGtin = v => String(v ?? "").replace(/\D/g, "");
+      const precioNum = v => Number(v ?? 0);
+
+      const porCodigo = new Map();
+      const porGtin = new Map();
+
+      actuales.forEach(item => {
+        const cod = normal(item.codigo_lista);
+        if (cod) porCodigo.set(cod, item);
+
+        const gtin = normalGtin(item.producto?.gtin);
+        if (gtin) porGtin.set(gtin, item);
+      });
+
+      const diagnosticoCodigos = {
+        codigosSupabase: [...porCodigo.keys()],
+        codigosExcel: vistaPreviaListaPrecios.validos.map(p => normal(p.codigo)),
+        muestras: vistaPreviaListaPrecios.validos.slice(0, 10).map(p => {
+          const codigoNormalizado = normal(p.codigo);
+          return {
+            original: String(p.codigo ?? ""),
+            normalizado: codigoNormalizado,
+            largo: codigoNormalizado.length,
+            coincide: porCodigo.has(codigoNormalizado)
+          };
+        })
+      };
+
+      const sinCambios = [];
+      const precioCambiado = [];
+      const nuevos = [];
+      const revisar = [];
+
+      for (const nuevo of vistaPreviaListaPrecios.validos) {
+        const codigo = normal(nuevo.codigo);
+        const gtin = normalGtin(nuevo.gtin);
+
+        const porCod = codigo ? porCodigo.get(codigo) : null;
+        const porBarra = gtin ? porGtin.get(gtin) : null;
+
+        // Si código y GTIN apuntan a productos distintos, no decidimos solos.
+        if (porCod && porBarra && porCod.producto_id !== porBarra.producto_id) {
+          revisar.push({
+            ...nuevo,
+            motivo: "El código y el GTIN coinciden con productos diferentes"
+          });
+          continue;
+        }
+
+        const existente = porCod || porBarra;
+
+        if (!existente) {
+          nuevos.push(nuevo);
+          continue;
+        }
+
+        const precioAnterior = precioNum(existente.precio);
+        const precioNuevo = precioNum(nuevo.precio);
+        const base = {
+          ...nuevo,
+          coincidencia: porCod ? "codigo" : "gtin",
+          producto_id: existente.producto_id,
+          codigo_cge: existente.producto?.codigo_cge || "",
+          precioAnterior,
+          precioNuevo
+        };
+
+        if (Math.abs(precioAnterior - precioNuevo) < 0.000001) {
+          sinCambios.push(base);
+        } else {
+          precioCambiado.push(base);
+        }
+      }
+
+      const listaSeleccionada = listasPreciosEmpresa.find(
+        l => l.id === listaPreciosSeleccionadaId
+      );
+
+      setComparacionListaPrecios({
+        totalActual: actuales.length,
+        nombreLista: listaSeleccionada?.nombre || listaSeleccionada?.codigo || "Lista seleccionada",
+        codigosActuales: porCodigo.size,
+        coincidenciasCodigo: sinCambios.filter(x => x.coincidencia === "codigo").length +
+          precioCambiado.filter(x => x.coincidencia === "codigo").length,
+        coincidenciasGtin: sinCambios.filter(x => x.coincidencia === "gtin").length +
+          precioCambiado.filter(x => x.coincidencia === "gtin").length,
+        diagnosticoCodigos,
+        sinCambios,
+        precioCambiado,
+        nuevos,
+        revisar
+      });
+    } catch (error) {
+      console.error("Error comparando lista de precios:", error);
+      alert("❌ No se pudo comparar la lista actual. No se modificó ningún dato.");
+    } finally {
+      setComparandoListaPrecios(false);
+    }
+  };
+
+  const descargarPlantillaListaPrecios = () => {
+    const filas = [
+      ["codigo", "gtin", "descripcion", "marca", "precio"],
+      ["ART001", "7791234567890", "Shampoo Profesional 1 L", "Marca Ejemplo", 12500],
+      ["ART002", "", "Acondicionador Profesional 1 L", "", 11800],
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(filas);
+    ws["!cols"] = [
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 38 },
+      { wch: 22 },
+      { wch: 14 },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Lista de precios");
+    XLSX.writeFile(wb, "plantilla_lista_precios_rutacomercio.xlsx");
+  };
+
+
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* CABECERA PRINCIPAL */}
@@ -1581,6 +1876,12 @@ useEffect(() => {
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "estadoCuenta" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "estadoCuenta" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
           💳 Estado de Cuenta
+        </button>
+        <button
+          onClick={() => setSeccionActiva("listasPrecios")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "listasPrecios" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "listasPrecios" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          💲 Listas de Precios
         </button>
         <button
           onClick={() => setSeccionActiva("solicitudes")}
@@ -2136,6 +2437,268 @@ useEffect(() => {
                   <div style={{ fontWeight: "900", color: solicitud.estado === "aprobada" ? "#16a34a" : "#dc2626" }}>{solicitud.estado === "aprobada" ? "✅ APROBADA" : "❌ RECHAZADA"}</div>
                 </div>
               ))}
+            </div>
+          </div>
+        ) : seccionActiva === "listasPrecios" ? (
+          <div>
+            <div style={{ marginBottom: "16px" }}>
+              <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>💲 Listas de Precios</h2>
+              <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>
+                Administrá y actualizá la lista de precios de tu empresa.
+              </p>
+            </div>
+
+            <div style={{ maxWidth: "720px", margin: "0 auto 14px" }}>
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px" }}>
+                <div style={{ fontSize: "14px", fontWeight: "900", color: "#0f172a" }}>📋 Listas actuales de la empresa</div>
+                <div style={{ marginTop: "4px", fontSize: "11px", color: "#64748b" }}>
+                  Elegí cuál querés actualizar con el nuevo archivo.
+                </div>
+
+                {cargandoListasPrecios ? (
+                  <div style={{ marginTop: "10px", fontSize: "12px", color: "#64748b" }}>⏳ Cargando listas...</div>
+                ) : listasPreciosEmpresa.length === 0 ? (
+                  <div style={{ marginTop: "10px", padding: "10px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "8px", fontSize: "11px", color: "#92400e" }}>
+                    ⚠️ Esta empresa todavía no tiene una lista de precios activa.
+                  </div>
+                ) : (
+                  <div style={{ marginTop: "10px", display: "grid", gap: "7px" }}>
+                    {listasPreciosEmpresa.map((lista) => {
+                      const seleccionada = listaPreciosSeleccionadaId === lista.id;
+                      return (
+                        <label key={lista.id} style={{
+                          display: "flex", alignItems: "center", gap: "9px", padding: "10px",
+                          border: seleccionada ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                          borderRadius: "9px", background: seleccionada ? "#eff6ff" : "#fff", cursor: "pointer"
+                        }}>
+                          <input
+                            type="radio"
+                            name="listaPrecioActual"
+                            checked={seleccionada}
+                            onChange={() => setListaPreciosSeleccionadaId(lista.id)}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: "12px", fontWeight: "900", color: "#0f172a" }}>
+                              {lista.nombre || lista.codigo || "Lista sin nombre"}
+                              {lista.predeterminada ? " ⭐ Predeterminada" : ""}
+                            </div>
+                            <div style={{ marginTop: "2px", fontSize: "10px", color: "#64748b" }}>
+                              {lista.codigo ? `Código: ${lista.codigo}` : "Sin código"}
+                              {lista.descripcion ? ` · ${lista.descripcion}` : ""}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px", maxWidth: "720px", margin: "0 auto" }}>
+              <div style={{ fontSize: "16px", fontWeight: "900", color: "#0f172a" }}>
+                💲 Cargar nueva lista de precios
+              </div>
+              <div style={{ marginTop: "4px", fontSize: "12px", color: "#64748b" }}>
+                Identificá la nueva lista antes de cargar el archivo.
+              </div>
+
+              <div style={{ marginTop: "16px", display: "grid", gap: "12px" }}>
+                <label style={{ fontSize: "12px", fontWeight: "800", color: "#334155" }}>
+                  N.º de lista <span style={{ fontWeight: "500", color: "#94a3b8" }}>(opcional)</span>
+                  <input value={numeroListaPrecios} onChange={e => setNumeroListaPrecios(e.target.value)}
+                    placeholder="Ej.: 12"
+                    style={{ width: "100%", marginTop: "5px", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "8px", boxSizing: "border-box" }} />
+                </label>
+
+                <label style={{ fontSize: "12px", fontWeight: "800", color: "#334155" }}>
+                  Vigente desde <span style={{ color: "#dc2626" }}>*</span>
+                  <input type="date" value={vigenciaListaPrecios} onChange={e => setVigenciaListaPrecios(e.target.value)}
+                    style={{ width: "100%", marginTop: "5px", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "8px", boxSizing: "border-box" }} />
+                </label>
+
+                <label style={{ fontSize: "12px", fontWeight: "800", color: "#334155" }}>
+                  Descripción <span style={{ fontWeight: "500", color: "#94a3b8" }}>(opcional)</span>
+                  <input value={descripcionListaPrecios} onChange={e => setDescripcionListaPrecios(e.target.value)}
+                    placeholder="Ej.: Lista Octubre 2026"
+                    style={{ width: "100%", marginTop: "5px", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "8px", boxSizing: "border-box" }} />
+                </label>
+              </div>
+
+              <div style={{ marginTop: "16px", padding: "12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "10px", textAlign: "center" }}>
+                <div style={{ fontWeight: "900", fontSize: "12px", color: "#1e40af" }}>¿Primera vez?</div>
+                <div style={{ marginTop: "3px", fontSize: "12px", color: "#475569" }}>
+                  Descargá la plantilla oficial y completala con los productos de tu empresa.
+                </div>
+                <button
+                  type="button"
+                  onClick={descargarPlantillaListaPrecios}
+                  style={{ marginTop: "10px", width: "100%", padding: "10px 12px", border: "1px solid #16a34a", borderRadius: "8px", background: "#f0fdf4", color: "#166534", fontWeight: "900", cursor: "pointer" }}
+                >
+                  📥 DESCARGAR PLANTILLA DE LISTA DE PRECIOS
+                </button>
+                <div style={{ marginTop: "7px", fontSize: "10px", color: "#64748b" }}>
+                  Obligatorios: código, descripción y precio · Opcionales: GTIN y marca
+                </div>
+              </div>
+
+              <input
+                ref={inputArchivoListaPreciosRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={leerArchivoListaPrecios}
+                style={{ display: "none" }}
+              />
+
+              <button
+                type="button"
+                onClick={() => inputArchivoListaPreciosRef.current?.click()}
+                style={{ marginTop: "16px", width: "100%", padding: "12px", border: "none", borderRadius: "9px", background: "#2563eb", color: "#fff", fontWeight: "900", cursor: "pointer" }}
+              >
+                1️⃣ ELEGIR ARCHIVO EXCEL / CSV
+              </button>
+
+              {archivoListaPreciosNombre && (
+                <div style={{ marginTop: "8px", fontSize: "11px", color: "#475569" }}>
+                  📄 Archivo: <strong>{archivoListaPreciosNombre}</strong>
+                </div>
+              )}
+
+              {vistaPreviaListaPrecios && (
+                <div style={{ marginTop: "14px", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", background: "#f8fafc" }}>
+                  <div style={{ fontWeight: "900", color: "#0f172a" }}>2️⃣ REVISAR ARTÍCULOS</div>
+                  <div style={{ marginTop: "8px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", textAlign: "center" }}>
+                    <div style={{ background: "#fff", borderRadius: "8px", padding: "9px" }}>
+                      <div style={{ fontSize: "18px", fontWeight: "900" }}>{vistaPreviaListaPrecios.total}</div>
+                      <div style={{ fontSize: "10px", color: "#64748b" }}>Encontrados</div>
+                    </div>
+                    <div style={{ background: "#f0fdf4", borderRadius: "8px", padding: "9px" }}>
+                      <div style={{ fontSize: "18px", fontWeight: "900", color: "#166534" }}>{vistaPreviaListaPrecios.validos.length}</div>
+                      <div style={{ fontSize: "10px", color: "#166534" }}>Correctos</div>
+                    </div>
+                    <div style={{ background: vistaPreviaListaPrecios.conProblemas.length ? "#fef2f2" : "#f0fdf4", borderRadius: "8px", padding: "9px" }}>
+                      <div style={{ fontSize: "18px", fontWeight: "900", color: vistaPreviaListaPrecios.conProblemas.length ? "#b91c1c" : "#166534" }}>{vistaPreviaListaPrecios.conProblemas.length}</div>
+                      <div style={{ fontSize: "10px", color: vistaPreviaListaPrecios.conProblemas.length ? "#b91c1c" : "#166534" }}>Con problemas</div>
+                    </div>
+                  </div>
+
+                  {vistaPreviaListaPrecios.conProblemas.length > 0 && (
+                    <div style={{ marginTop: "10px", padding: "10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px", fontSize: "11px" }}>
+                      <strong>⚠️ Revisar antes de continuar:</strong>
+                      {vistaPreviaListaPrecios.conProblemas.slice(0, 8).map((p) => (
+                        <div key={p.fila} style={{ marginTop: "4px" }}>
+                          Fila {p.fila}: {p.errores.join(" · ")}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {vistaPreviaListaPrecios.conProblemas.length === 0 && (
+                    <div style={{ marginTop: "10px", padding: "10px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", fontSize: "11px", color: "#166534", fontWeight: "800" }}>
+                      ✅ Archivo reconocido correctamente. Todavía no se modificó ningún precio.
+                    </div>
+                  )}
+
+                  {vistaPreviaListaPrecios.conProblemas.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={compararListaPreciosActual}
+                      disabled={comparandoListaPrecios || !listaPreciosSeleccionadaId}
+                      style={{
+                        marginTop: "10px", width: "100%", padding: "11px",
+                        border: "none", borderRadius: "8px",
+                        background: comparandoListaPrecios ? "#94a3b8" : "#7c3aed",
+                        color: "#fff", fontWeight: "900",
+                        cursor: comparandoListaPrecios ? "wait" : "pointer"
+                      }}
+                    >
+                      {comparandoListaPrecios ? "⏳ COMPARANDO..." : "🔎 COMPARAR CON LA LISTA ACTUAL"}
+                    </button>
+                  )}
+
+                  {comparacionListaPrecios && (
+                    <div style={{ marginTop: "12px", padding: "12px", background: "#fff", border: "1px solid #ddd6fe", borderRadius: "10px" }}>
+                      <div style={{ fontWeight: "900", color: "#4c1d95" }}>🔎 Resultado de la comparación</div>
+                      <div style={{ marginTop: "4px", fontSize: "10px", color: "#64748b" }}>
+                        📋 Comparando contra: <strong>{comparacionListaPrecios.nombreLista}</strong>
+                      </div>
+                      <div style={{ marginTop: "3px", fontSize: "10px", color: "#64748b" }}>
+                        Lista actual: {comparacionListaPrecios.totalActual} artículo(s) ·
+                        Códigos actuales detectados: {comparacionListaPrecios.codigosActuales} ·
+                        Archivo nuevo: {vistaPreviaListaPrecios.validos.length}
+                      </div>
+                      <div style={{ marginTop: "3px", fontSize: "10px", color: "#64748b" }}>
+                        Coincidencias encontradas: {comparacionListaPrecios.coincidenciasCodigo} por código
+                        {comparacionListaPrecios.coincidenciasGtin > 0 ? ` · ${comparacionListaPrecios.coincidenciasGtin} por GTIN` : ""}
+                      </div>
+
+                      <div style={{ marginTop: "10px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "7px", textAlign: "center" }}>
+                        <div style={{ padding: "9px 4px", background: "#f8fafc", borderRadius: "8px" }}>
+                          <div style={{ fontSize: "18px", fontWeight: "900" }}>{comparacionListaPrecios.sinCambios.length}</div>
+                          <div style={{ fontSize: "9px", color: "#64748b" }}>➖ Sin cambios</div>
+                        </div>
+                        <div style={{ padding: "9px 4px", background: "#eff6ff", borderRadius: "8px" }}>
+                          <div style={{ fontSize: "18px", fontWeight: "900", color: "#1d4ed8" }}>{comparacionListaPrecios.precioCambiado.length}</div>
+                          <div style={{ fontSize: "9px", color: "#1d4ed8" }}>💲 Precio nuevo</div>
+                        </div>
+                        <div style={{ padding: "9px 4px", background: "#f0fdf4", borderRadius: "8px" }}>
+                          <div style={{ fontSize: "18px", fontWeight: "900", color: "#166534" }}>{comparacionListaPrecios.nuevos.length}</div>
+                          <div style={{ fontSize: "9px", color: "#166534" }}>🆕 Nuevos</div>
+                        </div>
+                        <div style={{ padding: "9px 4px", background: comparacionListaPrecios.revisar.length ? "#fffbeb" : "#f8fafc", borderRadius: "8px" }}>
+                          <div style={{ fontSize: "18px", fontWeight: "900", color: comparacionListaPrecios.revisar.length ? "#b45309" : "#64748b" }}>{comparacionListaPrecios.revisar.length}</div>
+                          <div style={{ fontSize: "9px", color: comparacionListaPrecios.revisar.length ? "#b45309" : "#64748b" }}>⚠️ Revisar</div>
+                        </div>
+                      </div>
+
+                      {comparacionListaPrecios.precioCambiado.length > 0 && (
+                        <div style={{ marginTop: "10px", fontSize: "10px", color: "#334155" }}>
+                          <strong>💲 Algunos cambios de precio:</strong>
+                          {comparacionListaPrecios.precioCambiado.slice(0, 5).map((p, i) => (
+                            <div key={`${p.codigo}-${i}`} style={{ marginTop: "3px" }}>
+                              {p.codigo} · {p.descripcion}: ${p.precioAnterior} → ${p.precioNuevo}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {comparacionListaPrecios.nuevos.length > 0 && (
+                        <div style={{ marginTop: "10px", fontSize: "10px", color: "#166534" }}>
+                          <strong>🆕 Productos que no encontramos en la lista actual:</strong>
+                          {comparacionListaPrecios.nuevos.slice(0, 5).map((p, i) => (
+                            <div key={`${p.codigo}-${i}`} style={{ marginTop: "3px" }}>
+                              {p.codigo} · {p.descripcion}{p.gtin ? ` · GTIN ${p.gtin}` : ""}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {comparacionListaPrecios.revisar.length > 0 && (
+                        <div style={{ marginTop: "10px", padding: "8px", background: "#fffbeb", borderRadius: "7px", fontSize: "10px", color: "#92400e" }}>
+                          <strong>⚠️ Necesitan revisión:</strong>
+                          {comparacionListaPrecios.revisar.map((p, i) => (
+                            <div key={`${p.codigo}-${i}`} style={{ marginTop: "3px" }}>
+                              {p.codigo} · {p.descripcion}: {p.motivo}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: "10px", fontSize: "10px", color: "#64748b", fontWeight: "800" }}>
+                        🔒 Comparación solamente informativa. Todavía no se modificó ningún producto ni precio.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ marginTop: "14px", padding: "10px", borderRadius: "8px", background: "#f8fafc", color: "#94a3b8", fontSize: "11px", fontWeight: "800", textAlign: "center" }}>
+                3️⃣ CARGAR LISTA — todavía deshabilitado
+              </div>
+
+              <div style={{ marginTop: "10px", fontSize: "11px", color: "#64748b" }}>
+                🔒 Esta etapa solamente lee y revisa el archivo. No modifica productos ni precios.
+              </div>
             </div>
           </div>
         ) : seccionActiva === "estadoCuenta" ? (
