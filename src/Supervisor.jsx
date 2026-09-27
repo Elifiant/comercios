@@ -233,6 +233,7 @@ const reactivarComercio = async (comercio) => {
   const [archivoClientesNombre, setArchivoClientesNombre] = useState("");
   const [vistaPreviaClientes, setVistaPreviaClientes] = useState(null);
   const [archivoClientesTieneEncabezados, setArchivoClientesTieneEncabezados] = useState(true);
+  const [mostrarOpcionesArchivoClientes, setMostrarOpcionesArchivoClientes] = useState(false);
   const [probandoGeo, setProbandoGeo] = useState(false);
   const [resultadoGeo, setResultadoGeo] = useState(null);
   const [revisionMapa, setRevisionMapa] = useState(null);
@@ -793,8 +794,8 @@ useEffect(() => {
     }
 
     const mensaje = modoImportacionCuenta === "completo"
-      ? "⚠️ REEMPLAZAR ESTADO DE CUENTA COMPLETO\n\nLos clientes que NO aparecen en la planilla pasarán a saldo $0.\n\n¿Confirmar importación?"
-      : `Se actualizarán ${vistaPreviaCuenta.encontrados.length} clientes incluidos en la planilla.\n\n¿Confirmar importación?`;
+      ? "⚠️ REEMPLAZAR ESTADO DE CUENTA COMPLETO\n\nLos clientes que NO aparecen en la planilla pasarán a saldo $0.\n\n¿Confirmar carga en RutaComercio?"
+      : `Se actualizarán ${vistaPreviaCuenta.encontrados.length} clientes incluidos en la planilla.\n\n¿Confirmar carga en RutaComercio?`;
     if (!window.confirm(mensaje)) return;
 
     setImportandoCuenta(true);
@@ -1209,6 +1210,53 @@ useEffect(() => {
   const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
   const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
 
+  // 📥 Plantilla oficial RutaComercio para importación de clientes
+  const descargarPlantillaClientes = () => {
+    const encabezados = [
+      "codigo_cliente",
+      "nombre_comercio",
+      "direccion",
+      "localidad",
+      "provincia_estado",
+      "pais",
+      "email_preventista",
+      "latitud",
+      "longitud"
+    ];
+
+    const ejemplo = [
+      "CLI0001",
+      "Almacén El Sol",
+      "Av. Mitre 1234",
+      "Quilmes",
+      "Buenos Aires",
+      "Argentina",
+      "vendedor@empresa.com",
+      "",
+      ""
+    ];
+
+    const escaparCsv = (valor) => {
+      const texto = String(valor ?? "");
+      return `"${texto.replace(/"/g, '""')}"`;
+    };
+
+    // BOM UTF-8 para que LibreOffice/Excel reconozcan bien tildes y ñ.
+    const csv = "\uFEFF" +
+      encabezados.map(escaparCsv).join(";") + "\n" +
+      ejemplo.map(escaparCsv).join(";") + "\n";
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = "Plantilla_Clientes_RutaComercio.csv";
+    document.body.appendChild(enlace);
+    enlace.click();
+    document.body.removeChild(enlace);
+    URL.revokeObjectURL(url);
+  };
+
   // 💾 Importación REAL de clientes aprobados por el supervisor
   const confirmarImportacionRealClientes = async () => {
     if (importandoClientes) return;
@@ -1222,13 +1270,13 @@ useEffect(() => {
     const geos = resultadoGeo?.multiple ? (resultadoGeo.resultados || []) : [];
 
     if (!clientes.length || geos.length !== clientes.length) {
-      alert("❌ La vista previa o la geolocalización están incompletas. No se importó nada.");
+      alert("❌ La vista previa o la geolocalización están incompletas. No se cargó ningún cliente.");
       return;
     }
 
     const pendientes = geos.filter(r => !r?.ok || r?.revisar);
     if (pendientes.length) {
-      alert(`⚠️ Todavía hay ${pendientes.length} ubicación(es) sin resolver. No se importó nada.`);
+      alert(`⚠️ Todavía hay ${pendientes.length} ubicación(es) sin resolver. No se cargó ningún cliente.`);
       return;
     }
 
@@ -1239,7 +1287,7 @@ useEffect(() => {
     }
 
     const confirmacion = window.confirm(
-      `⚠️ IMPORTACIÓN REAL\n\nSe van a crear ${clientes.length} cliente(s) en Supabase para ${perfilSupervisor.empresa || "esta empresa"}.\n\nEsta acción SÍ guarda datos.\n\n¿Confirmar importación?`
+      `⚠️ CARGA DE CLIENTES\n\nSe van a cargar ${clientes.length} cliente(s) en RutaComercio para ${perfilSupervisor.empresa || "esta empresa"}.\n\nEsta acción cargará los clientes definitivamente en RutaComercio.\n\n¿Confirmar carga en RutaComercio?`
     );
     if (!confirmacion) return;
 
@@ -1370,7 +1418,7 @@ useEffect(() => {
         : "";
 
       alert(
-        `✅ Importación finalizada\n\nNuevos importados: ${importados.length}\nYa existentes / omitidos: ${omitidosExistentes.length}\nErrores reales: ${errores.length}${sinDuplicados}${detalleOmitidos}${detalleErrores}`
+        `✅ Carga finalizada\n\nNuevos cargados: ${importados.length}\nYa existentes / omitidos: ${omitidosExistentes.length}\nErrores reales: ${errores.length}${sinDuplicados}${detalleOmitidos}${detalleErrores}`
       );
 
       if (errores.length === 0) {
@@ -1548,8 +1596,8 @@ useEffect(() => {
             <div style={{ width: "min(900px, 96vw)", maxHeight: "88vh", overflow: "auto", background: "#fff", borderRadius: "14px", padding: "16px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
                 <div>
-                  <h3 style={{ margin: 0 }}>💾 Confirmación final de importación</h3>
-                  <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Revisá qué se va a crear antes de tocar Supabase.</div>
+                  <h3 style={{ margin: 0 }}>💾 Confirmación final de carga</h3>
+                  <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Revisá qué clientes se van a cargar en RutaComercio.</div>
                 </div>
                 <button type="button" onClick={() => setPreConfirmacionImportacion(false)} style={{ border: "none", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}>✕</button>
               </div>
@@ -1599,7 +1647,7 @@ useEffect(() => {
                     cursor: importandoClientes ? "not-allowed" : "pointer"
                   }}
                 >
-                  {importandoClientes ? "⏳ IMPORTANDO..." : "💾 IMPORTAR AHORA"}
+                  {importandoClientes ? "⏳ CARGANDO..." : "✅ CARGAR CLIENTES"}
                 </button>
               </div>
             </div>
@@ -1649,7 +1697,7 @@ useEffect(() => {
                 <button type="button" onClick={() => setRevisionMapa(null)} style={{ padding: "9px 13px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", cursor: "pointer", fontWeight: "800" }}>Cancelar</button>
                 <button type="button" onClick={confirmarRevisionMapa} style={{ padding: "9px 13px", border: "none", borderRadius: "8px", background: "#16a34a", color: "#fff", cursor: "pointer", fontWeight: "900" }}>✅ CONFIRMAR UBICACIÓN</button>
               </div>
-              <div style={{ marginTop: "8px", fontSize: "10px", color: "#64748b", textAlign: "center" }}>🔒 Sigue siendo una revisión previa: todavía no se guarda nada en Supabase.</div>
+              <div style={{ marginTop: "8px", fontSize: "10px", color: "#64748b", textAlign: "center" }}>🔒 Sigue siendo una revisión previa: todavía no se cargó ningún cliente en RutaComercio.</div>
             </div>
           </div>
         )}
@@ -1659,12 +1707,38 @@ useEffect(() => {
             <div style={{ width: "min(820px, 96vw)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: "14px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", padding: "18px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: "18px" }}>📥 Importar Clientes</h3>
+                  <h3 style={{ margin: 0, fontSize: "18px" }}>📥 Cargar Clientes a RutaComercio</h3>
                   <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
                     PASO 1 — Lee y revisa el Excel. <strong>No guarda nada todavía.</strong>
                   </div>
                 </div>
                 <button type="button" onClick={() => setModalImportacionClientes(false)} style={{ border: "none", background: "#f1f5f9", borderRadius: "8px", padding: "7px 10px", cursor: "pointer", fontWeight: "800" }}>✕</button>
+              </div>
+
+              <div style={{ marginTop: "14px", marginBottom: "12px", padding: "11px", border: "1px solid #bbf7d0", borderRadius: "10px", background: "#f0fdf4" }}>
+                <div style={{ textAlign: "center", fontSize: "11px", color: "#166534", marginBottom: "8px", fontWeight: "800" }}>
+                  ¿Primera vez? Empezá descargando la plantilla oficial.
+                </div>
+                <button
+                type="button"
+                onClick={descargarPlantillaClientes}
+                style={{
+                  width: "100%",
+                  marginBottom: "8px",
+                  padding: "10px",
+                  border: "1px solid #16a34a",
+                  borderRadius: "9px",
+                  background: "#f0fdf4",
+                  color: "#166534",
+                  fontWeight: "900",
+                  cursor: "pointer"
+                }}
+              >
+                📥 DESCARGAR PLANTILLA DE CLIENTES
+              </button>
+              <div style={{ marginBottom: "8px", textAlign: "center", fontSize: "10px", color: "#64748b" }}>
+                Incluye una fila de ejemplo. Latitud y longitud son opcionales.
+              </div>
               </div>
 
               <div style={{ marginTop: "14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "9px", padding: "10px", fontSize: "12px", color: "#1e3a8a" }}>
@@ -1674,30 +1748,112 @@ useEffect(() => {
                 <div style={{ marginTop: "3px", fontWeight: "800" }}>📧 “email_preventista” = email de login del preventista. No usar su nombre.</div>
               </div>
 
-              <div style={{ marginTop: "14px", display: "grid", gap: "8px" }}>
-                <label style={{ border: archivoClientesTieneEncabezados ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: "9px", padding: "10px", cursor: "pointer", background: archivoClientesTieneEncabezados ? "#eff6ff" : "#fff" }}>
-                  <input type="radio" name="encabezadosClientes" checked={archivoClientesTieneEncabezados} onChange={() => { setArchivoClientesTieneEncabezados(true); setVistaPreviaClientes(null); }} />
-                  <strong> Mi archivo tiene títulos de columnas</strong>
-                  <div style={{ marginLeft: "22px", marginTop: "3px", fontSize: "11px", color: "#64748b" }}>Ejemplo: codigo_cliente | nombre_comercio | direccion | localidad | provincia/estado | pais | email_preventista</div>
-                </label>
-                <label style={{ border: !archivoClientesTieneEncabezados ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: "9px", padding: "10px", cursor: "pointer", background: !archivoClientesTieneEncabezados ? "#eff6ff" : "#fff" }}>
-                  <input type="radio" name="encabezadosClientes" checked={!archivoClientesTieneEncabezados} onChange={() => { setArchivoClientesTieneEncabezados(false); setVistaPreviaClientes(null); }} />
-                  <strong> Mi archivo NO tiene títulos de columnas</strong>
-                  <div style={{ marginLeft: "22px", marginTop: "3px", fontSize: "11px", color: "#64748b" }}>RutaComercio tomará: código | nombre comercio | dirección | localidad | provincia/estado | país | email preventista | latitud | longitud</div>
-                </label>
+              <div style={{ marginTop: "10px" }}>
+                <button type="button" onClick={() => setMostrarOpcionesArchivoClientes(v => !v)}
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#f8fafc", color: "#475569", fontWeight: "800", cursor: "pointer", fontSize: "11px" }}>
+                  ⚙️ Opciones para archivos propios {mostrarOpcionesArchivoClientes ? "▲" : "▼"}
+                </button>
+
+                {mostrarOpcionesArchivoClientes && (
+                  <div style={{ display: "grid", gap: "8px", marginTop: "8px" }}>
+                    <label style={{ border: archivoClientesTieneEncabezados ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: "9px", padding: "10px", cursor: "pointer", background: archivoClientesTieneEncabezados ? "#eff6ff" : "#fff" }}>
+                      <input type="radio" name="encabezadosClientes" checked={archivoClientesTieneEncabezados} onChange={() => { setArchivoClientesTieneEncabezados(true); setVistaPreviaClientes(null); }} />
+                      <strong> Mi archivo tiene títulos de columnas</strong>
+                    </label>
+                    <label style={{ border: !archivoClientesTieneEncabezados ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: "9px", padding: "10px", cursor: "pointer", background: !archivoClientesTieneEncabezados ? "#eff6ff" : "#fff" }}>
+                      <input type="radio" name="encabezadosClientes" checked={!archivoClientesTieneEncabezados} onChange={() => { setArchivoClientesTieneEncabezados(false); setVistaPreviaClientes(null); }} />
+                      <strong> Mi archivo NO tiene títulos de columnas</strong>
+                      <div style={{ marginLeft: "22px", marginTop: "3px", fontSize: "11px", color: "#64748b" }}>RutaComercio usará el orden esperado de columnas.</div>
+                    </label>
+                  </div>
+                )}
               </div>
+
+              {/* 🧭 Guía visual de importación — solo interfaz, no cambia la lógica */}
+              {(() => {
+                const pasoActual = !vistaPreviaClientes ? 1 : (resumenImportacionAPB?.listo ? 3 : 2);
+                const pasos = [
+                  { n: 1, texto: "CARGAR ARCHIVO" },
+                  { n: 2, texto: "REVISAR" },
+                  { n: 3, texto: "IMPORTAR" },
+                ];
+                return (
+                  <div style={{ margin: "12px 0 14px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px" }}>
+                      {pasos.map((p) => {
+                        const activo = p.n === pasoActual;
+                        const completado = p.n < pasoActual;
+                        return (
+                          <div key={p.n} style={{
+                            border: activo ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                            background: completado ? "#f0fdf4" : activo ? "#eff6ff" : "#f8fafc",
+                            borderRadius: "10px", padding: "9px 5px", textAlign: "center",
+                            fontWeight: "900", fontSize: "10px",
+                            color: completado ? "#166534" : activo ? "#1d4ed8" : "#64748b"
+                          }}>
+                            <div style={{ fontSize: "16px", marginBottom: "3px" }}>{completado ? "✓" : p.n}</div>
+                            {p.texto}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ marginTop: "7px", textAlign: "center", fontSize: "10px", color: "#64748b" }}>
+                      {pasoActual === 1 && "Elegí el archivo de clientes para comenzar."}
+                      {pasoActual === 2 && "RutaComercio está revisando los datos antes de importar."}
+                      {pasoActual === 3 && "Todo está listo. Revisá el resumen y confirmá la importación."}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <input ref={inputArchivoClientesRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoClientes} style={{ display: "none" }} />
               <button type="button" onClick={() => inputArchivoClientesRef.current?.click()} style={{ marginTop: "14px", width: "100%", padding: "11px", border: "1px dashed #2563eb", borderRadius: "9px", background: "#eff6ff", color: "#1d4ed8", fontWeight: "800", cursor: "pointer" }}>
-                📄 ELEGIR ARCHIVO EXCEL / CSV
+                1️⃣ ELEGIR ARCHIVO EXCEL / CSV
               </button>
               {archivoClientesNombre && <div style={{ fontSize: "11px", color: "#475569", marginTop: "6px" }}>Archivo: <strong>{archivoClientesNombre}</strong></div>}
 
               {vistaPreviaClientes && (
                 <div style={{ marginTop: "16px" }}>
-                  <div style={{ fontWeight: "800", fontSize: "13px", marginBottom: "8px" }}>Vista previa — Supabase sigue intacto</div>
+                  <div style={{ fontWeight: "800", fontSize: "13px", marginBottom: "8px" }}>Vista previa — todavía no se guardaron cambios</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: "8px" }}>
-                    <div style={{ background: "#f8fafc", padding: "9px", borderRadius: "8px" }}><small>Filas leídas</small><div style={{ fontWeight: "900" }}>{vistaPreviaClientes.totalFilas}</div></div>
+                                      {(() => {
+                    const totalProblemas =
+                      (vistaPreviaClientes.sinNombre?.length || 0) +
+                      (vistaPreviaClientes.sinDireccion?.length || 0) +
+                      (vistaPreviaClientes.duplicados?.length || 0) +
+                      Number(vistaPreviaClientes.preventistasProblema || 0) +
+                      Number(vistaPreviaClientes.preventistasSinEmail || 0);
+
+                    return (
+                      <div style={{
+                        marginTop: "10px",
+                        marginBottom: "10px",
+                        padding: "12px",
+                        borderRadius: "10px",
+                        border: totalProblemas === 0 ? "1px solid #86efac" : "1px solid #fcd34d",
+                        background: totalProblemas === 0 ? "#f0fdf4" : "#fffbeb"
+                      }}>
+                        <div style={{
+                          fontWeight: "900",
+                          fontSize: "14px",
+                          color: totalProblemas === 0 ? "#166534" : "#92400e"
+                        }}>
+                          {totalProblemas === 0
+                            ? "✅ Archivo reconocido correctamente"
+                            : `⚠️ Encontramos ${totalProblemas} dato(s) que necesitan atención`}
+                        </div>
+                        <div style={{ marginTop: "4px", fontSize: "12px", color: totalProblemas === 0 ? "#166534" : "#92400e" }}>
+                          <strong>{vistaPreviaClientes.validos?.length || 0}</strong>{" "}
+                          {(vistaPreviaClientes.validos?.length || 0) === 1 ? "cliente encontrado" : "clientes encontrados"}.
+                          {totalProblemas === 0
+                            ? " RutaComercio verificará direcciones y preventistas antes de cargarlos."
+                            : " Revisá los avisos de abajo antes de continuar."}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+<div style={{ background: "#f8fafc", padding: "9px", borderRadius: "8px" }}><small>Filas leídas</small><div style={{ fontWeight: "900" }}>{vistaPreviaClientes.totalFilas}</div></div>
                     <div style={{ background: "#f0fdf4", padding: "9px", borderRadius: "8px" }}><small>Clientes válidos</small><div style={{ fontWeight: "900", color: "#15803d" }}>{vistaPreviaClientes.validos.length}</div></div>
                     <div style={{ background: "#ecfeff", padding: "9px", borderRadius: "8px" }}><small>Con coordenadas</small><div style={{ fontWeight: "900", color: "#0e7490" }}>{vistaPreviaClientes.conCoordenadas}</div></div>
                     <div style={{ background: "#fffbeb", padding: "9px", borderRadius: "8px" }}><small>Pendientes geocodificar</small><div style={{ fontWeight: "900", color: "#b45309" }}>{vistaPreviaClientes.pendientesGeocodificar}</div></div>
@@ -1762,35 +1918,13 @@ useEffect(() => {
                     🔒 Esta primera etapa es solamente de control. <strong>No existe todavía botón de guardar.</strong>
                   </div>
 
-                  {resumenImportacionAPB && (
-                    <div style={{ marginTop: "12px", border: resumenImportacionAPB.listo ? "1px solid #86efac" : "1px solid #fcd34d", background: resumenImportacionAPB.listo ? "#f0fdf4" : "#fffbeb", borderRadius: "10px", padding: "12px" }}>
-                      <div style={{ fontWeight: "900", fontSize: "13px", color: resumenImportacionAPB.listo ? "#166534" : "#92400e" }}>
-                        {resumenImportacionAPB.listo ? `✅ IMPORTACIÓN LISTA — ${resumenImportacionAPB.cantidad} cliente(s) preparados` : "🔒 IMPORTACIÓN BLOQUEADA — hay cosas por resolver"}
-                      </div>
-                      {!resumenImportacionAPB.listo && (
-                        <div style={{ marginTop: "7px", fontSize: "11px", color: "#92400e" }}>
-                          {resumenImportacionAPB.motivos.map((m, i) => <div key={i} style={{ marginTop: "3px" }}>• {m}</div>)}
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        disabled={!resumenImportacionAPB.listo}
-                        onClick={() => setPreConfirmacionImportacion(true)}
-                        style={{ width: "100%", marginTop: "10px", border: "none", borderRadius: "8px", padding: "11px", fontWeight: "900", cursor: resumenImportacionAPB.listo ? "pointer" : "not-allowed", background: resumenImportacionAPB.listo ? "#16a34a" : "#cbd5e1", color: resumenImportacionAPB.listo ? "#fff" : "#64748b" }}
-                      >
-                        💾 PREPARAR IMPORTACIÓN REAL
-                      </button>
-                      <div style={{ marginTop: "7px", textAlign: "center", fontSize: "10px", color: "#64748b" }}>🔎 Primero vas a ver exactamente qué se importaría. Todavía no se guarda nada.</div>
-                    </div>
-                  )}
-
                   <button
                     type="button"
                     disabled={probandoGeo || vistaPreviaClientes.validos.length === 0}
                     onClick={probarGeoapifyPrimerCliente}
                     style={{ marginTop: "12px", width: "100%", padding: "11px", border: "none", borderRadius: "9px", background: probandoGeo ? "#94a3b8" : "#7c3aed", color: "#fff", fontWeight: "900", cursor: probandoGeo ? "wait" : "pointer" }}
                   >
-                    {probandoGeo ? "🌍 GEOLOCALIZANDO CLIENTES..." : `🌍 GEOLOCALIZAR LOS ${vistaPreviaClientes.validos.length} CLIENTES`}
+                    {probandoGeo ? "🌍 GEOLOCALIZANDO CLIENTES..." : `2️⃣ GEOLOCALIZAR LOS ${vistaPreviaClientes.validos.length} CLIENTES`}
                   </button>
 
                   {resultadoGeo?.multiple && (
@@ -1852,8 +1986,31 @@ useEffect(() => {
                         ))}
                       </div>
 
+                  {resumenImportacionAPB && (
+                    <div style={{ marginTop: "12px", border: resumenImportacionAPB.listo ? "1px solid #86efac" : "1px solid #fcd34d", background: resumenImportacionAPB.listo ? "#f0fdf4" : "#fffbeb", borderRadius: "10px", padding: "12px" }}>
+                      <div style={{ fontWeight: "900", fontSize: "13px", color: resumenImportacionAPB.listo ? "#166534" : "#92400e" }}>
+                        {resumenImportacionAPB.listo ? `✅ TODOS LOS CLIENTES ESTÁN LISTOS — ${resumenImportacionAPB.cantidad} cliente(s) preparados` : "🔒 TODAVÍA HAY COSAS POR RESOLVER"}
+                      </div>
+                      {!resumenImportacionAPB.listo && (
+                        <div style={{ marginTop: "7px", fontSize: "11px", color: "#92400e" }}>
+                          {resumenImportacionAPB.motivos.map((m, i) => <div key={i} style={{ marginTop: "3px" }}>• {m}</div>)}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        disabled={!resumenImportacionAPB.listo}
+                        onClick={() => setPreConfirmacionImportacion(true)}
+                        style={{ width: "100%", marginTop: "10px", border: "none", borderRadius: "8px", padding: "11px", fontWeight: "900", cursor: resumenImportacionAPB.listo ? "pointer" : "not-allowed", background: resumenImportacionAPB.listo ? "#16a34a" : "#cbd5e1", color: resumenImportacionAPB.listo ? "#fff" : "#64748b" }}
+                      >
+                        3️⃣ CONTINUAR A CARGA
+                      </button>
+                      <div style={{ marginTop: "7px", textAlign: "center", fontSize: "10px", color: "#64748b" }}>🔎 Vas a revisar exactamente qué se cargará antes de guardar. Todavía no se guardó nada.</div>
+                    </div>
+                  )}
+
+
                       <div style={{ marginTop: "10px", background: "#f1f5f9", borderRadius: "8px", padding: "9px", fontSize: "11px", color: "#475569" }}>
-                        🔒 Resultado de prueba: <strong>todavía no se guardó ningún cliente ni coordenada en Supabase.</strong>
+                        🔒 <strong>Todavía no se cargó ningún cliente en RutaComercio.</strong>
                       </div>
                     </div>
                   )}
@@ -1890,7 +2047,7 @@ useEffect(() => {
 
               {vistaPreviaCuenta && (
                 <div style={{ marginTop: "16px" }}>
-                  <div style={{ fontWeight: "800", fontSize: "13px", marginBottom: "8px" }}>Vista previa — todavía no se modificó Supabase</div>
+                  <div style={{ fontWeight: "800", fontSize: "13px", marginBottom: "8px" }}>Vista previa — todavía no se guardaron cambios</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))", gap: "8px" }}>
                     <div style={{ background: "#f8fafc", padding: "9px", borderRadius: "8px" }}><small>Filas leídas</small><div style={{ fontWeight: "900" }}>{vistaPreviaCuenta.totalFilas}</div></div>
                     <div style={{ background: "#f0fdf4", padding: "9px", borderRadius: "8px" }}><small>Encontrados</small><div style={{ fontWeight: "900", color: "#15803d" }}>{vistaPreviaCuenta.encontrados.length}</div></div>
@@ -2593,7 +2750,7 @@ useEffect(() => {
                     boxShadow: "0 2px 6px rgba(37,99,235,0.2)"
                   }}
                 >
-                  {guardandoFicha ? "Guardando en Supabase..." : "💾 Guardar Reasignación"}
+                  {guardandoFicha ? "Guardando..." : "💾 Guardar Reasignación"}
                 </button>
                 {msgExitoFicha && (
                   <div style={{ marginTop: "6px", fontSize: "11px", color: "#16a34a", fontWeight: "bold", textAlign: "center" }}>
@@ -2644,7 +2801,7 @@ useEffect(() => {
             </div>
 
             {cargandoPedidosReal ? (
-              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", fontSize: "14px" }}>⏳ Consultando pedidos en Supabase...</div>
+              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", fontSize: "14px" }}>⏳ Consultando pedidos...</div>
             ) : pedidosReal.length === 0 ? (
               <div style={{ backgroundColor: "#ffffff", padding: "40px", textAlign: "center", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
                 <div style={{ fontSize: "36px", marginBottom: "8px" }}>📭</div>
