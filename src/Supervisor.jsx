@@ -256,6 +256,7 @@ const reactivarComercio = async (comercio) => {
   const [preConfirmacionListaPrecios, setPreConfirmacionListaPrecios] = useState(false);
   const [confirmacionFinalListaPrecios, setConfirmacionFinalListaPrecios] = useState(false);
   const [decisionAusentesListaPrecios, setDecisionAusentesListaPrecios] = useState({});
+  const [actualizandoListaPrecios, setActualizandoListaPrecios] = useState(false);
 
 
 
@@ -1708,6 +1709,7 @@ useEffect(() => {
           ...nuevo,
           coincidencia: porCod ? "codigo" : "gtin",
           producto_id: existente.producto_id,
+          lista_producto_id: existente.id,
           codigo_cge: existente.producto?.codigo_cge || "",
           precioAnterior,
           precioNuevo
@@ -1759,6 +1761,79 @@ useEffect(() => {
       alert("❌ No se pudo comparar la lista actual. No se modificó ningún dato.");
     } finally {
       setComparandoListaPrecios(false);
+    }
+  };
+
+  const actualizarListaPreciosReal = async () => {
+    if (actualizandoListaPrecios) return;
+    if (!listaPreciosSeleccionadaId || !comparacionListaPrecios) {
+      alert("❌ Falta la lista seleccionada o la comparación.");
+      return;
+    }
+    if ((comparacionListaPrecios.revisar || []).length > 0) {
+      alert("⚠️ Hay artículos pendientes de revisar. No se actualizó nada.");
+      return;
+    }
+
+    const cambiosPrecio = (comparacionListaPrecios.precioCambiado || []).map(p => ({
+      lista_producto_id: p.lista_producto_id,
+      precio: p.precioNuevo
+    }));
+
+    const productosNuevos = (comparacionListaPrecios.nuevos || []).map(p => ({
+      codigo: String(p.codigo || "").trim(),
+      nombre: String(p.descripcion || "").trim(),
+      descripcion: String(p.descripcion || "").trim(),
+      marca: String(p.marca || "").trim(),
+      gtin: String(p.gtin || "").trim(),
+      precio: Number(p.precio)
+    }));
+
+    const productosQuitar = (comparacionListaPrecios.ausentes || [])
+      .filter(p => decisionAusentesListaPrecios[p.id] === "quitar")
+      .map(p => ({ lista_producto_id: p.id }));
+
+    const confirmar = window.confirm(
+      `⚠️ ACTUALIZACIÓN REAL DE LISTA\n\n` +
+      `Lista: ${comparacionListaPrecios.nombreLista}\n` +
+      `Cambios de precio: ${cambiosPrecio.length}\n` +
+      `Productos nuevos: ${productosNuevos.length}\n` +
+      `Quitar de la lista: ${productosQuitar.length}\n\n` +
+      `Esta operación modificará Supabase. ¿Confirmar?`
+    );
+    if (!confirmar) return;
+
+    setActualizandoListaPrecios(true);
+    try {
+      const { data, error } = await supabase.rpc("actualizar_lista_precios", {
+        p_lista_id: listaPreciosSeleccionadaId,
+        p_cambios_precio: cambiosPrecio,
+        p_productos_nuevos: productosNuevos,
+        p_productos_quitar: productosQuitar
+      });
+
+      if (error) throw error;
+      if (!data?.ok) throw new Error("Supabase no confirmó la actualización.");
+
+      alert(
+        `✅ LISTA ACTUALIZADA CORRECTAMENTE\n\n` +
+        `Precios actualizados: ${data.precios_actualizados ?? 0}\n` +
+        `Productos creados: ${data.productos_creados ?? 0}\n` +
+        `Productos quitados: ${data.productos_quitados ?? 0}`
+      );
+
+      setConfirmacionFinalListaPrecios(false);
+      setPreConfirmacionListaPrecios(false);
+      setComparacionListaPrecios(null);
+      setDecisionAusentesListaPrecios({});
+      setVistaPreviaListaPrecios(null);
+      setArchivoListaPreciosNombre("");
+      if (inputArchivoListaPreciosRef.current) inputArchivoListaPreciosRef.current.value = "";
+    } catch (error) {
+      console.error("Error actualizando lista de precios:", error);
+      alert(`❌ NO SE ACTUALIZÓ LA LISTA\n\n${error?.message || "Error desconocido"}\n\nLa operación transaccional fue rechazada.`);
+    } finally {
+      setActualizandoListaPrecios(false);
     }
   };
 
@@ -2872,8 +2947,8 @@ useEffect(() => {
                             </div>
                           )}
 
-                          <div style={{ marginTop: "12px", padding: "11px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "9px", fontSize: "11px", color: "#991b1b", fontWeight: "800", textAlign: "center" }}>
-                            ⚠️ PRUEBA DE CONFIRMACIÓN: el botón de actualización real sigue deshabilitado. No se modificará Supabase.
+                          <div style={{ marginTop: "12px", padding: "11px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "9px", fontSize: "11px", color: "#9a3412", fontWeight: "800", textAlign: "center" }}>
+                            ⚠️ ACTUALIZACIÓN REAL: al confirmar, RutaComercio modificará esta lista en Supabase. La operación se ejecutará de forma transaccional.
                           </div>
 
                           <div style={{ marginTop: "14px", display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
@@ -2886,10 +2961,11 @@ useEffect(() => {
                             </button>
                             <button
                               type="button"
-                              disabled
-                              style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: "#e2e8f0", color: "#94a3b8", fontWeight: "900", cursor: "not-allowed" }}
+                              onClick={actualizarListaPreciosReal}
+                              disabled={actualizandoListaPrecios}
+                              style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: actualizandoListaPrecios ? "#94a3b8" : "#16a34a", color: "#fff", fontWeight: "900", cursor: actualizandoListaPrecios ? "not-allowed" : "pointer" }}
                             >
-                              💾 ACTUALIZAR LISTA AHORA — todavía deshabilitado
+                              {actualizandoListaPrecios ? "⏳ ACTUALIZANDO..." : "💾 ACTUALIZAR LISTA AHORA"}
                             </button>
                           </div>
                         </div>
