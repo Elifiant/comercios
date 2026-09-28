@@ -2785,7 +2785,17 @@ useEffect(() => {
                         </div>
                       )}
 
-                      {comparacionListaPrecios.nuevos.length > 0 && (
+                      {(comparacionListaPrecios.reactivar || []).length > 0 && (
+                      <div style={{ marginTop: "10px", padding: "10px", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: "9px", fontSize: "11px", color: "#065f46" }}>
+                        <strong>♻️ Productos que se reactivarían:</strong>
+                        {comparacionListaPrecios.reactivar.map((p, i) => (
+                          <div key={`${p.lista_producto_id}-${i}`} style={{ marginTop: "4px" }}>{p.codigo} · {p.descripcion} · ${p.precioNuevo}</div>
+                        ))}
+                        <div style={{ marginTop: "7px", fontWeight: "800" }}>🔒 En esta micro todavía no se reactiva nada en Supabase.</div>
+                      </div>
+                    )}
+
+                    {comparacionListaPrecios.nuevos.length > 0 && (
                         <div style={{ marginTop: "10px", fontSize: "10px", color: "#166534" }}>
                           <strong>🆕 Productos que no encontramos en la lista actual:</strong>
                           {comparacionListaPrecios.nuevos.slice(0, 5).map((p, i) => (
@@ -2860,6 +2870,7 @@ useEffect(() => {
                       <div style={{ padding: "12px 6px", background: "#f8fafc", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900" }}>{comparacionListaPrecios.sinCambios.length}</div><div style={{ fontSize: "10px", color: "#64748b" }}>➖ Se mantienen</div></div>
                       <div style={{ padding: "12px 6px", background: "#eff6ff", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900", color: "#1d4ed8" }}>{comparacionListaPrecios.precioCambiado.length}</div><div style={{ fontSize: "10px", color: "#1d4ed8" }}>💲 Cambiarían precio</div></div>
                       <div style={{ padding: "12px 6px", background: "#f0fdf4", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900", color: "#166534" }}>{comparacionListaPrecios.nuevos.length}</div><div style={{ fontSize: "10px", color: "#166534" }}>🆕 Se crearían</div></div>
+                      <div style={{ padding: "12px 6px", background: "#ecfdf5", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900", color: "#047857" }}>{comparacionListaPrecios.reactivar?.length || 0}</div><div style={{ fontSize: "10px", color: "#047857" }}>♻️ Se reactivarían</div></div>
                       <div style={{ padding: "12px 6px", background: "#fff7ed", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900", color: "#c2410c" }}>{comparacionListaPrecios.ausentes?.length || 0}</div><div style={{ fontSize: "10px", color: "#c2410c" }}>📤 Ya no vienen</div></div>
                     </div>
 
@@ -2945,6 +2956,10 @@ useEffect(() => {
                               <div style={{ fontSize: "20px", fontWeight: "900", color: "#166534" }}>{comparacionListaPrecios.nuevos.length}</div>
                               <div style={{ fontSize: "10px", color: "#166534" }}>🆕 Crear</div>
                             </div>
+                            <div style={{ padding: "11px 6px", background: "#ecfdf5", borderRadius: "9px" }}>
+                              <div style={{ fontSize: "20px", fontWeight: "900", color: "#047857" }}>{comparacionListaPrecios.reactivar?.length || 0}</div>
+                              <div style={{ fontSize: "10px", color: "#047857" }}>♻️ Reactivar</div>
+                            </div>
                             <div style={{ padding: "11px 6px", background: "#fff7ed", borderRadius: "9px" }}>
                               <div style={{ fontSize: "20px", fontWeight: "900", color: "#c2410c" }}>
                                 {comparacionListaPrecios.ausentes.filter(p => decisionAusentesListaPrecios[p.id] === "quitar").length}
@@ -2956,6 +2971,16 @@ useEffect(() => {
                           <div style={{ marginTop: "8px", padding: "9px", background: "#f8fafc", borderRadius: "9px", textAlign: "center", fontSize: "11px", color: "#475569" }}>
                             ✓ Ausentes que se mantendrán activos: <strong>{comparacionListaPrecios.ausentes.filter(p => decisionAusentesListaPrecios[p.id] !== "quitar").length}</strong>
                           </div>
+
+                          {(comparacionListaPrecios.reactivar || []).length > 0 && (
+                            <div style={{ marginTop: "10px", padding: "10px", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: "9px", fontSize: "11px", color: "#065f46", textAlign: "center" }}>
+                              <strong>♻️ Marcados para reactivar:</strong>
+                              {comparacionListaPrecios.reactivar.map((p, i) => (
+                                <div key={`${p.lista_producto_id}-${i}`} style={{ marginTop: "4px" }}>{p.codigo} · {p.descripcion} · ${p.precioNuevo}</div>
+                              ))}
+                              <div style={{ marginTop: "7px", fontWeight: "800" }}>Conservará el mismo producto y su historial.</div>
+                            </div>
+                          )}
 
                           {comparacionListaPrecios.ausentes.filter(p => decisionAusentesListaPrecios[p.id] === "quitar").length > 0 && (
                             <div style={{ marginTop: "10px", padding: "10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "9px", fontSize: "11px", color: "#9a3412" }}>
@@ -2983,11 +3008,10 @@ useEffect(() => {
                             </button>
                             <button
                               type="button"
-                              onClick={actualizarListaPreciosReal}
-                              disabled={actualizandoListaPrecios}
-                              style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: actualizandoListaPrecios ? "#94a3b8" : "#16a34a", color: "#fff", fontWeight: "900", cursor: actualizandoListaPrecios ? "not-allowed" : "pointer" }}
+                              disabled={true}
+                              style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: "#e2e8f0", color: "#94a3b8", fontWeight: "900", cursor: "not-allowed" }}
                             >
-                              {actualizandoListaPrecios ? "⏳ ACTUALIZANDO..." : "💾 ACTUALIZAR LISTA AHORA"}
+                              💾 ACTUALIZAR LISTA AHORA — reactivación en prueba
                             </button>
                           </div>
                         </div>
