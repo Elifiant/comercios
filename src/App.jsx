@@ -3065,68 +3065,80 @@ onChange={(e) =>
                   }}
                   style={{
                     backgroundColor: yaVisitadoHoy ? "#172033" : "#1e293b",
-                    padding: "12px 14px",
-                    borderRadius: "10px",
+                    padding: "7px 10px",
+                    borderRadius: "9px",
                     border: yaVisitadoHoy ? "1px solid #475569" : "1px solid #334155",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "space-between",
                     cursor: "pointer",
                     transition: "transform 0.1s",
                     opacity: yaVisitadoHoy ? 0.72 : 1,
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
                     {c.foto_url ? (
-                      <img src={c.foto_url} alt="Local" style={{ width: "42px", height: "42px", borderRadius: "8px", objectFit: "cover", border: "1px solid #475569" }} />
+                      <img src={c.foto_url} alt="Local" style={{ width: "36px", height: "36px", borderRadius: "7px", objectFit: "cover", border: "1px solid #475569", flexShrink: 0 }} />
                     ) : (
-                      <div style={{ width: "42px", height: "42px", borderRadius: "8px", backgroundColor: "#0b1329", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", flexShrink: 0 }}>
+                      <div style={{ width: "36px", height: "36px", borderRadius: "7px", backgroundColor: "#0b1329", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
                         🏪
                       </div>
                     )}
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: "700", fontSize: "14px", color: "#f8fafc" }}>
-                        {c.nombre || "Comercio #" + c.id}
+
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                        <div style={{ fontWeight: "800", fontSize: "14px", color: "#f8fafc", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: 1 }}>
+                          {c.nombre || "Comercio #" + c.id}
+                        </div>
+
+                        {c.distancia_actual !== null && (
+                          <div style={{ fontSize: "12px", color: yaVisitadoHoy ? "#94a3b8" : "#60a5fa", fontWeight: "900", whiteSpace: "nowrap", flexShrink: 0 }}>
+                            📍 {c.distancia_actual < 1000
+                              ? `${c.distancia_actual} m`
+                              : `${(c.distancia_actual / 1000).toFixed(1)} km`}
+                          </div>
+                        )}
                       </div>
-                      <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
-                        {c.rubro || "General"} {c.direccion ? "· " + c.direccion : ""}
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "2px", minWidth: 0 }}>
+                        <div style={{ fontSize: "11px", color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: 1 }}>
+                          📍 {c.direccion || "Sin dirección"}
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: "900",
+                            color: Number(c.deuda || 0) > 0 ? "#fca5a5" : "#93c5fd",
+                            whiteSpace: "nowrap",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {Number(c.deuda || 0) > 0
+                            ? `🔴 DEBE $${Number(c.deuda || 0).toLocaleString("es-AR")}`
+                            : "🔵 SIN DEUDA"}
+                        </div>
                       </div>
 
                       {yaVisitadoHoy && (
                         <div
                           style={{
                             display: "inline-block",
-                            marginTop: "5px",
-                            padding: "3px 7px",
+                            marginTop: "3px",
+                            padding: "2px 5px",
                             borderRadius: "999px",
                             backgroundColor: "#334155",
                             color: "#e2e8f0",
-                            fontSize: "10px",
+                            fontSize: "9px",
                             fontWeight: "900",
-                            letterSpacing: "0.3px",
+                            letterSpacing: "0.2px",
                           }}
                         >
                           ✓ {resultadoHoy}
                         </div>
                       )}
-
-                      {c.distancia_actual !== null && (
-                        <div
-                          style={{
-                            fontSize: yaVisitadoHoy ? "17px" : "24px",
-                            color: yaVisitadoHoy ? "#94a3b8" : "#60a5fa",
-                            marginTop: "6px",
-                            fontWeight: "700",
-                          }}
-                        >
-                          📍 {c.distancia_actual < 1000
-                            ? `${c.distancia_actual} m`
-                            : `${(c.distancia_actual / 1000).toFixed(1)} km`}
-                        </div>
-                      )}
                     </div>
                   </div>
-                  <span style={{ fontSize: "18px", color: "#64748b", paddingLeft: "8px" }}>›</span>
+                  <span style={{ fontSize: "17px", color: "#64748b", paddingLeft: "6px", flexShrink: 0 }}>›</span>
                 </div>
               );
 
