@@ -2830,7 +2830,7 @@ onChange={(e) =>
               background: proximoDestino ? "#172554" : "#14532d",
               border: proximoDestino ? "1px solid #2563eb" : "1px solid #22c55e",
               borderRadius: "10px",
-              padding: "8px 10px",
+              padding: "6px 8px",
               boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
             }}
           >
@@ -2842,7 +2842,7 @@ onChange={(e) =>
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: "8px",
-                    marginBottom: "5px",
+                    marginBottom: "3px",
                   }}
                 >
                   <div
@@ -2854,7 +2854,7 @@ onChange={(e) =>
                       minWidth: 0,
                     }}
                   >
-                    🧭 PRÓXIMO DESTINO · Parada {indiceProximoDestino + 1} de {rutaSugeridaHoy.length}
+                    🎯 PRÓXIMO · {indiceProximoDestino + 1}/{rutaSugeridaHoy.length}
                   </div>
                   <div style={{ fontSize: "12px", fontWeight: "900", color: "#f8fafc", flexShrink: 0 }}>
                     {distanciaProximoDestino === null
@@ -2867,7 +2867,7 @@ onChange={(e) =>
 
                 {/* En móvil, los datos del cliente ocupan todo el ancho.
                     Así los botones nunca tapan el nombre ni la dirección. */}
-                <div style={{ minWidth: 0, marginBottom: "6px" }}>
+                <div style={{ minWidth: 0, marginBottom: "4px" }}>
                   <div
                     style={{
                       display: "flex",
@@ -2947,7 +2947,7 @@ onChange={(e) =>
                     }}
                     style={{
                       minWidth: 0,
-                      padding: "7px 4px",
+                      padding: "5px 4px",
                       backgroundColor: "#334155",
                       color: "#fff",
                       border: "1px solid #64748b",
@@ -2966,7 +2966,7 @@ onChange={(e) =>
                     onClick={() => setDestinoMapa(proximoDestino)}
                     style={{
                       minWidth: 0,
-                      padding: "7px 4px",
+                      padding: "5px 4px",
                       backgroundColor: "#2563eb",
                       color: "#fff",
                       border: "1px solid #60a5fa",
@@ -2985,7 +2985,7 @@ onChange={(e) =>
                     onClick={() => setLlegueDestino(proximoDestino)}
                     style={{
                       minWidth: 0,
-                      padding: "7px 4px",
+                      padding: "5px 4px",
                       backgroundColor: "#166534",
                       color: "#fff",
                       border: "1px solid #4ade80",
