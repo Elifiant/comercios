@@ -1619,8 +1619,7 @@ useEffect(() => {
       const { data: filasActuales, error: errorLista } = await supabase
         .from("lista_productos")
         .select("id,producto_id,lista_id,codigo_lista,detalle_en_lista,precio,activo")
-        .eq("lista_id", listaPreciosSeleccionadaId)
-        .or("activo.eq.true,activo.is.null");
+        .eq("lista_id", listaPreciosSeleccionadaId);
 
       if (errorLista) throw errorLista;
 
@@ -1674,6 +1673,7 @@ useEffect(() => {
 
       const sinCambios = [];
       const precioCambiado = [];
+      const reactivar = [];
       const nuevos = [];
       const revisar = [];
       const idsEncontrados = new Set();
@@ -1715,6 +1715,11 @@ useEffect(() => {
           precioNuevo
         };
 
+        if (existente.activo === false) {
+          reactivar.push(base);
+          continue;
+        }
+
         if (Math.abs(precioAnterior - precioNuevo) < 0.000001) {
           sinCambios.push(base);
         } else {
@@ -1723,7 +1728,7 @@ useEffect(() => {
       }
 
       const ausentes = actuales
-        .filter(item => !idsEncontrados.has(item.id))
+        .filter(item => item.activo !== false && !idsEncontrados.has(item.id))
         .map(item => ({
           id: item.id,
           producto_id: item.producto_id,
@@ -1752,6 +1757,7 @@ useEffect(() => {
         diagnosticoCodigos,
         sinCambios,
         precioCambiado,
+        reactivar,
         nuevos,
         ausentes,
         revisar
@@ -2742,6 +2748,10 @@ useEffect(() => {
                           <div style={{ fontSize: "18px", fontWeight: "900", color: "#166534" }}>{comparacionListaPrecios.nuevos.length}</div>
                           <div style={{ fontSize: "9px", color: "#166534" }}>🆕 Nuevos</div>
                         </div>
+                        <div style={{ padding: "9px 4px", background: comparacionListaPrecios.reactivar?.length ? "#ecfdf5" : "#f8fafc", borderRadius: "8px" }}>
+                          <div style={{ fontSize: "18px", fontWeight: "900", color: comparacionListaPrecios.reactivar?.length ? "#047857" : "#64748b" }}>{comparacionListaPrecios.reactivar?.length || 0}</div>
+                          <div style={{ fontSize: "9px", color: comparacionListaPrecios.reactivar?.length ? "#047857" : "#64748b" }}>♻️ Reactivar</div>
+                        </div>
                         <div style={{ padding: "9px 4px", background: comparacionListaPrecios.ausentes?.length ? "#fff7ed" : "#f8fafc", borderRadius: "8px" }}>
                           <div style={{ fontSize: "18px", fontWeight: "900", color: comparacionListaPrecios.ausentes?.length ? "#c2410c" : "#64748b" }}>{comparacionListaPrecios.ausentes?.length || 0}</div>
                           <div style={{ fontSize: "9px", color: comparacionListaPrecios.ausentes?.length ? "#c2410c" : "#64748b" }}>📤 Ya no vienen</div>
@@ -2751,6 +2761,18 @@ useEffect(() => {
                           <div style={{ fontSize: "9px", color: comparacionListaPrecios.revisar.length ? "#b45309" : "#64748b" }}>⚠️ Revisar</div>
                         </div>
                       </div>
+
+                      {(comparacionListaPrecios.reactivar || []).length > 0 && (
+                        <div style={{ marginTop: "10px", padding: "10px", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: "9px", fontSize: "11px", color: "#065f46" }}>
+                          <strong>♻️ Productos detectados para reactivar:</strong>
+                          {comparacionListaPrecios.reactivar.map((p, i) => (
+                            <div key={`${p.lista_producto_id}-${i}`} style={{ marginTop: "4px" }}>
+                              {p.codigo} · {p.descripcion} · precio en archivo ${p.precioNuevo}
+                            </div>
+                          ))}
+                          <div style={{ marginTop: "7px", fontWeight: "800" }}>🔒 Micro-prueba: todavía NO se reactiva nada en Supabase.</div>
+                        </div>
+                      )}
 
                       {comparacionListaPrecios.precioCambiado.length > 0 && (
                         <div style={{ marginTop: "10px", fontSize: "10px", color: "#334155" }}>
