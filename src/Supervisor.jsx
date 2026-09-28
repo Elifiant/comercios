@@ -254,6 +254,7 @@ const reactivarComercio = async (comercio) => {
   const [comparacionListaPrecios, setComparacionListaPrecios] = useState(null);
   const [comparandoListaPrecios, setComparandoListaPrecios] = useState(false);
   const [preConfirmacionListaPrecios, setPreConfirmacionListaPrecios] = useState(false);
+  const [confirmacionFinalListaPrecios, setConfirmacionFinalListaPrecios] = useState(false);
   const [decisionAusentesListaPrecios, setDecisionAusentesListaPrecios] = useState({});
 
 
@@ -2800,9 +2801,100 @@ useEffect(() => {
                       🔒 VISTA PREVIA SOLAMENTE — todavía no se guarda nada.
                     </div>
 
-                    <div style={{ marginTop: "14px", display: "flex", justifyContent: "flex-end" }}>
-                      <button type="button" onClick={() => setPreConfirmacionListaPrecios(false)} style={{ padding: "9px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: "800", cursor: "pointer" }}>Volver</button>
+                    <div style={{ marginTop: "14px", display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPreConfirmacionListaPrecios(false)}
+                        style={{ padding: "9px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: "800", cursor: "pointer" }}
+                      >
+                        Volver
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmacionFinalListaPrecios(true)}
+                        style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: "#16a34a", color: "#fff", fontWeight: "900", cursor: "pointer" }}
+                      >
+                        CONTINUAR A CONFIRMACIÓN FINAL
+                      </button>
                     </div>
+
+                    {confirmacionFinalListaPrecios && (
+                      <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.78)", zIndex: 13100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+                        <div style={{ width: "min(720px, 96vw)", maxHeight: "88vh", overflow: "auto", background: "#fff", borderRadius: "14px", padding: "18px", boxShadow: "0 20px 55px rgba(0,0,0,.3)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start" }}>
+                            <div>
+                              <h3 style={{ margin: 0, fontSize: "18px" }}>💾 Confirmación final de actualización</h3>
+                              <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Última revisión antes de habilitar el guardado real.</div>
+                            </div>
+                            <button type="button" onClick={() => setConfirmacionFinalListaPrecios(false)} style={{ border: "none", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}>✕</button>
+                          </div>
+
+                          <div style={{ marginTop: "14px", padding: "11px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "9px", fontSize: "11px", lineHeight: 1.8 }}>
+                            📋 Lista: <strong>{comparacionListaPrecios.nombreLista}</strong><br/>
+                            📄 Archivo: <strong>{archivoListaPreciosNombre || "Archivo seleccionado"}</strong><br/>
+                            🗓️ Vigente desde: <strong>{vigenciaListaPrecios || "Sin fecha indicada"}</strong>
+                          </div>
+
+                          <div style={{ marginTop: "12px", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px", textAlign: "center" }}>
+                            <div style={{ padding: "11px 6px", background: "#f8fafc", borderRadius: "9px" }}>
+                              <div style={{ fontSize: "20px", fontWeight: "900" }}>{comparacionListaPrecios.sinCambios.length}</div>
+                              <div style={{ fontSize: "10px", color: "#64748b" }}>➖ Sin cambios</div>
+                            </div>
+                            <div style={{ padding: "11px 6px", background: "#eff6ff", borderRadius: "9px" }}>
+                              <div style={{ fontSize: "20px", fontWeight: "900", color: "#1d4ed8" }}>{comparacionListaPrecios.precioCambiado.length}</div>
+                              <div style={{ fontSize: "10px", color: "#1d4ed8" }}>💲 Actualizar precio</div>
+                            </div>
+                            <div style={{ padding: "11px 6px", background: "#f0fdf4", borderRadius: "9px" }}>
+                              <div style={{ fontSize: "20px", fontWeight: "900", color: "#166534" }}>{comparacionListaPrecios.nuevos.length}</div>
+                              <div style={{ fontSize: "10px", color: "#166534" }}>🆕 Crear</div>
+                            </div>
+                            <div style={{ padding: "11px 6px", background: "#fff7ed", borderRadius: "9px" }}>
+                              <div style={{ fontSize: "20px", fontWeight: "900", color: "#c2410c" }}>
+                                {comparacionListaPrecios.ausentes.filter(p => decisionAusentesListaPrecios[p.id] === "quitar").length}
+                              </div>
+                              <div style={{ fontSize: "10px", color: "#c2410c" }}>🚫 Quitar de la lista</div>
+                            </div>
+                          </div>
+
+                          <div style={{ marginTop: "8px", padding: "9px", background: "#f8fafc", borderRadius: "9px", textAlign: "center", fontSize: "11px", color: "#475569" }}>
+                            ✓ Ausentes que se mantendrán activos: <strong>{comparacionListaPrecios.ausentes.filter(p => decisionAusentesListaPrecios[p.id] !== "quitar").length}</strong>
+                          </div>
+
+                          {comparacionListaPrecios.ausentes.filter(p => decisionAusentesListaPrecios[p.id] === "quitar").length > 0 && (
+                            <div style={{ marginTop: "10px", padding: "10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "9px", fontSize: "11px", color: "#9a3412" }}>
+                              <strong>🚫 Marcados para quitar de esta lista:</strong>
+                              {comparacionListaPrecios.ausentes.filter(p => decisionAusentesListaPrecios[p.id] === "quitar").map((p, i) => (
+                                <div key={`${p.id || p.codigo_lista}-${i}`} style={{ marginTop: "4px" }}>
+                                  {p.codigo || "Sin código"} · {p.descripcion || "Producto"}
+                                </div>
+                              ))}
+                              <div style={{ marginTop: "7px", fontWeight: "800" }}>Su producto e historial se conservarán.</div>
+                            </div>
+                          )}
+
+                          <div style={{ marginTop: "12px", padding: "11px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "9px", fontSize: "11px", color: "#991b1b", fontWeight: "800", textAlign: "center" }}>
+                            ⚠️ PRUEBA DE CONFIRMACIÓN: el botón de actualización real sigue deshabilitado. No se modificará Supabase.
+                          </div>
+
+                          <div style={{ marginTop: "14px", display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmacionFinalListaPrecios(false)}
+                              style={{ padding: "9px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: "800", cursor: "pointer" }}
+                            >
+                              Volver y corregir
+                            </button>
+                            <button
+                              type="button"
+                              disabled
+                              style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: "#e2e8f0", color: "#94a3b8", fontWeight: "900", cursor: "not-allowed" }}
+                            >
+                              💾 ACTUALIZAR LISTA AHORA — todavía deshabilitado
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
