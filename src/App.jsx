@@ -2747,23 +2747,23 @@ onChange={(e) =>
 </button>
         {/* FRANJA DE MÉTRICAS DIARIAS DEL PREVENTISTA */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px", marginTop: "7px" }}>
-          <div style={{ backgroundColor: "#1e293b", padding: "4px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Visitas</div>
-            <div style={{ fontSize: "14px", fontWeight: "800", color: "#38bdf8", marginTop: "2px" }}>
+          <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Visitas</div>
+            <div style={{ fontSize: "19px", lineHeight: 1.05, fontWeight: "900", color: "#38bdf8", marginTop: "1px" }}>
               {`${visitasRealizadasHoy} de ${visitasProgramadasHoy}`}
             </div>
           </div>
 
-          <div style={{ backgroundColor: "#1e293b", padding: "4px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Venta Hoy</div>
-            <div style={{ fontSize: "14px", fontWeight: "800", color: "#4ade80", marginTop: "2px" }}>
+          <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Venta Hoy</div>
+            <div style={{ fontSize: "19px", lineHeight: 1.05, fontWeight: "900", color: "#4ade80", marginTop: "1px" }}>
               {jornadaActiva ? "$ 148.5K" : "$ 0"}
             </div>
           </div>
 
-          <div style={{ backgroundColor: "#1e293b", padding: "4px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
-            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700" }}>Efectividad</div>
-            <div style={{ fontSize: "15px", fontWeight: "800", color: "#facc15", marginTop: "2px" }}>
+          <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Efectividad</div>
+            <div style={{ fontSize: "20px", lineHeight: 1.05, fontWeight: "900", color: "#facc15", marginTop: "1px" }}>
               {jornadaActiva ? "44%" : "0%"}
             </div>
           </div>
