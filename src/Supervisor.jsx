@@ -253,6 +253,8 @@ const reactivarComercio = async (comercio) => {
   const [cargandoListasPrecios, setCargandoListasPrecios] = useState(false);
   const [comparacionListaPrecios, setComparacionListaPrecios] = useState(null);
   const [comparandoListaPrecios, setComparandoListaPrecios] = useState(false);
+  const [preConfirmacionListaPrecios, setPreConfirmacionListaPrecios] = useState(false);
+  const [decisionAusentesListaPrecios, setDecisionAusentesListaPrecios] = useState({});
 
 
 
@@ -1672,6 +1674,7 @@ useEffect(() => {
       const precioCambiado = [];
       const nuevos = [];
       const revisar = [];
+      const idsEncontrados = new Set();
 
       for (const nuevo of vistaPreviaListaPrecios.validos) {
         const codigo = normal(nuevo.codigo);
@@ -1690,6 +1693,8 @@ useEffect(() => {
         }
 
         const existente = porCod || porBarra;
+
+        if (existente) idsEncontrados.add(existente.id);
 
         if (!existente) {
           nuevos.push(nuevo);
@@ -1714,6 +1719,21 @@ useEffect(() => {
         }
       }
 
+      const ausentes = actuales
+        .filter(item => !idsEncontrados.has(item.id))
+        .map(item => ({
+          id: item.id,
+          producto_id: item.producto_id,
+          codigo: item.codigo_lista || item.producto?.codigo_cge || "",
+          descripcion: item.detalle_en_lista || item.producto?.nombre || item.producto?.descripcion || "Producto sin descripción",
+          precioAnterior: precioNum(item.precio),
+          gtin: item.producto?.gtin || ""
+        }));
+
+      setDecisionAusentesListaPrecios(
+        Object.fromEntries(ausentes.map(item => [item.id, "mantener"]))
+      );
+
       const listaSeleccionada = listasPreciosEmpresa.find(
         l => l.id === listaPreciosSeleccionadaId
       );
@@ -1730,6 +1750,7 @@ useEffect(() => {
         sinCambios,
         precioCambiado,
         nuevos,
+        ausentes,
         revisar
       });
     } catch (error) {
@@ -2080,7 +2101,7 @@ useEffect(() => {
                 ];
                 return (
                   <div style={{ margin: "12px 0 14px" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
                       {pasos.map((p) => {
                         const activo = p.n === pasoActual;
                         const completado = p.n < pasoActual;
@@ -2230,7 +2251,7 @@ useEffect(() => {
 
                   {resultadoGeo?.multiple && (
                     <div style={{ marginTop: "12px" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginBottom: "10px" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px", marginBottom: "10px" }}>
                         <div style={{ background: "#f8fafc", borderRadius: "8px", padding: "9px", textAlign: "center" }}>
                           <div style={{ fontSize: "11px", color: "#64748b" }}>Procesados</div>
                           <div style={{ fontSize: "20px", fontWeight: "900" }}>{resultadoGeo.total}</div>
@@ -2645,6 +2666,10 @@ useEffect(() => {
                           <div style={{ fontSize: "18px", fontWeight: "900", color: "#166534" }}>{comparacionListaPrecios.nuevos.length}</div>
                           <div style={{ fontSize: "9px", color: "#166534" }}>🆕 Nuevos</div>
                         </div>
+                        <div style={{ padding: "9px 4px", background: comparacionListaPrecios.ausentes?.length ? "#fff7ed" : "#f8fafc", borderRadius: "8px" }}>
+                          <div style={{ fontSize: "18px", fontWeight: "900", color: comparacionListaPrecios.ausentes?.length ? "#c2410c" : "#64748b" }}>{comparacionListaPrecios.ausentes?.length || 0}</div>
+                          <div style={{ fontSize: "9px", color: comparacionListaPrecios.ausentes?.length ? "#c2410c" : "#64748b" }}>📤 Ya no vienen</div>
+                        </div>
                         <div style={{ padding: "9px 4px", background: comparacionListaPrecios.revisar.length ? "#fffbeb" : "#f8fafc", borderRadius: "8px" }}>
                           <div style={{ fontSize: "18px", fontWeight: "900", color: comparacionListaPrecios.revisar.length ? "#b45309" : "#64748b" }}>{comparacionListaPrecios.revisar.length}</div>
                           <div style={{ fontSize: "9px", color: comparacionListaPrecios.revisar.length ? "#b45309" : "#64748b" }}>⚠️ Revisar</div>
@@ -2692,13 +2717,95 @@ useEffect(() => {
                 </div>
               )}
 
-              <div style={{ marginTop: "14px", padding: "10px", borderRadius: "8px", background: "#f8fafc", color: "#94a3b8", fontSize: "11px", fontWeight: "800", textAlign: "center" }}>
-                3️⃣ CARGAR LISTA — todavía deshabilitado
-              </div>
+              <button
+                type="button"
+                disabled={!comparacionListaPrecios || comparacionListaPrecios.revisar.length > 0}
+                onClick={() => setPreConfirmacionListaPrecios(true)}
+                style={{
+                  width: "100%",
+                  marginTop: "14px",
+                  padding: "11px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: comparacionListaPrecios && comparacionListaPrecios.revisar.length === 0 ? "#16a34a" : "#f1f5f9",
+                  color: comparacionListaPrecios && comparacionListaPrecios.revisar.length === 0 ? "#fff" : "#94a3b8",
+                  fontSize: "11px",
+                  fontWeight: "900",
+                  cursor: comparacionListaPrecios && comparacionListaPrecios.revisar.length === 0 ? "pointer" : "not-allowed"
+                }}
+              >
+                3️⃣ PREPARAR CARGA DE LISTA
+              </button>
 
               <div style={{ marginTop: "10px", fontSize: "11px", color: "#64748b" }}>
-                🔒 Esta etapa solamente lee y revisa el archivo. No modifica productos ni precios.
+                🔒 Este paso abre una confirmación previa. Todavía no modifica productos ni precios.
               </div>
+
+              {preConfirmacionListaPrecios && comparacionListaPrecios && (
+                <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.72)", zIndex: 13000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+                  <div style={{ width: "min(760px, 96vw)", maxHeight: "88vh", overflow: "auto", background: "#fff", borderRadius: "14px", padding: "18px", boxShadow: "0 20px 50px rgba(0,0,0,.25)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start" }}>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: "18px" }}>💾 Confirmación previa de lista de precios</h3>
+                        <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Revisá qué haría RutaComercio antes de habilitar el guardado real.</div>
+                      </div>
+                      <button type="button" onClick={() => setPreConfirmacionListaPrecios(false)} style={{ border: "none", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}>✕</button>
+                    </div>
+
+                    <div style={{ marginTop: "14px", padding: "11px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "9px", fontSize: "11px", lineHeight: 1.8 }}>
+                      📋 Lista actual: <strong>{comparacionListaPrecios.nombreLista}</strong><br/>
+                      📄 Archivo: <strong>{archivoListaPreciosNombre || "Archivo seleccionado"}</strong><br/>
+                      🗓️ Vigente desde: <strong>{vigenciaListaPrecios || "Sin fecha indicada"}</strong>
+                    </div>
+
+                    <div style={{ marginTop: "12px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", textAlign: "center" }}>
+                      <div style={{ padding: "12px 6px", background: "#f8fafc", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900" }}>{comparacionListaPrecios.sinCambios.length}</div><div style={{ fontSize: "10px", color: "#64748b" }}>➖ Se mantienen</div></div>
+                      <div style={{ padding: "12px 6px", background: "#eff6ff", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900", color: "#1d4ed8" }}>{comparacionListaPrecios.precioCambiado.length}</div><div style={{ fontSize: "10px", color: "#1d4ed8" }}>💲 Cambiarían precio</div></div>
+                      <div style={{ padding: "12px 6px", background: "#f0fdf4", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900", color: "#166534" }}>{comparacionListaPrecios.nuevos.length}</div><div style={{ fontSize: "10px", color: "#166534" }}>🆕 Se crearían</div></div>
+                      <div style={{ padding: "12px 6px", background: "#fff7ed", borderRadius: "9px" }}><div style={{ fontSize: "20px", fontWeight: "900", color: "#c2410c" }}>{comparacionListaPrecios.ausentes?.length || 0}</div><div style={{ fontSize: "10px", color: "#c2410c" }}>📤 Ya no vienen</div></div>
+                    </div>
+
+                    {comparacionListaPrecios.precioCambiado.length > 0 && (
+                      <div style={{ marginTop: "12px", padding: "10px", background: "#eff6ff", borderRadius: "9px", fontSize: "11px" }}>
+                        <strong>💲 Precios que cambiarían:</strong>
+                        {comparacionListaPrecios.precioCambiado.map((p, i) => <div key={`${p.codigo}-${i}`} style={{ marginTop: "4px" }}>{p.codigo} · {p.descripcion}: ${p.precioAnterior} → ${p.precioNuevo}</div>)}
+                      </div>
+                    )}
+
+                    {comparacionListaPrecios.nuevos.length > 0 && (
+                      <div style={{ marginTop: "10px", padding: "10px", background: "#f0fdf4", borderRadius: "9px", fontSize: "11px" }}>
+                        <strong>🆕 Productos que se crearían:</strong>
+                        {comparacionListaPrecios.nuevos.map((p, i) => <div key={`${p.codigo}-${i}`} style={{ marginTop: "4px" }}>{p.codigo} · {p.descripcion} · ${p.precio}</div>)}
+                      </div>
+                    )}
+
+                    {(comparacionListaPrecios.ausentes || []).length > 0 && (
+                      <div style={{ marginTop: "12px", padding: "10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "9px", fontSize: "11px", color: "#9a3412" }}>
+                        <strong>📤 Productos que estaban en la lista actual y ya no vienen en el archivo nuevo:</strong>
+                        <div style={{ marginTop: "6px", color: "#7c2d12" }}>Elegí qué hacer con cada uno. Por seguridad, RutaComercio los mantiene activos salvo que el supervisor indique lo contrario.</div>
+                        {comparacionListaPrecios.ausentes.map((p) => (
+                          <div key={p.id} style={{ marginTop: "8px", padding: "8px", background: "#fff", borderRadius: "8px", display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                            <div><strong>{p.codigo}</strong> · {p.descripcion} · ${p.precioAnterior}</div>
+                            <div style={{ display: "flex", gap: "6px" }}>
+                              <button type="button" onClick={() => setDecisionAusentesListaPrecios(prev => ({ ...prev, [p.id]: "mantener" }))} style={{ padding: "6px 9px", borderRadius: "7px", border: decisionAusentesListaPrecios[p.id] === "mantener" ? "2px solid #16a34a" : "1px solid #cbd5e1", background: decisionAusentesListaPrecios[p.id] === "mantener" ? "#f0fdf4" : "#fff", fontWeight: "800", cursor: "pointer" }}>✓ Mantener</button>
+                              <button type="button" onClick={() => setDecisionAusentesListaPrecios(prev => ({ ...prev, [p.id]: "quitar" }))} style={{ padding: "6px 9px", borderRadius: "7px", border: decisionAusentesListaPrecios[p.id] === "quitar" ? "2px solid #dc2626" : "1px solid #cbd5e1", background: decisionAusentesListaPrecios[p.id] === "quitar" ? "#fef2f2" : "#fff", fontWeight: "800", cursor: "pointer" }}>🚫 Quitar de la lista</button>
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ marginTop: "8px", fontWeight: "800" }}>🔒 Quitar de la lista será una baja lógica: el producto y su historial se conservarán. En esta versión de prueba todavía no se guarda ningún cambio.</div>
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: "12px", padding: "10px", background: "#f8fafc", borderRadius: "9px", textAlign: "center", fontSize: "11px", fontWeight: "800", color: "#64748b" }}>
+                      🔒 VISTA PREVIA SOLAMENTE — todavía no se guarda nada.
+                    </div>
+
+                    <div style={{ marginTop: "14px", display: "flex", justifyContent: "flex-end" }}>
+                      <button type="button" onClick={() => setPreConfirmacionListaPrecios(false)} style={{ padding: "9px 14px", borderRadius: "8px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: "800", cursor: "pointer" }}>Volver</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : seccionActiva === "estadoCuenta" ? (
