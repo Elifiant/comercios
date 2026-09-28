@@ -2976,7 +2976,10 @@ useEffect(() => {
                             <div style={{ marginTop: "10px", padding: "10px", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: "9px", fontSize: "11px", color: "#065f46", textAlign: "center" }}>
                               <strong>♻️ Marcados para reactivar:</strong>
                               {comparacionListaPrecios.reactivar.map((p, i) => (
-                                <div key={`${p.lista_producto_id}-${i}`} style={{ marginTop: "4px" }}>{p.codigo} · {p.descripcion} · ${p.precioNuevo}</div>
+                                <div key={`${p.lista_producto_id}-${i}`} style={{ marginTop: "4px" }}>{p.codigo} · {p.descripcion} · ${p.precioNuevo}
+                                  <div style={{ marginTop: "3px", fontWeight: "800" }}>Inactivo → Activo</div>
+                                  <div style={{ marginTop: "2px", fontSize: "10px" }}>Mismo producto · mismo CGE · historial conservado</div>
+                                </div>
                               ))}
                               <div style={{ marginTop: "7px", fontWeight: "800" }}>Conservará el mismo producto y su historial.</div>
                             </div>
