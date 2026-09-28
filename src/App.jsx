@@ -2912,18 +2912,6 @@ onChange={(e) =>
                     </span>
                   </div>
 
-                  <div
-                    style={{
-                      fontSize: "10px",
-                      color: "#cbd5e1",
-                      marginTop: "2px",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    📍 {proximoDestino.direccion || "Sin dirección cargada"}
-                  </div>
                 </div>
 
                 {/* Acciones compactas: tres columnas iguales para iPhone chico */}
