@@ -191,6 +191,39 @@ const reactivarComercio = async (comercio) => {
     alert("❌ No se pudo reactivar el comercio.");
   }
 };
+  const validarClienteNuevo = async (comercio) => {
+    if (!comercio || !perfilSupervisor?.empresa_id) return;
+
+    const confirmar = window.confirm(
+      `✅ ¿Validar como cliente a "${comercio.nombre || "este comercio"}"?`
+    );
+    if (!confirmar) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("comercios")
+        .update({ estado_alta: "validado" })
+        .eq("id", comercio.id)
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .select("id, estado_alta")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) throw new Error("El cliente no fue actualizado en Supabase.");
+
+      setComercios((prev) =>
+        (prev || []).map((c) =>
+          c.id === comercio.id ? { ...c, estado_alta: "validado" } : c
+        )
+      );
+
+      alert("✅ Cliente validado correctamente.");
+    } catch (error) {
+      console.error("Error validando cliente:", error);
+      alert("❌ No se pudo validar el cliente: " + (error.message || "Verifique conexión"));
+    }
+  };
+
   const [comercios, setComercios] = useState([]);
   const [pedidosReal, setPedidosReal] = useState([]);
   const [cargandoPedidosReal, setCargandoPedidosReal] = useState(false);
@@ -1228,6 +1261,9 @@ useEffect(() => {
 
   const clientesConSaldo = (comercios || []).filter(c => Number(c.deuda || 0) > 0).length;
   const saldoTotalPendiente = (comercios || []).reduce((acc, c) => acc + Math.max(0, Number(c.deuda || 0)), 0);
+  const clientesPendientesValidacion = (comercios || []).filter(c =>
+    c.creado_por_preventista === true && String(c.estado_alta || "").toLowerCase() === "provisorio"
+  );
   const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
   const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
 
@@ -2493,6 +2529,22 @@ useEffect(() => {
               >
                 📥 IMPORTAR CLIENTES
               </button>
+            </div>
+
+            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "10px", padding: "14px", marginBottom: "14px" }}>
+              <div style={{ fontSize: "14px", fontWeight: "900", color: "#92400e", marginBottom: "8px" }}>🟡 Clientes nuevos pendientes de validación ({clientesPendientesValidacion.length})</div>
+              {clientesPendientesValidacion.length === 0 ? (
+                <div style={{ color: "#64748b", fontSize: "12px" }}>No hay clientes nuevos pendientes.</div>
+              ) : clientesPendientesValidacion.map((c) => (
+                <div key={c.id} style={{ background: "#fff", border: "1px solid #fde68a", borderRadius: "9px", padding: "11px", marginTop: "8px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "900", color: "#0f172a" }}>🏪 {c.nombre || "Comercio sin nombre"}</div>
+                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px" }}>👤 Preventista: <strong>{c.preventista || "Sin informar"}</strong></div>
+                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>📍 {c.direccion || "Sin dirección cargada"}</div>
+                  <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>📞 {c.telefono || c.whatsapp || "Sin teléfono cargado"}</div>
+                  <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "3px" }}>{c.created_at ? new Date(c.created_at).toLocaleString("es-AR") : ""}</div>
+                  <button type="button" onClick={() => validarClienteNuevo(c)} style={{ marginTop: "9px", padding: "8px 13px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "7px", fontSize: "12px", fontWeight: "900", cursor: "pointer" }}>✅ VALIDAR CLIENTE</button>
+                </div>
+              ))}
             </div>
 
             <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px" }}>
