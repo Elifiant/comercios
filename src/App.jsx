@@ -944,6 +944,16 @@ const solicitarNoVisitar = async (comercio) => {
     
     const guardarConCoords = async (lat, lng) => {
       try {
+        await supabase
+  .from("perfiles")
+  .update({
+    latitud: lat,
+    longitud: lng,
+    ultima_posicion_at: new Date().toISOString(),
+    ultima_conexion: new Date().toISOString(),
+    activo_hoy: true
+  })
+  .eq("id", sesion?.user?.id);
         const idTemp = Date.now();
 
         let ultimaZona = { localidad: "", partido: "", provincia: "", pais: "Argentina" };
