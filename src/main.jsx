@@ -128,6 +128,24 @@ function EnrutadorSeguro() {
   // Con sesión activa: derivamos según rol y ruta
 const rol = (perfil?.rol || "").toLowerCase();
 
+// Esperar a que Supabase termine de cargar el perfil antes de decidir qué panel mostrar.
+// Evita que un Supervisor o SuperAdmin vea por un instante la pantalla de Preventista.
+if (!perfil) {
+  return (
+    <div style={{
+      minHeight: "100vh",
+      backgroundColor: "#0f172a",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: "#94a3b8",
+      fontFamily: "sans-serif"
+    }}>
+      Iniciando RutaComercio...
+    </div>
+  );
+}
+
 // El panel Admin solo puede abrirlo el SuperAdmin
 if (ruta.startsWith("/admin")) {
   if (rol === "superadmin") return <AdminClientes />;
