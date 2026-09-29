@@ -1,1 +1,1103 @@
-import React, { useState } from "react"; export default function WebComercial() { const [faqAbierta, setFaqAbierta] = useState(null); const toggleFaq = (idx) => setFaqAbierta(faqAbierta === idx ? null : idx); return ( <div style={{ minHeight: "100vh", width: "100%", maxWidth: "100vw", overflowX: "hidden", backgroundColor: "#ffffff", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif", boxSizing: "border-box" }}> {/* NAVBAR */} <header style={{ width: "100%", padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", backgroundColor: "#ffffff", position: "sticky", top: 0, zIndex: 50, boxSizing: "border-box" }}> <div style={{ display: "flex", alignItems: "center", gap: "8px" }}> <img src="/logo.svg" alt="RutaComercio" style={{ height: "30px", width: "auto" }} onError={(e) => { e.target.style.display = "none"; }} /> <span style={{ fontWeight: "800", fontSize: "18px", letterSpacing: "-0.5px", color: "#0f172a" }}>RutaComercio</span> </div> <div style={{ display: "flex", gap: "8px", alignItems: "center" }}> <a href="/login" style={{ fontSize: "12px", color: "#475569", textDecoration: "none", fontWeight: "600", padding: "6px 10px" }}>Acceso</a> <a href="#contacto" style={{ backgroundColor: "#2563eb", color: "#ffffff", padding: "8px 14px", borderRadius: "8px", textDecoration: "none", fontSize: "12px", fontWeight: "700" }}>Probar 15 Días</a> </div> </header> {/* HERO SECTION */} <section style={{ width: "100%", padding: "36px 16px 28px", textAlign: "center", backgroundColor: "#f8fafc", boxSizing: "border-box" }}> <div style={{ display: "inline-block", backgroundColor: "#dbeafe", color: "#1d4ed8", padding: "4px 12px", borderRadius: "20px", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "14px" }}> ⚡ Plataforma B2B para Distribuidoras y Mayoristas </div> <h1 style={{ fontSize: "28px", lineHeight: "1.25", fontWeight: "900", color: "#0f172a", margin: "0 auto 16px", maxWidth: "480px" }}> Multiplicá las ventas en la calle y <span style={{ color: "#2563eb" }}>controlá tus preventistas</span> en tiempo real </h1> <p style={{ fontSize: "15px", lineHeight: "1.5", color: "#475569", margin: "0 auto 24px", maxWidth: "460px" }}> Toma de pedidos ágil sin conexión, hojas de ruta optimizadas con GPS, catálogos interactivos en WhatsApp y auditoría 360° para supervisores y dueños. </p> {/* BOTONES CTA APILADOS */} <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "340px", margin: "0 auto 28px" }}> <a href="#contacto" style={{ width: "100%", padding: "14px 20px", backgroundColor: "#2563eb", color: "#ffffff", borderRadius: "10px", textDecoration: "none", fontWeight: "800", fontSize: "15px", boxShadow: "0 4px 14px rgba(37,99,235,0.35)", boxSizing: "border-box" }}> 🚀 Solicitar Demo 15 Días Gratis </a> <a href="#tarifas" style={{ width: "100%", padding: "12px 20px", backgroundColor: "#ffffff", color: "#334155", border: "1px solid #cbd5e1", borderRadius: "10px", textDecoration: "none", fontWeight: "700", fontSize: "14px", boxSizing: "border-box" }}> 📋 Ver Planes & Tarifas 2026 </a> </div> {/* MÉTRICAS CLAVE */} <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", maxWidth: "420px", margin: "0 auto 28px" }}> <div style={{ backgroundColor: "#ffffff", padding: "12px 6px", borderRadius: "10px", border: "1px solid #e2e8f0" }}> <div style={{ fontSize: "18px", fontWeight: "900", color: "#2563eb" }}>+38%</div> <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>Efectividad</div> </div> <div style={{ backgroundColor: "#ffffff", padding: "12px 6px", borderRadius: "10px", border: "1px solid #e2e8f0" }}> <div style={{ fontSize: "18px", fontWeight: "900", color: "#16a34a" }}>0%</div> <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>Caída Offline</div> </div> <div style={{ backgroundColor: "#ffffff", padding: "12px 6px", borderRadius: "10px", border: "1px solid #e2e8f0" }}> <div style={{ fontSize: "18px", fontWeight: "900", color: "#0f172a" }}>15 Días</div> <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>Prueba Total</div> </div> </div> {/* MOCKUP CONSOLA Y MAPA FLUIDO */} <div style={{ width: "100%", maxWidth: "460px", margin: "0 auto", borderRadius: "14px", overflow: "hidden", border: "1px solid #cbd5e1", boxShadow: "0 10px 25px rgba(0,0,0,0.08)", backgroundColor: "#0f172a", boxSizing: "border-box" }}> <div style={{ padding: "8px 12px", backgroundColor: "#1e293b", display: "flex", justifyContent: "space-between", alignItems: "center" }}> <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "700" }}>● CONSOLA EN VIVO</span> <span style={{ fontSize: "11px", color: "#4ade80", fontWeight: "800" }}>GPS 4G ACTIVO</span> </div> <div style={{ padding: "16px", textAlign: "left", color: "#ffffff" }}> <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800", marginBottom: "4px" }}>Ruta Norte • Walter M.</div> <div style={{ fontSize: "18px", fontWeight: "900" }}>34 / 42 Visitas completadas</div> <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "6px" }}>Recaudación en ruta: $ 1.840.200 ARS</div> </div> </div> </section> {/* 4 PILARES */} <section style={{ width: "100%", padding: "36px 16px", boxSizing: "border-box" }}> <h2 style={{ fontSize: "22px", fontWeight: "900", textAlign: "center", margin: "0 0 24px", color: "#0f172a" }}> La tecnología que tu equipo de calle realmente va a usar </h2> <div style={{ display: "flex", flexDirection: "column", gap: "14px", maxWidth: "460px", margin: "0 auto" }}> <div style={{ padding: "18px", borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#ffffff" }}> <div style={{ fontSize: "24px", marginBottom: "8px" }}>⚡</div> <h3 style={{ fontSize: "16px", fontWeight: "800", margin: "0 0 6px" }}>Toma de pedidos en segundos</h3> <p style={{ fontSize: "13px", color: "#64748b", margin: 0, lineHeight: "1.45" }}>Con listas de precios diferenciadas, bonificaciones por escala, notas y envío automático por WhatsApp.</p> </div> <div style={{ padding: "18px", borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#ffffff" }}> <div style={{ fontSize: "24px", marginBottom: "8px" }}>📍</div> <h3 style={{ fontSize: "16px", fontWeight: "800", margin: "0 0 6px" }}>Monitoreo GPS & Telemetría</h3> <p style={{ fontSize: "13px", color: "#64748b", margin: 0, lineHeight: "1.45" }}>Sabé exactamente dónde está cada preventista, paradas del día y tiempos en cada comercio sin gastar batería.</p> </div> <div style={{ padding: "18px", borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#ffffff" }}> <div style={{ fontSize: "24px", marginBottom: "8px" }}>🗺️</div> <h3 style={{ fontSize: "16px", fontWeight: "800", margin: "0 0 6px" }}>Secuenciador visual de rutas</h3> <p style={{ fontSize: "13px", color: "#64748b", margin: 0, lineHeight: "1.45" }}>Planificación de lunes a sábado de menor a mayor distancia para optimizar tiempos y combustible.</p> </div> <div style={{ padding: "18px", borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#ffffff" }}> <div style={{ fontSize: "24px", marginBottom: "8px" }}>📋</div> <h3 style={{ fontSize: "16px", fontWeight: "800", margin: "0 0 6px" }}>Ficha 360° con CUIT y Facturación</h3> <p style={{ fontSize: "13px", color: "#64748b", margin: 0, lineHeight: "1.45" }}>Control fiscal directo, saldo deudor por comercio y geolocalización precisa de la persiana del local.</p> </div> </div> </section> {/* PLANES & TARIFAS 2026 */} <section id="tarifas" style={{ width: "100%", padding: "36px 16px", backgroundColor: "#f8fafc", boxSizing: "border-box" }}> <h2 style={{ fontSize: "22px", fontWeight: "900", textAlign: "center", margin: "0 0 8px", color: "#0f172a" }}> Tarifas Transparentes en Pesos Argentinos </h2> <p style={{ fontSize: "13px", color: "#64748b", textAlign: "center", margin: "0 0 24px" }}> Sin costos ocultos de instalación. Configuración remota incluida y soporte dedicado en español. </p> <div style={{ display: "flex", flexDirection: "column", gap: "18px", maxWidth: "420px", margin: "0 auto" }}> {/* PLAN INICIAL */} <div style={{ backgroundColor: "#ffffff", padding: "24px 20px", borderRadius: "14px", border: "2px solid #2563eb", position: "relative", boxSizing: "border-box" }}> <div style={{ backgroundColor: "#2563eb", color: "#ffffff", padding: "4px 10px", borderRadius: "12px", fontSize: "10px", fontWeight: "800", display: "inline-block", marginBottom: "10px" }}> MÁS ELEGIDO • 1 A 3 PREVENTISTAS </div> <h3 style={{ fontSize: "18px", fontWeight: "900", margin: "0 0 4px" }}>Plan Inicial</h3> <div style={{ fontSize: "26px", fontWeight: "900", color: "#0f172a", margin: "8px 0" }}> $ 50.000.- <span style={{ fontSize: "13px", fontWeight: "600", color: "#64748b" }}>ARS / mes</span> </div> <ul style={{ paddingLeft: "18px", fontSize: "13px", color: "#475569", lineHeight: "1.8", margin: "14px 0 20px" }}> <li>App móvil para hasta <b>3 preventistas</b></li> <li>Panel web Supervisor en tiempo real</li> <li>Catálogo digital hasta <b>2.000 artículos</b></li> <li>Sincronización offline y toma ágil</li> <li>Soporte directo prioritario por WhatsApp</li> </ul> <a href="#contacto" style={{ display: "block", textAlign: "center", width: "100%", padding: "12px", backgroundColor: "#2563eb", color: "#ffffff", borderRadius: "8px", textDecoration: "none", fontWeight: "800", fontSize: "14px", boxSizing: "border-box" }}> Comenzar Prueba Gratis (15 Días) </a> </div> {/* PLAN PYME */} <div style={{ backgroundColor: "#ffffff", padding: "24px 20px", borderRadius: "14px", border: "1px solid #e2e8f0", boxSizing: "border-box" }}> <div style={{ color: "#64748b", fontSize: "11px", fontWeight: "700", marginBottom: "6px" }}>4 A 8 PREVENTISTAS</div> <h3 style={{ fontSize: "18px", fontWeight: "900", margin: "0 0 4px" }}>Plan Pyme</h3> <div style={{ fontSize: "26px", fontWeight: "900", color: "#0f172a", margin: "8px 0" }}> $ 95.000.- <span style={{ fontSize: "13px", fontWeight: "600", color: "#64748b" }}>ARS / mes</span> </div> <ul style={{ paddingLeft: "18px", fontSize: "13px", color: "#475569", lineHeight: "1.8", margin: "14px 0 20px" }}> <li>Hasta <b>8 preventistas activos</b></li> <li>Hasta <b>2 supervisores simultáneos</b></li> <li>Catálogo hasta <b>5.000 artículos</b></li> <li>Secuenciador semanal de rutas con IA</li> <li>Exportación a Excel y CUIT AFIP</li> </ul> <a href="#contacto" style={{ display: "block", textAlign: "center", width: "100%", padding: "12px", backgroundColor: "#f1f5f9", color: "#1e293b", borderRadius: "8px", textDecoration: "none", fontWeight: "800", fontSize: "14px", boxSizing: "border-box" }}> Elegir Plan Pyme </a> </div> {/* PLAN CORPORATIVO */} <div style={{ backgroundColor: "#ffffff", padding: "24px 20px", borderRadius: "14px", border: "1px solid #e2e8f0", boxSizing: "border-box" }}> <div style={{ color: "#64748b", fontSize: "11px", fontWeight: "700", marginBottom: "6px" }}>9 A 15 PREVENTISTAS</div> <h3 style={{ fontSize: "18px", fontWeight: "900", margin: "0 0 4px" }}>Plan Corporativo</h3> <div style={{ fontSize: "26px", fontWeight: "900", color: "#0f172a", margin: "8px 0" }}> $ 160.000.- <span style={{ fontSize: "13px", fontWeight: "600", color: "#64748b" }}>ARS / mes</span> </div> <ul style={{ paddingLeft: "18px", fontSize: "13px", color: "#475569", lineHeight: "1.8", margin: "14px 0 20px" }}> <li>Hasta <b>15 preventistas activos</b></li> <li>Hasta <b>3 supervisores simultáneos</b></li> <li>Catálogo con <b>artículos ilimitados</b></li> <li>Monitoreo y balanceo masivo de zonas</li> <li>Account Manager asignado 24/7</li> </ul> <a href="#contacto" style={{ display: "block", textAlign: "center", width: "100%", padding: "12px", backgroundColor: "#f1f5f9", color: "#1e293b", borderRadius: "8px", textDecoration: "none", fontWeight: "800", fontSize: "14px", boxSizing: "border-box" }}> Hablar con Asesor Comercial </a> </div> </div> </section> {/* EXPANSIÓN REGIONAL Y CONTACTO ALEJANDRO JONES */} <section id="contacto" style={{ width: "100%", padding: "36px 16px", boxSizing: "border-box" }}> <div style={{ maxWidth: "460px", margin: "0 auto", backgroundColor: "#eff6ff", borderRadius: "16px", padding: "24px 20px", border: "1px solid #bfdbfe", boxSizing: "border-box" }}> <div style={{ fontSize: "11px", fontWeight: "800", color: "#1d4ed8", textTransform: "uppercase", marginBottom: "6px" }}>Expansión Cono Sur & LatAm</div> <h3 style={{ fontSize: "18px", fontWeight: "900", margin: "0 0 10px", color: "#0f172a" }}>Operamos en toda la región</h3> <p style={{ fontSize: "13px", color: "#475569", lineHeight: "1.5", margin: "0 0 16px" }}> Implementaciones activas en <b>Argentina, Uruguay, Paraguay, Chile y México</b>. Cobro sin comisiones abusivas por transferencia local o moneda internacional. </p> <div style={{ backgroundColor: "#ffffff", padding: "12px 14px", borderRadius: "10px", border: "1px solid #dbeafe", marginBottom: "18px" }}> <div style={{ fontSize: "11px", color: "#64748b" }}>Tarifa de Referencia Internacional:</div> <div style={{ fontSize: "20px", fontWeight: "900", color: "#1d4ed8", marginTop: "2px" }}>u$d 40.- <span style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>/ mes base</span></div> </div> <div style={{ borderTop: "1px solid #dbeafe", paddingTop: "16px" }}> <div style={{ fontWeight: "800", fontSize: "15px", color: "#0f172a" }}>Alejandro Jones</div> <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "14px" }}>Director de Cuentas / Asesor Comercial LatAm</div> <a href="https://wa.me/5491166646806?text=Hola%20Alejandro,%20quiero%20solicitar%20la%20demo%20de%20RutaComercio%20por%2015%20d%C3%ADas" target="_blank" rel="noreferrer" style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", width: "100%", padding: "12px", backgroundColor: "#16a34a", color: "#ffffff", borderRadius: "10px", textDecoration: "none", fontWeight: "800", fontSize: "14px", marginBottom: "8px", boxSizing: "border-box" }}> <span>💬</span> WhatsApp: +54 9 11 6664-6806 </a> <a href="mailto:soporte@rutacomercio.com" style={{ display: "block", textAlign: "center", fontSize: "12px", color: "#2563eb", textDecoration: "none", fontWeight: "700" }}> ✉️ soporte@rutacomercio.com </a> </div> </div> </section> {/* FAQ */} <section style={{ width: "100%", padding: "20px 16px 36px", boxSizing: "border-box" }}> <h3 style={{ fontSize: "18px", fontWeight: "900", textAlign: "center", margin: "0 0 16px" }}>Preguntas Frecuentes</h3> <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: "460px", margin: "0 auto" }}> {[ { q: "¿Funciona en zonas sin señal de celular 4G?", a: "Sí, la app de preventistas cuenta con almacenamiento local blindado y sincroniza automáticamente al recuperar señal." }, { q: "¿Cómo se activa la prueba gratis de 15 días?", a: "Coordinamos una videollamada o contacto directo por WhatsApp para dar de alta tu empresa sin costo ni tarjeta de crédito." }, { q: "¿Puedo cambiar de plan si sumo más vendedores?", a: "Sí, podés escalar en cualquier momento sin perder tu historial de clientes, rutas ni cuentas corrientes." } ].map((item, idx) => ( <div key={idx} onClick={() => toggleFaq(idx)} style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px 14px", backgroundColor: "#ffffff", cursor: "pointer" }}> <div style={{ fontWeight: "700", fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "center" }}> <span>{item.q}</span> <span style={{ fontSize: "14px", color: "#2563eb" }}>{faqAbierta === idx ? "▲" : "▼"}</span> </div> {faqAbierta === idx && ( <div style={{ fontSize: "12px", color: "#64748b", marginTop: "8px", lineHeight: "1.45" }}> {item.a} </div> )} </div> ))} </div> </section> {/* FOOTER */} <footer style={{ width: "100%", padding: "24px 16px", backgroundColor: "#0f172a", color: "#94a3b8", textAlign: "center", fontSize: "12px", lineHeight: "1.6", boxSizing: "border-box" }}> <div style={{ fontWeight: "800", color: "#ffffff", fontSize: "15px", marginBottom: "4px" }}>RutaComercio</div> <p style={{ margin: "0 0 12px" }}>Plataforma B2B para preventa en calle, optimización de ruteo y telemetría en tiempo real.</p> <div style={{ fontSize: "11px", color: "#64748b" }}>Medios de Pago: Transferencias bancarias CBU/CVU, tarjetas de débito/crédito y criptomonedas.</div> <div style={{ fontSize: "11px", color: "#64748b", marginTop: "12px" }}>© 2026 RutaComercio. Todos los derechos reservados.</div> </footer> {/* BOTÓN FLOTANTE DE WHATSAPP */} <a href="https://wa.me/5491166646806?text=Hola%20Alejandro,%20consulto%20desde%20la%20web" target="_blank" rel="noreferrer" style={{ position: "fixed", bottom: "16px", right: "16px", backgroundColor: "#16a34a", color: "#ffffff", borderRadius: "50px", padding: "10px 16px", textDecoration: "none", display: "flex", alignItems: "center", gap: "6px", fontWeight: "800", fontSize: "12px", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", zIndex: 100 }}> <span>💬</span> Consultar con Alejandro </a> </div> ); } 
+import React, { useState } from "react";
+
+export default function WebComercial() {
+  const [faqAbierta, setFaqAbierta] = useState(null);
+
+  const toggleFaq = (idx) => {
+    setFaqAbierta(faqAbierta === idx ? null : idx);
+  };
+
+  const irAlLogin = () => {
+    window.location.href = "/login";
+  };
+
+  const whatsapp =
+    "https://wa.me/5491166646806?text=Hola,%20quiero%20conocer%20RutaComercio";
+
+  const funciones = [
+    {
+      icono: "📍",
+      titulo: "Actividad en calle",
+      texto:
+        "Visualizá la actividad de tus preventistas y las ubicaciones reportadas durante su jornada.",
+    },
+    {
+      icono: "🧭",
+      titulo: "Visitas y recorridos",
+      texto:
+        "Organizá comercios, días de visita y recorridos para que cada vendedor tenga claro qué sigue.",
+    },
+    {
+      icono: "🛒",
+      titulo: "Pedidos desde el celular",
+      texto:
+        "El preventista consulta artículos, carga cantidades y registra pedidos directamente desde su teléfono.",
+    },
+    {
+      icono: "🏪",
+      titulo: "Ficha de cada comercio",
+      texto:
+        "Centralizá datos, ubicación, notas, historial y la información necesaria para trabajar cada cliente.",
+    },
+    {
+      icono: "💲",
+      titulo: "Listas de precios",
+      texto:
+        "Trabajá con listas asociadas a cada comercio y mantené los precios disponibles para la toma de pedidos.",
+    },
+    {
+      icono: "👀",
+      titulo: "Supervisión operativa",
+      texto:
+        "El supervisor puede seguir visitas, pedidos y actividad del equipo desde un único panel.",
+    },
+    {
+  icono: "📈",
+  titulo: "Crece junto con tu equipo",
+  texto:
+    "RutaComercio está pensado para acompañar operaciones de distintos tamaños: desde pequeños equipos comerciales hasta organizaciones con cientos de vendedores y preventistas.",
+},
+  ];
+
+  const pasos = [
+    {
+      numero: "01",
+      titulo: "Organizás",
+      texto: "Definís comercios, vendedores y recorridos de trabajo.",
+    },
+    {
+      numero: "02",
+      titulo: "El preventista visita",
+      texto: "Trabaja desde el celular y registra lo que sucede en cada comercio.",
+    },
+    {
+      numero: "03",
+      titulo: "Carga el pedido",
+      texto: "Consulta productos, cantidades y deja el pedido registrado.",
+    },
+    {
+      numero: "04",
+      titulo: "Supervisás",
+      texto: "Seguís la operación y tenés información para tomar decisiones.",
+    },
+  ];
+
+  const faqs = [
+    {
+      q: "¿RutaComercio se usa desde el celular?",
+      a:
+        "Sí. El preventista trabaja desde su teléfono y el supervisor accede a su panel para seguir la operación.",
+    },
+    {
+      q: "¿Puedo trabajar con varios preventistas?",
+      a:
+        "Sí. RutaComercio está pensado para empresas que necesitan organizar y supervisar equipos de venta en calle.",
+    },
+    {
+      q: "¿Los pedidos quedan vinculados al comercio?",
+      a:
+        "Sí. La toma de pedidos forma parte del trabajo asociado a cada comercio y a la operación del preventista.",
+    },
+    {
+      q: "¿Puedo conocer RutaComercio antes de contratar?",
+      a:
+        "Sí. Contactanos por WhatsApp y coordinamos una demostración para que puedas ver cómo funciona.",
+    },
+  ];
+
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        overflowX: "hidden",
+        backgroundColor: "#ffffff",
+        color: "#0f172a",
+        fontFamily:
+          "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}
+    >
+      {/* NAV */}
+      <header
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 100,
+          width: "100%",
+          boxSizing: "border-box",
+          backgroundColor: "rgba(255,255,255,0.96)",
+          backdropFilter: "blur(12px)",
+          borderBottom: "1px solid #e2e8f0",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "1120px",
+            margin: "0 auto",
+            padding: "13px 18px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "12px",
+            boxSizing: "border-box",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
+            <img
+              src="/logo.svg"
+              alt="RutaComercio"
+              style={{ height: "34px", width: "auto", display: "block" }}
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
+            <span
+              style={{
+                fontSize: "18px",
+                fontWeight: "900",
+                letterSpacing: "-0.6px",
+              }}
+            >
+              RutaComercio
+            </span>
+          </div>
+
+          <div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    flexGrow: 1,
+  }}
+>
+            <button
+              type="button"
+              onClick={irAlLogin}
+              style={{
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#ffffff",
+                color: "#0f172a",
+                borderRadius: "9px",
+                padding: "9px 12px",
+                fontSize: "12px",
+                fontWeight: "800",
+                cursor: "pointer",
+              }}
+            >
+              INGRESAR
+            </button>
+            <a
+              href="#contacto"
+              style={{
+                backgroundColor: "#2563eb",
+                color: "#ffffff",
+                borderRadius: "9px",
+                padding: "10px 13px",
+                fontSize: "12px",
+                fontWeight: "800",
+                textDecoration: "none",
+              }}
+            >
+              SOLICITAR DEMO
+            </a>
+          </div>
+        </div>
+      </header>
+
+      {/* HERO */}
+      <main>
+        <section
+          style={{
+            background:
+              "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)",
+            borderBottom: "1px solid #eef2f7",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: "1120px",
+              margin: "0 auto",
+              padding: "70px 18px 58px",
+              boxSizing: "border-box",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: "44px",
+            }}
+          >
+            <div style={{ flex: "1 1 460px", minWidth: "0" }}>
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "7px",
+                  backgroundColor: "#dbeafe",
+                  color: "#1d4ed8",
+                  padding: "7px 11px",
+                  borderRadius: "999px",
+                  fontSize: "11px",
+                  fontWeight: "900",
+                  letterSpacing: "0.35px",
+                  marginBottom: "18px",
+                }}
+              >
+                ● GESTIÓN PARA EQUIPOS DE VENTA EN CALLE
+              </div>
+
+              <h1
+                style={{
+                  margin: 0,
+                  maxWidth: "650px",
+                  fontSize: "clamp(38px, 6vw, 64px)",
+                  lineHeight: "1.02",
+                  letterSpacing: "-2.5px",
+                  fontWeight: "950",
+                }}
+              >
+                Tu equipo vende en la calle.
+                <span
+                  style={{
+                    display: "block",
+                    color: "#2563eb",
+                    marginTop: "7px",
+                  }}
+                >
+                  Vos sabés qué está pasando.
+                </span>
+              </h1>
+
+              <p
+                style={{
+                  maxWidth: "610px",
+                  margin: "22px 0 0",
+                  color: "#475569",
+                  fontSize: "17px",
+                  lineHeight: "1.65",
+                }}
+              >
+                Organizá visitas, pedidos, clientes y recorridos de tus
+                preventistas desde una sola plataforma. Más información para
+                supervisar. Menos improvisación en la calle.
+              </p>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "11px",
+                  marginTop: "28px",
+                }}
+              >
+                <a
+                  href="#contacto"
+                  style={{
+                    backgroundColor: "#2563eb",
+                    color: "#ffffff",
+                    textDecoration: "none",
+                    padding: "14px 20px",
+                    borderRadius: "11px",
+                    fontWeight: "900",
+                    fontSize: "14px",
+                    boxShadow: "0 8px 22px rgba(37,99,235,0.22)",
+                  }}
+                >
+                  SOLICITAR DEMO
+                </a>
+                <button
+                  type="button"
+                  onClick={irAlLogin}
+                  style={{
+                    backgroundColor: "#ffffff",
+                    color: "#0f172a",
+                    padding: "13px 20px",
+                    borderRadius: "11px",
+                    border: "1px solid #cbd5e1",
+                    fontWeight: "900",
+                    fontSize: "14px",
+                    cursor: "pointer",
+                  }}
+                >
+                  YA SOY CLIENTE · INGRESAR
+                </button>
+              </div>
+
+              <div
+                style={{
+                  marginTop: "25px",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "14px 22px",
+                  color: "#64748b",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                }}
+              >
+                <span>✓ Preventistas</span>
+                <span>✓ Supervisores</span>
+                <span>✓ Comercios</span>
+                <span>✓ Pedidos</span>
+              </div>
+            </div>
+
+            {/* MOCKUP */}
+            <div
+              style={{
+                flex: "1 1 390px",
+                minWidth: "0",
+                maxWidth: "500px",
+                margin: "0 auto",
+              }}
+            >
+              <div
+                style={{
+                  backgroundColor: "#0f172a",
+                  borderRadius: "22px",
+                  padding: "14px",
+                  boxShadow: "0 24px 55px rgba(15,23,42,0.22)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    color: "#ffffff",
+                    padding: "4px 5px 14px",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: "10px",
+                        color: "#94a3b8",
+                        fontWeight: "800",
+                      }}
+                    >
+                      PANEL DE SUPERVISIÓN
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "16px",
+                        fontWeight: "900",
+                        marginTop: "2px",
+                      }}
+                    >
+                      Actividad del equipo
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      backgroundColor: "#14532d",
+                      color: "#86efac",
+                      borderRadius: "999px",
+                      padding: "6px 9px",
+                      fontSize: "10px",
+                      fontWeight: "900",
+                    }}
+                  >
+                    ● EN LÍNEA
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    backgroundColor: "#f8fafc",
+                    borderRadius: "14px",
+                    padding: "13px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(3, 1fr)",
+                      gap: "8px",
+                      marginBottom: "10px",
+                    }}
+                  >
+                    {[
+                      ["12", "Visitas"],
+                      ["7", "Pedidos"],
+                      ["3", "En ruta"],
+                    ].map(([valor, label]) => (
+                      <div
+                        key={label}
+                        style={{
+                          backgroundColor: "#ffffff",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "10px",
+                          padding: "11px 7px",
+                          textAlign: "center",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "19px",
+                            fontWeight: "950",
+                            color: "#0f172a",
+                          }}
+                        >
+                          {valor}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "9px",
+                            color: "#64748b",
+                            fontWeight: "800",
+                            marginTop: "2px",
+                          }}
+                        >
+                          {label}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div
+                    style={{
+                      height: "175px",
+                      borderRadius: "12px",
+                      position: "relative",
+                      overflow: "hidden",
+                      background:
+                        "linear-gradient(135deg,#dbeafe 0%,#e2e8f0 48%,#dcfce7 100%)",
+                      border: "1px solid #cbd5e1",
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "22%",
+                        left: "18%",
+                        width: "150%",
+                        height: "7px",
+                        backgroundColor: "rgba(255,255,255,0.9)",
+                        transform: "rotate(18deg)",
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "63%",
+                        left: "-10%",
+                        width: "140%",
+                        height: "8px",
+                        backgroundColor: "rgba(255,255,255,0.92)",
+                        transform: "rotate(-11deg)",
+                      }}
+                    />
+                    {[
+                      ["22%", "35%"],
+                      ["48%", "61%"],
+                      ["68%", "28%"],
+                    ].map(([top, left], idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          position: "absolute",
+                          top,
+                          left,
+                          width: "18px",
+                          height: "18px",
+                          backgroundColor: idx === 1 ? "#16a34a" : "#2563eb",
+                          border: "3px solid #ffffff",
+                          borderRadius: "50% 50% 50% 0",
+                          transform: "rotate(-45deg)",
+                          boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                        }}
+                      />
+                    ))}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "10px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "10px",
+                      alignItems: "center",
+                      backgroundColor: "#ffffff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "10px",
+                      padding: "10px 11px",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: "10px",
+                          color: "#64748b",
+                          fontWeight: "800",
+                        }}
+                      >
+                        ÚLTIMA ACTIVIDAD
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          fontWeight: "900",
+                          marginTop: "2px",
+                        }}
+                      >
+                        Visita registrada
+                      </div>
+                    </div>
+                    <span style={{ fontSize: "20px" }}>📍</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* DOS ROLES */}
+        <section style={{ padding: "70px 18px", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: "1050px", margin: "0 auto" }}>
+            <div style={{ textAlign: "center", maxWidth: "690px", margin: "0 auto 34px" }}>
+              <div
+                style={{
+                  color: "#2563eb",
+                  fontSize: "11px",
+                  fontWeight: "900",
+                  letterSpacing: "1px",
+                }}
+              >
+                DOS VISTAS · UNA SOLA OPERACIÓN
+              </div>
+              <h2
+                style={{
+                  margin: "8px 0 10px",
+                  fontSize: "clamp(28px, 4vw, 40px)",
+                  lineHeight: "1.1",
+                  letterSpacing: "-1.2px",
+                }}
+              >
+                El preventista trabaja. El supervisor tiene visibilidad.
+              </h2>
+              <p style={{ margin: 0, color: "#64748b", lineHeight: "1.6", fontSize: "15px" }}>
+                Cada rol ve lo que necesita para hacer su trabajo sin convertir
+                la operación diaria en una planilla interminable.
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: "18px",
+              }}
+            >
+              <div
+                style={{
+                  borderRadius: "18px",
+                  padding: "26px",
+                  backgroundColor: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                }}
+              >
+                <div style={{ fontSize: "34px" }}>📱</div>
+                <h3 style={{ fontSize: "23px", margin: "10px 0 8px" }}>
+                  Preventista
+                </h3>
+                <p style={{ color: "#475569", lineHeight: "1.6", margin: 0 }}>
+                  Comercios del día, ubicación, visitas, ficha del cliente y
+                  toma de pedidos desde el celular.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  borderRadius: "18px",
+                  padding: "26px",
+                  backgroundColor: "#f8fafc",
+                  border: "1px solid #cbd5e1",
+                }}
+              >
+                <div style={{ fontSize: "34px" }}>🖥️</div>
+                <h3 style={{ fontSize: "23px", margin: "10px 0 8px" }}>
+                  Supervisor
+                </h3>
+                <p style={{ color: "#475569", lineHeight: "1.6", margin: 0 }}>
+                  Actividad del equipo, comercios, visitas, pedidos y
+                  seguimiento operativo desde un panel central.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* COMO FUNCIONA */}
+        <section
+          style={{
+            padding: "70px 18px",
+            backgroundColor: "#0f172a",
+            color: "#ffffff",
+            boxSizing: "border-box",
+          }}
+        >
+          <div style={{ maxWidth: "1050px", margin: "0 auto" }}>
+            <div style={{ maxWidth: "660px", margin: "0 auto 34px", textAlign: "center" }}>
+              <div
+                style={{
+                  color: "#93c5fd",
+                  fontSize: "11px",
+                  fontWeight: "900",
+                  letterSpacing: "1px",
+                }}
+              >
+                DEL PLAN A LA CALLE
+              </div>
+              <h2
+                style={{
+                  fontSize: "clamp(28px, 4vw, 40px)",
+                  lineHeight: "1.1",
+                  letterSpacing: "-1px",
+                  margin: "8px 0 10px",
+                  WebkitTextFillColor: "white",
+                }}
+              >
+                Así funciona RutaComercio
+              </h2>
+              <p style={{ color: "#e2e8f0", lineHeight: "1.6", margin: 0 }}>
+                Un flujo simple para que la información acompañe el trabajo real
+                del equipo.
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+                gap: "12px",
+              }}
+            >
+              {pasos.map((paso) => (
+                <div
+                  key={paso.numero}
+                  style={{
+                    backgroundColor: "#1e293b",
+                    border: "1px solid #334155",
+                    borderRadius: "14px",
+                    padding: "20px",
+                  }}
+                >
+                  <div
+                    style={{
+                      color: "#60a5fa",
+                      fontSize: "11px",
+                      fontWeight: "900",
+                    }}
+                  >
+                    {paso.numero}
+                  </div>
+                  <h3 style={{ margin: "9px 0 7px", fontSize: "17px" }}>
+                    {paso.titulo}
+                  </h3>
+                  <p
+                    style={{
+                      margin: 0,
+                      color: "#cbd5e1",
+                      lineHeight: "1.55",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {paso.texto}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* FUNCIONES */}
+        <section style={{ padding: "70px 18px", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: "1050px", margin: "0 auto" }}>
+            <div style={{ textAlign: "center", maxWidth: "690px", margin: "0 auto 34px" }}>
+              <div
+                style={{
+                  color: "#2563eb",
+                  fontSize: "11px",
+                  fontWeight: "900",
+                  letterSpacing: "1px",
+                }}
+              >
+                HERRAMIENTAS PARA EL DÍA A DÍA
+              </div>
+              <h2
+                style={{
+  fontSize: "clamp(28px, 4vw, 40px)",
+  lineHeight: "1.1",
+  letterSpacing: "-1px",
+  margin: "8px 0 10px",
+  color: "#0f172a",
+  
+}}
+              >
+                La calle y la supervisión, conectadas
+              </h2>
+              <p style={{ color: "#64748b", lineHeight: "1.6", margin: 0 }}>
+                RutaComercio concentra la información operativa que tu equipo
+                necesita para trabajar y supervisar.
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))",
+                gap: "14px",
+              }}
+            >
+              {funciones.map((item) => (
+                <div
+                  key={item.titulo}
+                  style={{
+                    padding: "21px",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "14px",
+                    backgroundColor: "#ffffff",
+                    boxShadow: "0 6px 20px rgba(15,23,42,0.04)",
+                  }}
+                >
+                  <div style={{ fontSize: "25px" }}>{item.icono}</div>
+                  <h3 style={{ margin: "10px 0 6px", fontSize: "16px" }}>
+                    {item.titulo}
+                  </h3>
+                  <p
+                    style={{
+                      margin: 0,
+                      color: "#64748b",
+                      lineHeight: "1.55",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {item.texto}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+        {/* PROXIMAMENTE */}
+<section
+  style={{
+    padding: "65px 18px",
+    backgroundColor: "#f8fafc",
+    boxSizing: "border-box",
+  }}
+>
+  <div
+    style={{
+      maxWidth: "900px",
+      margin: "0 auto",
+      textAlign: "center",
+    }}
+  >
+    <div
+      style={{
+        display: "inline-block",
+        backgroundColor: "#dbeafe",
+        color: "#1d4ed8",
+        padding: "7px 12px",
+        borderRadius: "999px",
+        fontSize: "11px",
+        fontWeight: "900",
+        letterSpacing: "1px",
+        marginBottom: "14px",
+      }}
+    >
+      EN DESARROLLO
+    </div>
+
+    <h2
+      style={{
+        margin: "0 0 12px",
+        fontSize: "clamp(28px, 4vw, 40px)",
+        lineHeight: "1.1",
+        letterSpacing: "-1px",
+        color: "#0f172a",
+      }}
+    >
+      🚚 Próximamente: nuevos módulos
+    </h2>
+
+    <p
+      style={{
+        maxWidth: "700px",
+        margin: "0 auto",
+        color: "#64748b",
+        fontSize: "15px",
+        lineHeight: "1.7",
+      }}
+    >
+      <strong style={{ color: "#0f172a" }}>
+        RutaComercio sigue creciendo.
+      </strong>{" "}
+      Estamos desarrollando nuevas herramientas para ampliar la gestión de tu
+      operación, incluyendo un módulo de <strong>Entregas y Repartos</strong>,
+      con asignación de entregas, seguimiento de recorridos y estados como
+      entregado, no entregado, rechazado o reprogramado.
+    </p>
+
+    <div
+      style={{
+        marginTop: "20px",
+        fontSize: "17px",
+        fontWeight: "900",
+        color: "#2563eb",
+      }}
+    >
+      Y esto es solo el comienzo.
+    </div>
+  </div>
+</section>
+        {/* COMERCIAL */}
+        <section
+          id="contacto"
+          style={{
+            padding: "70px 18px",
+            backgroundColor: "#eff6ff",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: "900px",
+              margin: "0 auto",
+              textAlign: "center",
+              backgroundColor: "#ffffff",
+              border: "1px solid #bfdbfe",
+              borderRadius: "22px",
+              padding: "clamp(28px, 6vw, 54px) 20px",
+              boxShadow: "0 16px 45px rgba(37,99,235,0.08)",
+            }}
+          >
+            <div
+              style={{
+                color: "#2563eb",
+                fontSize: "11px",
+                fontWeight: "900",
+                letterSpacing: "1px",
+              }}
+            >
+              CONOCÉ RUTACOMERCIO
+            </div>
+            <h2
+              style={{
+                margin: "9px auto 12px",
+                maxWidth: "650px",
+                fontSize: "clamp(29px, 5vw, 44px)",
+                lineHeight: "1.08",
+                letterSpacing: "-1.4px",
+              }}
+            >
+              Mirá cómo puede funcionar con tu equipo
+            </h2>
+            <p
+              style={{
+                maxWidth: "610px",
+                margin: "0 auto",
+                color: "#64748b",
+                fontSize: "15px",
+                lineHeight: "1.65",
+              }}
+            >
+              Contanos cuántos preventistas tenés y cómo trabajan hoy. Te
+              mostramos RutaComercio y evaluamos juntos la configuración que
+              mejor se adapte a tu operación.
+            </p>
+
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                justifyContent: "center",
+                gap: "10px",
+                marginTop: "25px",
+              }}
+            >
+              <a
+                href={whatsapp}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  backgroundColor: "#16a34a",
+                  color: "#ffffff",
+                  textDecoration: "none",
+                  padding: "14px 20px",
+                  borderRadius: "11px",
+                  fontWeight: "900",
+                  fontSize: "14px",
+                }}
+              >
+                💬 HABLAR POR WHATSAPP
+              </a>
+              <button
+                type="button"
+                onClick={irAlLogin}
+                style={{
+                  backgroundColor: "#ffffff",
+                  color: "#0f172a",
+                  padding: "13px 20px",
+                  borderRadius: "11px",
+                  border: "1px solid #cbd5e1",
+                  fontWeight: "900",
+                  fontSize: "14px",
+                  cursor: "pointer",
+                }}
+              >
+                ACCESO A CLIENTES
+              </button>
+            </div>
+
+            <div
+              style={{
+                marginTop: "18px",
+                color: "#64748b",
+                fontSize: "12px",
+                fontWeight: "700",
+              }}
+            >
+              Planes adaptables según la cantidad de usuarios y necesidades de
+              cada empresa.
+            </div>
+          </div>
+        </section>
+
+        {/* FAQ */}
+        <section style={{ padding: "65px 18px", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: "760px", margin: "0 auto" }}>
+            <h2
+              style={{
+                textAlign: "center",
+                fontSize: "clamp(26px, 4vw, 36px)",
+                margin: "0 0 26px",
+              }}
+            >
+              Preguntas frecuentes
+            </h2>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "9px" }}>
+              {faqs.map((item, idx) => (
+                <div
+                  key={item.q}
+                  style={{
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "12px",
+                    backgroundColor: "#ffffff",
+                    overflow: "hidden",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleFaq(idx)}
+                    style={{
+                      width: "100%",
+                      border: 0,
+                      backgroundColor: "#ffffff",
+                      color: "#0f172a",
+                      padding: "16px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      textAlign: "left",
+                      cursor: "pointer",
+                      fontWeight: "850",
+                      fontSize: "14px",
+                    }}
+                  >
+                    <span>{item.q}</span>
+                    <span style={{ color: "#2563eb" }}>
+                      {faqAbierta === idx ? "−" : "+"}
+                    </span>
+                  </button>
+
+                  {faqAbierta === idx && (
+                    <div
+                      style={{
+                        padding: "0 16px 16px",
+                        color: "#64748b",
+                        lineHeight: "1.6",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {item.a}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* FOOTER */}
+      <footer
+        style={{
+          backgroundColor: "#0f172a",
+          color: "#94a3b8",
+          padding: "32px 18px",
+          boxSizing: "border-box",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "1050px",
+            margin: "0 auto",
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "18px",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: "#ffffff",
+                fontWeight: "900",
+                fontSize: "18px",
+              }}
+            >
+              RutaComercio
+            </div>
+            <div style={{ fontSize: "12px", marginTop: "5px" }}>
+              Gestión para equipos de venta en calle.
+            </div>
+          </div>
+
+          <div style={{ fontSize: "11px", textAlign: "right" }}>
+            © 2026 RutaComercio · Todos los derechos reservados.
+          </div>
+        </div>
+      </footer>
+
+      {/* WHATSAPP */}
+      <a
+        href={whatsapp}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Consultar RutaComercio por WhatsApp"
+        style={{
+          position: "fixed",
+          right: "16px",
+          bottom: "16px",
+          zIndex: 120,
+          backgroundColor: "#16a34a",
+          color: "#ffffff",
+          textDecoration: "none",
+          borderRadius: "999px",
+          padding: "11px 15px",
+          fontSize: "12px",
+          fontWeight: "900",
+          boxShadow: "0 8px 22px rgba(0,0,0,0.22)",
+        }}
+      >
+        💬 Consultar
+      </a>
+    </div>
+  );
+}
