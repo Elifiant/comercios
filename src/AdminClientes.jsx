@@ -196,11 +196,8 @@ export default function AdminClientes() {
   };
 
   const abrirEditarEmpresa = (emp) => {
-    let t = {};
-    try {
-      const guardadas = JSON.parse(localStorage.getItem("tarifas_empresas") || "{}");
-      t = guardadas[emp] || {};
-    } catch(e){}
+    // Supabase / tarifasMap es la fuente actual. Evitamos datos viejos de localStorage.
+    const t = tarifasMap[emp] || {};
     setEmpresaAEditar(emp);
     setDiaCobroModal(t.dia_cobro || t.diaCobro || (diasCorteMap[emp] ? diasCorteMap[emp].dia : "05"));
     setEstadoCobroModal(t.estado_pago || (diasCorteMap[emp] ? diasCorteMap[emp].estado : "Al Día"));
@@ -223,6 +220,7 @@ export default function AdminClientes() {
         moneda: monedaEditada,
         modelo_cobro: tipoTarifaEditada,
         tarifa_pactada: Number(tarifaEditada) || 0,
+        cupo_preventistas: Math.max(0, Number(cupoEditado) || 0),
         dia_cobro: Number(diaCobroModal) || 5
       };
       const { error } = await supabase.from("empresas").update(cambios).eq("id", empresaDB.id);
@@ -239,9 +237,9 @@ export default function AdminClientes() {
     setEmpresaPago(emp);
     const t = tarifasMap[emp] || {};
     setMonedaPago(t.moneda || "ARS");
-    const prevs = preventistas.filter(p => p.empresa === emp && p.rol === "preventista").length;
+    const cupoContratado = Number(t.cupo || 0);
     const val = Number(t.valor || t.tarifa || 10000);
-    setMontoPago(t.tipo === "plana" ? String(val) : String(prevs * val || val));
+    setMontoPago(t.tipo === "plana" ? String(val) : String(cupoContratado * val));
     const tieneAbonosPrevios = historialPagos.some(p =>
       p.empresa_id === t.id && ["alta", "primer_abono", "renovacion"].includes(p.tipo_movimiento)
     );
@@ -666,7 +664,8 @@ export default function AdminClientes() {
                 const moneda = t.moneda || "ARS";
                 const valor = t.valor || t.tarifa || (moneda === "ARS" ? "10000" : "50");
                 const tipo = t.tipo || t.tipo_tarifa || "preventista";
-                const totalEst = tipo === "preventista" ? (prevsCount * Number(valor)) : Number(valor);
+                // El abono se calcula por el cupo contratado, no por los usuarios ya creados.
+                const totalEst = tipo === "preventista" ? (cupoMax * Number(valor)) : Number(valor);
                 const bandera = (t.pais === "México") ? "🇲🇽" : (t.pais === "Colombia") ? "🇨🇴" : (t.pais === "Brasil") ? "🇧🇷" : (t.pais === "Internacional") ? "🌐" : "🇦🇷";
                 const diaCorte = t.diaCobro || t.dia_cobro || cInfoRaw.dia || "05";
 
@@ -876,11 +875,27 @@ export default function AdminClientes() {
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>País<input value={paisEditado} onChange={(e) => setPaisEditado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Moneda<input value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Modelo de cobro<select value={tipoTarifaEditada} onChange={(e) => setTipoTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px" }}><option value="preventista">Por preventista</option><option value="plana">Tarifa plana</option></select></label>
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Tarifa<input type="number" onWheel={(e) => e.currentTarget.blur()} value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              <label style={{ color: "#94a3b8", fontSize: "12px" }}>{tipoTarifaEditada === "preventista" ? "Tarifa por preventista" : "Tarifa plana mensual"}<input type="number" min="0" onWheel={(e) => e.currentTarget.blur()} value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              {tipoTarifaEditada === "preventista" && (
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Preventistas contratados<input type="number" min="0" onWheel={(e) => e.currentTarget.blur()} value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+              )}
               <label style={{ color: "#94a3b8", fontSize: "12px" }}>Día de cobro<input type="number" min="1" max="31" onWheel={(e) => e.currentTarget.blur()} value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
             </div>
-            <div style={{ marginTop: "14px", padding: "10px 12px", borderRadius: "8px", backgroundColor: "#0f172a", border: "1px solid #334155", color: "#94a3b8", fontSize: "12px", lineHeight: 1.45 }}>
-              ℹ️ El cupo de preventistas se modifica desde <strong style={{ color: "#cbd5e1" }}>💳 Abonos</strong>, para que el cambio quede registrado en el historial comercial.
+            <div style={{ marginTop: "14px", padding: "12px", borderRadius: "9px", backgroundColor: "#0f172a", border: "1px solid #38bdf8", color: "#cbd5e1", fontSize: "12px", lineHeight: 1.5 }}>
+              <div style={{ color: "#94a3b8", fontWeight: "800", marginBottom: "3px" }}>CONTRATO MENSUAL</div>
+              {tipoTarifaEditada === "preventista" ? (
+                <>
+                  <div>{Math.max(0, Number(cupoEditado) || 0)} preventistas × {monedaEditada} ${Number(tarifaEditada || 0).toLocaleString("es-AR")}</div>
+                  <div style={{ marginTop: "3px", color: "#38bdf8", fontSize: "17px", fontWeight: "900" }}>
+                    {monedaEditada} ${(Math.max(0, Number(cupoEditado) || 0) * Number(tarifaEditada || 0)).toLocaleString("es-AR")} / mes
+                  </div>
+                </>
+              ) : (
+                <div style={{ color: "#38bdf8", fontSize: "17px", fontWeight: "900" }}>
+                  {monedaEditada} ${Number(tarifaEditada || 0).toLocaleString("es-AR")} / mes
+                </div>
+              )}
+              <div style={{ marginTop: "6px", color: "#94a3b8" }}>Editar Empresa define qué tiene contratado el cliente. Abonos registra lo que efectivamente paga.</div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
               <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
@@ -1025,6 +1040,26 @@ export default function AdminClientes() {
               <button type="button" onClick={() => setMostrarModalPago(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}>✕</button>
             </div>
 
+            {(() => {
+              const contrato = tarifasMap[empresaPago] || {};
+              const cupo = Number(contrato.cupo || 0);
+              const tarifa = Number(contrato.valor || contrato.tarifa || 0);
+              const moneda = contrato.moneda || monedaPago || "ARS";
+              const esPlana = contrato.tipo === "plana";
+              const mensual = esPlana ? tarifa : cupo * tarifa;
+              return (
+                <div style={{ backgroundColor: "#0f172a", border: "1px solid #38bdf8", borderRadius: "10px", padding: "12px", marginBottom: "16px" }}>
+                  <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: "800", marginBottom: "4px" }}>CONTRATO ACTUAL</div>
+                  <div style={{ color: "#e2e8f0", fontSize: "12px" }}>
+                    {esPlana ? "Tarifa plana mensual" : `${cupo} preventistas contratados × ${moneda} $${tarifa.toLocaleString("es-AR")} c/u`}
+                  </div>
+                  <div style={{ marginTop: "4px", color: "#38bdf8", fontSize: "18px", fontWeight: "900" }}>
+                    Abono mensual: {moneda} ${mensual.toLocaleString("es-AR")}
+                  </div>
+                </div>
+              );
+            })()}
+
             <form onSubmit={guardarPago}>
               <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Tipo de operación</label>
               <select value={tipoMovimientoPago} onChange={(e) => {
@@ -1032,7 +1067,14 @@ export default function AdminClientes() {
                 setTipoMovimientoPago(v);
                 setBonificadoPago(v === "bonificacion");
                 setConceptoPago(v === "primer_abono" ? "Alta / Primer abono" : v === "renovacion" ? "Renovación de abono" : v === "bonificacion" ? "Abono excepcional / bonificación" : v === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
-                if (v === "bonificacion") setMontoPago("0");
+                if (v === "bonificacion") {
+                  setMontoPago("0");
+                } else if (v === "primer_abono" || v === "renovacion") {
+                  const contrato = tarifasMap[empresaPago] || {};
+                  const tarifa = Number(contrato.valor || contrato.tarifa || 0);
+                  const cupo = Number(contrato.cupo || 0);
+                  setMontoPago(String(contrato.tipo === "plana" ? tarifa : cupo * tarifa));
+                }
               }} style={{ width: "100%", padding: "11px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "14px", boxSizing: "border-box" }}>
                 <option value="primer_abono">🆕 Alta / Primer abono</option>
                 <option value="renovacion">🔄 Renovar abono</option>
@@ -1103,7 +1145,7 @@ export default function AdminClientes() {
 
               {tipoMovimientoPago !== "bonificacion" && (
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>💰 Importe pactado / recibido
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>💰 Importe recibido
                     <input type="number" min="0" step="any" onWheel={(e) => e.currentTarget.blur()} value={montoPago} onChange={(e) => setMontoPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", fontWeight: "800" }} />
                   </label>
                   <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Moneda
