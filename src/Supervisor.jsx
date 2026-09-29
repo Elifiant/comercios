@@ -351,7 +351,33 @@ const reactivarComercio = async (comercio) => {
 
     inicializarSupervisor();
   }, []);
+    // 🔄 Mantener actualizada la actividad de los preventistas
+useEffect(() => {
+  if (!perfilSupervisor?.empresa_id) return;
 
+  const actualizarPerfiles = async () => {
+    
+    const { data, error } = await supabase
+      .from("perfiles")
+      .select(
+        "id, nombre, email, empresa, empresa_id, rol, activo, latitud, longitud, ultima_posicion_at, ultima_conexion, activo_hoy"
+      )
+      .eq("empresa_id", perfilSupervisor.empresa_id);
+
+    if (error) {
+      console.error("Error actualizando actividad de preventistas:", error);
+      return;
+    }
+
+    setPerfiles(data || []);
+  };
+
+  actualizarPerfiles();
+
+  const timer = setInterval(actualizarPerfiles, 5000);
+
+  return () => clearInterval(timer);
+}, [perfilSupervisor?.empresa_id]);
   // 📍 Cargar visitas reales de hoy y mantenerlas actualizadas
   useEffect(() => {
     if (!perfilSupervisor?.empresa_id) return;
