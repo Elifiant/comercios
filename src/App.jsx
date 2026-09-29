@@ -2213,6 +2213,83 @@ if (comercioSeleccionado) {
     }}
   />
 
+          {/* 🎙️ Notas de voz del comercio */}
+          <div
+            style={{
+              marginBottom: "16px",
+              padding: "12px",
+              backgroundColor: "#111827",
+              border: "1px solid #334155",
+              borderRadius: "10px",
+            }}
+          >
+            <div
+              style={{
+                fontWeight: "bold",
+                marginBottom: "8px",
+              }}
+            >
+              🎙️ Notas de voz
+            </div>
+
+            <button
+              type="button"
+              onClick={grabandoAudio ? detenerGrabacionVoz : iniciarGrabacionVoz}
+              style={{
+                width: "100%",
+                padding: "13px",
+                backgroundColor: grabandoAudio ? "#dc2626" : "#7c3aed",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                fontSize: "15px",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              {grabandoAudio
+                ? `⏹ DETENER · ${String(Math.floor(tiempoGrabacion / 60)).padStart(2, "0")}:${String(tiempoGrabacion % 60).padStart(2, "0")}`
+                : "🎙️ GRABAR NOTA DE VOZ"}
+            </button>
+
+            {Array.isArray(comercioSeleccionado.notas_audio) &&
+              comercioSeleccionado.notas_audio.length > 0 && (
+                <div style={{ marginTop: "10px" }}>
+                  {comercioSeleccionado.notas_audio.map((nota, index) => (
+                    <div
+                      key={nota.id || index}
+                      style={{
+                        padding: "8px",
+                        marginTop: index === 0 ? 0 : "8px",
+                        backgroundColor: "#1e293b",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "11px",
+                          color: "#94a3b8",
+                          marginBottom: "5px",
+                        }}
+                      >
+                        Nota de voz {nota.fecha ? `· ${nota.fecha}` : ""}
+                      </div>
+                      <audio
+                        controls
+                        src={nota.audio}
+                        style={{
+                          width: "100%",
+                          height: "36px",
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+          </div>
+
+
+
   <button
     type="button"
     onClick={() => registrarVisitaCheckIn(comercioSeleccionado)}
