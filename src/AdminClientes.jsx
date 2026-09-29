@@ -470,10 +470,10 @@ export default function AdminClientes() {
     const t = tarifasMap[emp] || {};
     const cInfo = diasCorteMap[emp] || {};
     const diaCorte = Number(t.diaCobro || t.dia_cobro || cInfo.dia || 5);
-    const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase() && p.rol === "preventista").length;
+    const cupoContratado = Number(t.cupo || cInfo.cupo || 0);
     const valor = Number(t.valor || t.tarifa || (t.moneda === "ARS" ? 10000 : 50));
     const moneda = t.moneda || "ARS";
-    const total = (t.tipo === "plana" ? valor : (prevsCount * valor || valor));
+    const total = (t.tipo === "plana" ? valor : (cupoContratado * valor));
     const item = { empresa: emp, total, moneda, dia: diaCorte };
 
     if (diaCorte === diaHoy) {
