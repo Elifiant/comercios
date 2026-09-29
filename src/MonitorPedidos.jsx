@@ -87,8 +87,33 @@ export default function MonitorPedidos() {
           }
         }
 
+        const idsComercios = [...new Set(data.map(p => p.comercio_id).filter(Boolean))];
+        let direccionPorComercio = {};
+
+        if (idsComercios.length > 0) {
+          const { data: comerciosData, error: errorComercios } = await supabase
+            .from("comercios")
+            .select("id, direccion, localidad, partido, provincia, pais")
+            .in("id", idsComercios);
+
+          if (errorComercios) {
+            console.error("Error cargando direcciones de comercios:", errorComercios);
+          } else {
+            (comerciosData || []).forEach(c => {
+              direccionPorComercio[String(c.id)] = [
+                c.direccion,
+                c.localidad,
+                c.partido,
+                c.provincia,
+                c.pais,
+              ].filter(Boolean).join(", ");
+            });
+          }
+        }
+
         listaConsolidada = data.map(p => {
           const itemsReales = itemsPorPedido[String(p.id)] || [];
+          const direccionReal = direccionPorComercio[String(p.comercio_id)] || "";
           return {
             id: p.id || ("PED-" + String(p.created_at || Date.now()).slice(-4)),
             numeroVisible: String(p.numero_pedido || "").padStart(6, "0"),
@@ -96,7 +121,7 @@ export default function MonitorPedidos() {
             preventista: p.preventista || p.vendedor || "Walter",
             ruta: p.ruta || "Ruta de Visita",
             cliente: p.cliente || p.comercio_nombre || ("Comercio #" + (p.comercio_id || "")),
-            direccion: p.direccion || "En recorrido",
+            direccion: p.direccion || direccionReal || "Sin dirección cargada",
             condicion: p.condicion || "Consumidor Final",
             bultos: p.bultos || itemsReales.reduce((acc, it) => acc + Number(it.cant || 0), 0) || 1,
             total: Number(p.total || p.total_pedido || 0),
@@ -160,6 +185,17 @@ export default function MonitorPedidos() {
   const [pedidoActivo, setPedidoActivo] = useState(PEDIDOS_DEMO[0]);
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [esMovil, setEsMovil] = useState(window.innerWidth < 800);
+  const [mostrarExportacion, setMostrarExportacion] = useState(false);
+  const [opcionesEnvio, setOpcionesEnvio] = useState({
+    cliente: true,
+    direccion: true,
+    articulos: true,
+    cantidades: true,
+    precioUnitario: false,
+    subtotales: false,
+    importeTotal: false,
+    nota: true,
+  });
 
   useEffect(() => {
     const handleResize = () => setEsMovil(window.innerWidth < 800);
@@ -185,6 +221,107 @@ export default function MonitorPedidos() {
   };
 
   
+
+  const cantidadUnidades = (pedido) =>
+    (pedido?.items || []).reduce((acc, it) => acc + Number(it.cant || 0), 0);
+
+  const armarTextoPedido = (pedido) => {
+    if (!pedido) return "";
+
+    const lineas = [`PEDIDO #${pedido.numeroVisible}`];
+
+    if (opcionesEnvio.cliente) lineas.push(`Cliente: ${pedido.cliente}`);
+    if (opcionesEnvio.direccion) lineas.push(`Dirección: ${pedido.direccion}`);
+    lineas.push(`Preventista: ${pedido.preventista}`);
+
+    if (opcionesEnvio.articulos || opcionesEnvio.cantidades) {
+      lineas.push("", "MERCADERÍA:");
+      (pedido.items || []).forEach((it) => {
+        let linea = opcionesEnvio.articulos
+          ? `${it.codigo ? it.codigo + " - " : ""}${it.nombre}`
+          : "Artículo";
+
+        if (opcionesEnvio.cantidades) linea += ` | Cantidad: ${it.cant}`;
+        if (opcionesEnvio.precioUnitario) linea += ` | P. unitario: $${Number(it.p_unit || 0).toLocaleString("es-AR")}`;
+        if (opcionesEnvio.subtotales) linea += ` | Subtotal: $${Number(it.subtotal || 0).toLocaleString("es-AR")}`;
+        lineas.push(linea);
+      });
+    }
+
+    if (opcionesEnvio.importeTotal) {
+      lineas.push("", `Importe total del pedido: $${Number(pedido.total || 0).toLocaleString("es-AR")}`);
+    }
+    if (opcionesEnvio.nota && pedido.nota) lineas.push(`Nota: ${pedido.nota}`);
+
+    return lineas.join("\n");
+  };
+
+  const imprimirPedido = (pedido) => {
+    const texto = armarTextoPedido(pedido);
+    const ventana = window.open("", "_blank");
+    if (!ventana) {
+      alert("El navegador bloqueó la ventana de impresión.");
+      return;
+    }
+
+    const escapar = (valor) =>
+      String(valor ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+
+    ventana.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Pedido #${escapar(pedido.numeroVisible)}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 28px; color: #111827; }
+            h1 { margin: 0 0 4px; font-size: 22px; }
+            .sub { color: #64748b; margin-bottom: 20px; }
+            pre { white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.55; }
+          </style>
+        </head>
+        <body>
+          <h1>RutaComercio · Pedido #${escapar(pedido.numeroVisible)}</h1>
+          <div class="sub">${escapar(datosCabecera.empresa || "")}</div>
+          <pre>${escapar(texto)}</pre>
+          <script>window.onload = () => window.print();<\/script>
+        </body>
+      </html>
+    `);
+    ventana.document.close();
+  };
+
+  const enviarWhatsApp = (pedido) => {
+    const telefonoIngresado = window.prompt(
+      "Número de WhatsApp del depósito en formato internacional, sin + ni espacios.\nEjemplo Argentina: 5491122501680",
+      ""
+    );
+    if (telefonoIngresado === null) return;
+
+    const telefono = telefonoIngresado.replace(/\D/g, "");
+    if (!telefono) {
+      alert("Ingresá un número de WhatsApp.");
+      return;
+    }
+
+    window.location.href =
+      `https://wa.me/${telefono}?text=${encodeURIComponent(armarTextoPedido(pedido))}`;
+  };
+
+  const copiarParaEmail = async (pedido) => {
+    const asunto = `Pedido #${pedido.numeroVisible} - ${pedido.cliente}`;
+    const contenido = `Asunto: ${asunto}\n\n${armarTextoPedido(pedido)}`;
+
+    try {
+      await navigator.clipboard.writeText(contenido);
+      alert("Pedido copiado. Abrí tu correo y pegalo en un mensaje nuevo.");
+    } catch (e) {
+      window.prompt("Copiá este texto para enviarlo por email:", contenido);
+    }
+  };
 
   const estadoAbono = (() => {
     const nombreEmpresa = String(datosCabecera?.empresa || "").trim().toUpperCase();
@@ -306,7 +443,7 @@ export default function MonitorPedidos() {
                       <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>{p.cliente}</div>
                       <div style={{ fontSize: "10px", color: "#64748b", marginTop: "1px" }}>📍 {p.direccion}</div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "6px", borderTop: "1px solid #f1f5f9" }}>
-                        <span style={{ fontSize: "10px", color: "#475569" }}>👤 <strong>{p.preventista}</strong> ({p.bultos} bultos)</span>
+                        <span style={{ fontSize: "10px", color: "#475569" }}>👤 <strong>{p.preventista}</strong> ({cantidadUnidades(p)} unidades)</span>
                         <span style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>${p.total.toLocaleString("es-AR")}</span>
                       </div>
                     </div>
@@ -349,16 +486,63 @@ export default function MonitorPedidos() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px", background: "#eff6ff", borderRadius: "6px", marginBottom: "10px" }}>
                   <div>
                     <div style={{ fontSize: "10px", color: "#2563eb", fontWeight: "700" }}>TOTAL PEDIDO</div>
-                    <div style={{ fontSize: "10px", color: "#64748b" }}>{pedidoActivo.bultos} bultos</div>
+                    <div style={{ fontSize: "10px", color: "#64748b" }}>{cantidadUnidades(pedidoActivo)} unidades</div>
                   </div>
                   <div style={{ fontSize: "18px", fontWeight: "900", color: "#1d4ed8" }}>
                     ${pedidoActivo.total.toLocaleString("es-AR")}
                   </div>
                 </div>
 
-                <button onClick={() => alert("Comanda despachada al depósito.")} style={{ width: "100%", background: "#2563eb", color: "#fff", border: "none", padding: "10px", borderRadius: "6px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>
-                  📦 Pasar a Depósito
+                <button
+                  onClick={() => setMostrarExportacion(v => !v)}
+                  style={{ width: "100%", background: "#2563eb", color: "#fff", border: "none", padding: "10px", borderRadius: "6px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
+                >
+                  📤 ENVIAR / EXPORTAR PEDIDO
                 </button>
+
+                {mostrarExportacion && (
+                  <div style={{ marginTop: "10px", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "10px", background: "#f8fafc" }}>
+                    <div style={{ fontSize: "12px", fontWeight: "800", marginBottom: "8px" }}>Datos a incluir</div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: esMovil ? "1fr" : "1fr 1fr", gap: "6px", marginBottom: "10px" }}>
+                      {[
+                        ["cliente", "Datos del cliente"],
+                        ["direccion", "Dirección"],
+                        ["articulos", "Código y descripción"],
+                        ["cantidades", "Cantidades"],
+                        ["precioUnitario", "Precio unitario"],
+                        ["subtotales", "Importes por artículo"],
+                        ["importeTotal", "Importe total del pedido"],
+                        ["nota", "Nota del pedido"],
+                      ].map(([clave, etiqueta]) => (
+                        <label key={clave} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "#334155", cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={opcionesEnvio[clave]}
+                            onChange={e => setOpcionesEnvio(prev => ({ ...prev, [clave]: e.target.checked }))}
+                          />
+                          {etiqueta}
+                        </label>
+                      ))}
+                    </div>
+
+                    <div style={{ fontSize: "10px", color: "#64748b", marginBottom: "8px" }}>
+                      Los importes son opcionales. La cantidad de bultos no se calcula: depósito la definirá cuando prepare físicamente el pedido.
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: esMovil ? "1fr" : "repeat(3, 1fr)", gap: "6px" }}>
+                      <button type="button" onClick={() => imprimirPedido(pedidoActivo)} style={{ padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", background: "#fff", fontWeight: "800", cursor: "pointer" }}>
+                        🖨️ PDF / Imprimir
+                      </button>
+                      <button type="button" onClick={() => enviarWhatsApp(pedidoActivo)} style={{ padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", background: "#fff", fontWeight: "800", cursor: "pointer" }}>
+                        💬 WhatsApp
+                      </button>
+                      <button type="button" onClick={() => copiarParaEmail(pedidoActivo)} style={{ padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", background: "#fff", fontWeight: "800", cursor: "pointer" }}>
+                        📋 Copiar para email
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -199,6 +199,10 @@ console.log("🚗 APP SE ESTÁ RENDERIZANDO");
       const actualizacion = {
         nombre: comercioSeleccionado.nombre || ('Comercio #' + comercioSeleccionado.id),
         direccion: comercioSeleccionado.direccion || '',
+        localidad: comercioSeleccionado.localidad || '',
+        partido: comercioSeleccionado.partido || '',
+        provincia: comercioSeleccionado.provincia || '',
+        pais: comercioSeleccionado.pais || '',
         rubro: comercioSeleccionado.rubro || 'General',
         cuit: comercioSeleccionado.cuit || '',
         telefono: comercioSeleccionado.telefono || '',
@@ -222,6 +226,17 @@ console.log("🚗 APP SE ESTÁ RENDERIZANDO");
       if (error) throw error;
 
       const comercioActualizado = { ...comercioSeleccionado, ...actualizacion };
+
+      // 🧠 Recordar la última zona cargada para ahorrar escritura al preventista.
+      try {
+        localStorage.setItem("rutacomercio_ultima_zona", JSON.stringify({
+          localidad: actualizacion.localidad || "",
+          partido: actualizacion.partido || "",
+          provincia: actualizacion.provincia || "",
+          pais: actualizacion.pais || "Argentina",
+        }));
+      } catch (e) {}
+
       setComercioSeleccionado(comercioActualizado);
       setComercios(prev => prev.map(c => c.id === comercioSeleccionado.id ? comercioActualizado : c));
       alert('Comercio guardado con éxito');
@@ -930,8 +945,19 @@ const solicitarNoVisitar = async (comercio) => {
     const guardarConCoords = async (lat, lng) => {
       try {
         const idTemp = Date.now();
+
+        let ultimaZona = { localidad: "", partido: "", provincia: "", pais: "Argentina" };
+        try {
+          const guardada = localStorage.getItem("rutacomercio_ultima_zona");
+          if (guardada) ultimaZona = { ...ultimaZona, ...JSON.parse(guardada) };
+        } catch (e) {}
+
         const nuevo = {
           nombre: "Comercio #" + String(idTemp).slice(-4),
+          localidad: ultimaZona.localidad || "",
+          partido: ultimaZona.partido || "",
+          provincia: ultimaZona.provincia || "",
+          pais: ultimaZona.pais || "Argentina",
           latitud: lat,
           longitud: lng,
           ubicacion_exacta_latitud: lat,
@@ -2395,6 +2421,114 @@ if (comercioSeleccionado) {
               boxSizing: "border-box",
             }}
           />
+
+          <label>Localidad</label>
+          <input
+            type="text"
+            value={comercioSeleccionado.localidad || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                localidad: e.target.value,
+              })
+            }
+            placeholder="Ej.: Bernal"
+            style={{
+              width: "100%", padding: "10px", marginTop: "6px",
+              marginBottom: "15px", boxSizing: "border-box",
+            }}
+          />
+
+          <label>Partido / Departamento</label>
+          <input
+            type="text"
+            value={comercioSeleccionado.partido || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                partido: e.target.value,
+              })
+            }
+            placeholder="Ej.: Quilmes"
+            style={{
+              width: "100%", padding: "10px", marginTop: "6px",
+              marginBottom: "15px", boxSizing: "border-box",
+            }}
+          />
+
+          <label>Provincia / Estado</label>
+          <input
+            type="text"
+            list="provincias-rutacomercio"
+            value={comercioSeleccionado.provincia || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                provincia: e.target.value,
+              })
+            }
+            placeholder="Ej.: Buenos Aires"
+            style={{
+              width: "100%", padding: "10px", marginTop: "6px",
+              marginBottom: "15px", boxSizing: "border-box",
+            }}
+          />
+          <datalist id="provincias-rutacomercio">
+            <option value="Buenos Aires" />
+            <option value="CABA" />
+            <option value="Catamarca" />
+            <option value="Chaco" />
+            <option value="Chubut" />
+            <option value="Córdoba" />
+            <option value="Corrientes" />
+            <option value="Entre Ríos" />
+            <option value="Formosa" />
+            <option value="Jujuy" />
+            <option value="La Pampa" />
+            <option value="La Rioja" />
+            <option value="Mendoza" />
+            <option value="Misiones" />
+            <option value="Neuquén" />
+            <option value="Río Negro" />
+            <option value="Salta" />
+            <option value="San Juan" />
+            <option value="San Luis" />
+            <option value="Santa Cruz" />
+            <option value="Santa Fe" />
+            <option value="Santiago del Estero" />
+            <option value="Tierra del Fuego" />
+            <option value="Tucumán" />
+          </datalist>
+
+          <label>País</label>
+          <input
+            type="text"
+            list="paises-rutacomercio"
+            value={comercioSeleccionado.pais || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                pais: e.target.value,
+              })
+            }
+            placeholder="Argentina"
+            style={{
+              width: "100%", padding: "10px", marginTop: "6px",
+              marginBottom: "15px", boxSizing: "border-box",
+            }}
+          />
+          <datalist id="paises-rutacomercio">
+            <option value="Argentina" />
+            <option value="Uruguay" />
+            <option value="Paraguay" />
+            <option value="Chile" />
+            <option value="Brasil" />
+            <option value="Bolivia" />
+          </datalist>
+
+          <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "-8px", marginBottom: "15px" }}>
+            🧠 Localidad, partido, provincia y país se recuerdan para el próximo cliente.
+          </div>
 
           <label>Rubro</label>
 

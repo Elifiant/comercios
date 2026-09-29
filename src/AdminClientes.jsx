@@ -803,17 +803,46 @@ export default function AdminClientes() {
                         <div>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <div style={{ fontWeight: "700", color: "#0f172a", fontSize: "13px" }}>👤 {prev.nombre}</div>
-                            {prev.tipo_preventista === "temporal" ? (
-                              <span style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #f59e0b", borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: "800" }}>
-                                ⏱️ TEMPORAL{prev.temporal_hasta ? ` · hasta ${new Date(prev.temporal_hasta + "T00:00:00").toLocaleDateString("es-AR")}` : ""}
-                              </span>
-                            ) : (
+                            {prev.tipo_preventista === "temporal" ? (() => {
+                              const hoy = new Date();
+                              hoy.setHours(0, 0, 0, 0);
+                              const hasta = prev.temporal_hasta ? new Date(prev.temporal_hasta + "T00:00:00") : null;
+                              const vencido = hasta && hasta < hoy;
+                              return (
+                                <span style={{
+                                  backgroundColor: vencido ? "#fee2e2" : "#fef3c7",
+                                  color: vencido ? "#991b1b" : "#92400e",
+                                  border: `1px solid ${vencido ? "#ef4444" : "#f59e0b"}`,
+                                  borderRadius: "999px",
+                                  padding: "2px 8px",
+                                  fontSize: "10px",
+                                  fontWeight: "800"
+                                }}>
+                                  {(() => {
+                                    if (!hasta) return "⏱️ TEMPORAL";
+                                    if (vencido) return `🔴 TEMPORAL VENCIDO · ${hasta.toLocaleDateString("es-AR")}`;
+                                    const diasRestantes = Math.round((hasta - hoy) / 86400000);
+                                    if (diasRestantes === 0) return `⚠️ TEMPORAL · vence hoy · ${hasta.toLocaleDateString("es-AR")}`;
+                                    if (diasRestantes === 1) return `⚠️ TEMPORAL · vence mañana · ${hasta.toLocaleDateString("es-AR")}`;
+                                    return `⏱️ TEMPORAL · quedan ${diasRestantes} días · hasta ${hasta.toLocaleDateString("es-AR")}`;
+                                  })()}
+                                </span>
+                              );
+                            })() : (
                               <span style={{ backgroundColor: "#dcfce7", color: "#166534", border: "1px solid #86efac", borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: "800" }}>
                                 👤 PERMANENTE
                               </span>
                             )}
                           </div>
                           <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>✉️ {prev.email}</div>
+                          <div style={{
+                            fontSize: "11px",
+                            fontWeight: "800",
+                            marginTop: "4px",
+                            color: prev.activo === false ? "#64748b" : "#16a34a"
+                          }}>
+                            {prev.activo === false ? "⚫ INACTIVO" : "🟢 ACTIVO"}
+                          </div>
                         </div>
                         <div style={{ display: "flex", gap: "6px" }}>
                           <button onClick={() => setModalResetClave({ usuario: prev, nuevoPass: "" })} style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🔑 Clave</button>
