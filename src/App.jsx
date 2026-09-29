@@ -2770,13 +2770,13 @@ onChange={(e) =>
         </div>
 
         {/* BUSCADOR */}
-        <div style={{ marginTop: "12px", position: "relative" }}>
+        <div style={{ marginTop: "7px", position: "relative" }}>
           <input
             type="text"
             placeholder="🔍 Buscar comercio por nombre o ID..."
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            style={{ width: "100%", padding: "10px 14px", backgroundColor: "#0b1329", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
+            style={{ width: "100%", padding: "7px 14px", backgroundColor: "#0b1329", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
           />
         </div>
         <div
