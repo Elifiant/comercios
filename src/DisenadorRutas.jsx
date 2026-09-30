@@ -173,27 +173,40 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
     }
   };
 
+  // Ruta efectiva de hoy
+  const hoyClave = (() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })();
+  const diaHoy = normalizar(new Date().toLocaleDateString("es-AR", { weekday:"long" }));
+  const viendoHoy = normalizar(dia) === diaHoy;
+  const fechaClave = valor => {
+    if (!valor) return ""; const t=String(valor).trim();
+    const iso=t.match(/^(\d{4}-\d{2}-\d{2})/); if (iso) return iso[1];
+    const ar=t.match(/^(\d{2})\/(\d{2})\/(\d{4})/); return ar ? `${ar[3]}-${ar[2]}-${ar[1]}` : "";
+  };
+  const paradasOmitidasHoy = viendoHoy ? paradas.filter(c => fechaClave(c.omitir_visita_fecha) === hoyClave) : [];
+  const idsOmitidosHoy = new Set(paradasOmitidasHoy.map(c => String(c.id)));
+  const paradasEfectivas = viendoHoy ? paradas.filter(c => !idsOmitidosHoy.has(String(c.id))) : paradas;
+
   const coordenadaDe = c => {
     const lat = Number(c.ubicacion_exacta_latitud || c.latitud);
     const lng = Number(c.ubicacion_exacta_longitud || c.longitud);
     return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
   };
 
-  const puntos = paradas.map(coordenadaDe).filter(Boolean);
+  const puntos = paradasEfectivas.map(coordenadaDe).filter(Boolean);
   const idsVisitadosHoy = new Set((visitasHoy || []).map(v => String(v.comercio_id)));
 
   let ultimaParadaConsecutivaVisitada = -1;
-  for (let i = 0; i < paradas.length; i += 1) {
-    if (idsVisitadosHoy.has(String(paradas[i].id))) ultimaParadaConsecutivaVisitada = i;
+  for (let i = 0; i < paradasEfectivas.length; i += 1) {
+    if (idsVisitadosHoy.has(String(paradasEfectivas[i].id))) ultimaParadaConsecutivaVisitada = i;
     else break;
   }
 
-  const puntosRecorridos = paradas
+  const puntosRecorridos = paradasEfectivas
     .slice(0, ultimaParadaConsecutivaVisitada + 1)
     .map(coordenadaDe).filter(Boolean);
 
   const inicioPendiente = Math.max(ultimaParadaConsecutivaVisitada, 0);
-  const puntosPendientes = paradas
+  const puntosPendientes = paradasEfectivas
     .slice(inicioPendiente)
     .map(coordenadaDe).filter(Boolean);
 
@@ -234,6 +247,7 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
             <div>
               <strong>{preventista || "Preventista"} · {dia}</strong>
               <div style={{fontSize:11,color:"#64748b"}}>{paradas.length} paradas · arrastrá para ordenar</div>
+              {viendoHoy && <div style={{fontSize:11,color:"#334155",marginTop:4}}>Ruta habitual: <b>{paradas.length}</b> · Ruta efectiva hoy: <b>{paradasEfectivas.length}</b> · Omitidas: <b>{paradasOmitidasHoy.length}</b></div>}
             </div>
             <span style={{fontSize:11,fontWeight:700,color:mensaje.startsWith("✓")?"#16a34a":"#64748b"}}>{mensaje}</span>
           </div>
@@ -261,6 +275,9 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
                    <div style={{fontSize:10,color:"#64748b",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                      {c.direccion || "Sin dirección"}
                    </div>
+                   {viendoHoy && idsOmitidosHoy.has(String(c.id)) && (
+                     <div style={{fontSize:10,fontWeight:800,color:"#b45309",marginTop:2}}>⏭️ OMITIR HOY</div>
+                   )}
                  </div>
                   <div style={{display:"flex",gap:5,flexShrink:0}} onClick={e=>e.stopPropagation()}>
                     <button type="button" onClick={()=>moverParada(i,-1)} disabled={i===0} style={{width:34,height:34,borderRadius:7,border:"1px solid #cbd5e1",background:i===0?"#f1f5f9":"#fff",fontSize:15,fontWeight:800}}>▲</button>
@@ -297,7 +314,7 @@ export default function DisenadorRutas({ perfilSupervisor, perfiles = [] }) {
                 <Polyline positions={puntosPendientes}
                   pathOptions={{ color:"#2563eb", weight:4, opacity:0.8, dashArray:"8, 8" }} />
               )}
-              {paradas.map((c,i)=>{
+              {paradasEfectivas.map((c,i)=>{
                 const lat=Number(c.ubicacion_exacta_latitud || c.latitud);
                 const lng=Number(c.ubicacion_exacta_longitud || c.longitud);
                 if(!Number.isFinite(lat)||!Number.isFinite(lng)) return null;

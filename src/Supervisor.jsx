@@ -29,20 +29,65 @@ function iconoNumero(numero, estado) {
 
 function AutoCentradoMapa({ puntos, puntoActivo }) {
   const map = useMap();
+  const yaCentroInicial = useRef(false);
+  const usuarioMovioMapa = useRef(false);
+
   useEffect(() => {
+    const marcarMovimientoManual = () => {
+      usuarioMovioMapa.current = true;
+    };
+    map.on("dragstart", marcarMovimientoManual);
+    map.on("zoomstart", marcarMovimientoManual);
+    return () => {
+      map.off("dragstart", marcarMovimientoManual);
+      map.off("zoomstart", marcarMovimientoManual);
+    };
+  }, [map]);
+
+  useEffect(() => {
+    // Si se eligió expresamente un comercio, sí lo enfocamos.
     if (puntoActivo && puntoActivo[0] && puntoActivo[1]) {
+      usuarioMovioMapa.current = false;
       map.flyTo(puntoActivo, 16, { animate: true });
-    } else if (puntos && puntos.length > 0) {
+      return;
+    }
+
+    // Encuadre automático sólo al entrar/cambiar de recorrido.
+    // Las actualizaciones periódicas de GPS ya no pelean con el supervisor.
+    if (!yaCentroInicial.current && puntos && puntos.length > 0) {
       const validos = puntos.filter(p => p && p[0] && p[1]);
       if (validos.length > 0) {
         const bounds = L.latLngBounds(validos);
         map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+        yaCentroInicial.current = true;
       }
     }
   }, [puntos, puntoActivo, map]);
   return null;
 }
 
+
+function ControlCentradoMapa({ accion, puntoPreventista, puntosRecorrido }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!accion?.id) return;
+
+    if (accion.tipo === "preventista" && puntoPreventista?.[0] && puntoPreventista?.[1]) {
+      map.flyTo(puntoPreventista, 16, { animate: true });
+      return;
+    }
+
+    if (accion.tipo === "recorrido") {
+      const validos = (puntosRecorrido || []).filter(p => p && p[0] && p[1] && !isNaN(p[0]) && !isNaN(p[1]));
+      if (validos.length > 0) {
+        map.fitBounds(L.latLngBounds(validos), { padding: [40, 40], maxZoom: 15 });
+      }
+    }
+  }, [accion, puntoPreventista, puntosRecorrido, map]);
+
+  return null;
+}
 
 function iconoAutoGPS(nombre) {
   return L.divIcon({
@@ -237,6 +282,7 @@ const reactivarComercio = async (comercio) => {
   const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
   const diaSemana = filtroDiaMapa || "TODOS";
   const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
+  const [accionMapa, setAccionMapa] = useState({ tipo: null, id: 0 });
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [comercioFoco, setComercioFoco] = useState(null);
   const [comercioDetalleModal, setComercioDetalleModal] = useState(null);
@@ -542,8 +588,42 @@ useEffect(() => {
     return dCom === dFiltro || dCom.includes(dFiltro);
   });
 
+  // Excepciones operativas del día actual: conserva la ruta habitual,
+  // pero identifica las visitas que hoy deben omitirse.
+  const fechaHoySupervisor = (() => {
+    const ahora = new Date();
+    const y = ahora.getFullYear();
+    const m = String(ahora.getMonth() + 1).padStart(2, "0");
+    const d = String(ahora.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  })();
+
+  const diaHoySupervisor = new Date()
+    .toLocaleDateString("es-AR", { weekday: "long" })
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const viendoHoyEnPlanificador =
+    seccionActiva === "planificador" &&
+    String(diaActivo || "").toUpperCase().trim() === diaHoySupervisor;
+
+  const comerciosOmitidosHoy = viendoHoyEnPlanificador
+    ? comerciosFiltradosPorDia.filter(
+        (com) => com.omitir_visita_fecha === fechaHoySupervisor
+      )
+    : [];
+
+  const comerciosEfectivosHoy = viendoHoyEnPlanificador
+    ? comerciosFiltradosPorDia.filter(
+        (com) =>
+          com.no_visitar !== true &&
+          com.omitir_visita_fecha !== fechaHoySupervisor
+      )
+    : comerciosFiltradosPorDia;
+
   const comerciosVisibles = ordenarPorSecuenciaGuardada(
-    (comerciosFiltradosPorDia || []).filter(com => {
+    (comerciosEfectivosHoy || []).filter(com => {
       if (!busquedaSupervisor || busquedaSupervisor.trim() === "") return true;
       const q = busquedaSupervisor.toLowerCase().trim();
       const nom = String(com.nombre || "").toLowerCase();
@@ -627,6 +707,18 @@ useEffect(() => {
     .filter(p => p[0] && p[1] && !isNaN(p[0]) && !isNaN(p[1]));
 
   const centroMapa = coordenadasValidas[0] || [-34.719, -58.264];
+
+  // Posición GPS actual del preventista seleccionado para los controles del mapa
+  const targetMapaNom = String(preventistaSeleccionado?.nombre || preventistaSeleccionado || "").toLowerCase().trim();
+  const perfilMapaVivo = (perfiles || []).find(p => {
+    const n = String(p.nombre || p.email || "").toLowerCase().trim();
+    return targetMapaNom && (n === targetMapaNom || n.includes(targetMapaNom) || targetMapaNom.includes(n));
+  });
+  const latMapaVivo = parseFloat(perfilMapaVivo?.latitud);
+  const lngMapaVivo = parseFloat(perfilMapaVivo?.longitud);
+  const puntoPreventistaMapa = latMapaVivo && lngMapaVivo && !isNaN(latMapaVivo) && !isNaN(lngMapaVivo)
+    ? [latMapaVivo, lngMapaVivo]
+    : null;
   const rutaRecorrida = coordenadasValidas.slice(0, Math.ceil(coordenadasValidas.length * 0.65));
   const rutaRestante = coordenadasValidas.slice(Math.max(0, Math.ceil(coordenadasValidas.length * 0.65) - 1));
 
@@ -3370,6 +3462,21 @@ useEffect(() => {
               )}
             </div>
 
+            {viendoHoyEnPlanificador && (
+              <div style={{ marginBottom: "10px", padding: "8px 10px", borderRadius: "8px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", fontSize: "11px", color: "#334155" }}>
+                <div><b>Ruta habitual:</b> {comerciosFiltradosPorDia.length}</div>
+                <div><b>Ruta efectiva de hoy:</b> {comerciosEfectivosHoy.length}</div>
+                <div><b>Omitidas hoy:</b> {comerciosOmitidosHoy.length}</div>
+                {comerciosOmitidosHoy.length > 0 && (
+                  <div style={{ marginTop: "6px", color: "#92400e" }}>
+                    {comerciosOmitidosHoy.map((com) => (
+                      <div key={`omitido-${com.id}`}>⏭️ {com.nombre || ("Comercio #" + com.id)} — OMITIR HOY</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* LISTADO DE PARADAS (COMPACTO CON SCROLL) */}
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "480px", overflowY: "auto", paddingRight: "4px" }}>
               {secuenciaPersonalizada.length === 0 ? (
@@ -3451,9 +3558,23 @@ useEffect(() => {
               <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>
                 🗺️ Mapa de Recorrido: <span style={{ color: "#2563eb" }}>{nombrePrevActivo}</span> ({coordenadasValidas.length} puntos con GPS)
               </div>
-              <div style={{ display: "flex", gap: "10px", fontSize: "10px", fontWeight: "bold" }}>
-                <span style={{ color: "#16a34a" }}>— Real</span>
-                <span style={{ color: "#2563eb" }}>- - Restante</span>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => setAccionMapa({ tipo: "preventista", id: Date.now() })}
+                  disabled={!puntoPreventistaMapa}
+                  style={{ border: "1px solid #2563eb", background: puntoPreventistaMapa ? "#eff6ff" : "#f1f5f9", color: puntoPreventistaMapa ? "#1d4ed8" : "#94a3b8", borderRadius: "6px", padding: "5px 8px", fontSize: "10px", fontWeight: "800", cursor: puntoPreventistaMapa ? "pointer" : "not-allowed" }}
+                >
+                  🚗 Centrar en preventista
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAccionMapa({ tipo: "recorrido", id: Date.now() })}
+                  disabled={coordenadasValidas.length === 0}
+                  style={{ border: "1px solid #64748b", background: coordenadasValidas.length ? "#f8fafc" : "#f1f5f9", color: coordenadasValidas.length ? "#334155" : "#94a3b8", borderRadius: "6px", padding: "5px 8px", fontSize: "10px", fontWeight: "800", cursor: coordenadasValidas.length ? "pointer" : "not-allowed" }}
+                >
+                  🗺️ Centrar en recorrido
+                </button>
               </div>
             </div>
 
@@ -3461,6 +3582,7 @@ useEffect(() => {
               <MapContainer center={centroMapa} zoom={14} style={{ height: "100%", width: "100%" }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : null} />
+                <ControlCentradoMapa accion={accionMapa} puntoPreventista={puntoPreventistaMapa} puntosRecorrido={coordenadasValidas} />
 
                 {rutaRecorrida.length > 1 && (
                   <Polyline positions={rutaRecorrida} pathOptions={{ color: "#16a34a", weight: 4, opacity: 0.85 }} />

@@ -4,7 +4,7 @@ import { supabase } from "./supabase";
 const PEDIDOS_DEMO = [];
 
 const LISTA_PREVENTISTAS = ["Walter", "Todos"];
-const LISTA_ESTADOS = ["Ingresado", "En Preparación", "En Depósito"];
+const LISTA_ESTADOS = ["Ingresado", "Pasado a Depósito"];
 
 export default function MonitorPedidos() {
     const [pedidos, setPedidos] = useState([]);
@@ -126,6 +126,7 @@ export default function MonitorPedidos() {
             bultos: p.bultos || itemsReales.reduce((acc, it) => acc + Number(it.cant || 0), 0) || 1,
             total: Number(p.total || p.total_pedido || 0),
             estado: p.estado || "Ingresado",
+            pasado_deposito_at: p.pasado_deposito_at || null,
             items: itemsReales,
             nota: p.notas || p.nota || "Pedido registrado desde app móvil"
           };
@@ -186,6 +187,8 @@ export default function MonitorPedidos() {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [esMovil, setEsMovil] = useState(window.innerWidth < 800);
   const [mostrarExportacion, setMostrarExportacion] = useState(false);
+  const [vistaPedidos, setVistaPedidos] = useState("Activos");
+  const [procesandoDeposito, setProcesandoDeposito] = useState(false);
   const [opcionesEnvio, setOpcionesEnvio] = useState({
     cliente: true,
     direccion: true,
@@ -203,10 +206,17 @@ export default function MonitorPedidos() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  const esPasadoDeposito = (p) => ["PASADO A DEPOSITO", "EN DEPOSITO"].includes(normalizarEstado(p.estado));
+
+  function normalizarEstado(valor) {
+    return String(valor || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
+
   const listaFiltrada = pedidos.filter(p => {
+    const matchVista = vistaPedidos === "Historial" ? esPasadoDeposito(p) : !esPasadoDeposito(p);
     const matchPrev = filtroPreventista === "Todos" || p.preventista === filtroPreventista;
     const matchEst = filtroEstado === "Todos" || p.estado === filtroEstado;
-    return matchPrev && matchEst;
+    return matchVista && matchPrev && matchEst;
   });
 
   const totalFacturado = listaFiltrada.reduce((acc, p) => acc + p.total, 0);
@@ -215,6 +225,7 @@ export default function MonitorPedidos() {
     switch(estado) {
       case "Ingresado": return { bg: "#dcfce7", text: "#15803d", border: "#bbf7d0" };
       case "En Preparación": return { bg: "#fef3c7", text: "#b45309", border: "#fde68a" };
+      case "Pasado a Depósito":
       case "En Depósito": return { bg: "#e0e7ff", text: "#4338ca", border: "#c7d2fe" };
       default: return { bg: "#f1f5f9", text: "#475569", border: "#e2e8f0" };
     }
@@ -323,6 +334,35 @@ export default function MonitorPedidos() {
     }
   };
 
+  const marcarPasadoDeposito = async (pedido) => {
+    if (!pedido?.id) return;
+    const confirmar = window.confirm(`¿Confirmás que el pedido #${pedido.numeroVisible} ya fue pasado a depósito?\n\nSeguirá disponible en Historial para consultar, imprimir o reenviar.`);
+    if (!confirmar) return;
+
+    try {
+      setProcesandoDeposito(true);
+      const ahora = new Date().toISOString();
+      // Usamos el campo estado que ya existe. No dependemos de columnas nuevas.
+      const { error } = await supabase
+        .from("pedidos")
+        .update({ estado: "Pasado a Depósito" })
+        .eq("id", pedido.id);
+      if (error) throw error;
+
+      setPedidos(prev => prev.map(p => String(p.id) === String(pedido.id)
+        ? { ...p, estado: "Pasado a Depósito", pasado_deposito_at: ahora }
+        : p));
+      setPedidoActivo(null);
+      setMostrarExportacion(false);
+      alert("✓ Pedido pasado a depósito. Ya está disponible en Historial.");
+    } catch (e) {
+      console.error("Error pasando pedido a depósito:", e);
+      alert("No se pudo marcar el pedido como pasado a depósito.");
+    } finally {
+      setProcesandoDeposito(false);
+    }
+  };
+
   const estadoAbono = (() => {
     const nombreEmpresa = String(datosCabecera?.empresa || "").trim().toUpperCase();
     if (nombreEmpresa === "DEMO S.A." || nombreEmpresa === "DEMO SA") return { texto: "Cuenta DEMO", color: "#2563eb", icono: "🧪" };
@@ -402,6 +442,15 @@ export default function MonitorPedidos() {
             </div>
           </div>
 
+          <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+            {["Activos", "Historial"].map(v => (
+              <button key={v} type="button" onClick={() => { setVistaPedidos(v); setFiltroEstado("Todos"); setPedidoActivo(null); }}
+                style={{ padding: "8px 14px", borderRadius: "8px", border: vistaPedidos === v ? "1px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === v ? "#eff6ff" : "#fff", color: vistaPedidos === v ? "#1d4ed8" : "#475569", fontWeight: "800", cursor: "pointer" }}>
+                {v === "Activos" ? "📥 Comandas Activas" : "📚 Historial"}
+              </button>
+            ))}
+          </div>
+
           {/* Barra de Filtros */}
           <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "12px", display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: "1 1 140px" }}>
@@ -411,20 +460,22 @@ export default function MonitorPedidos() {
                 {preventistasReales.map((p, i) => <option key={i} value={p}>{p}</option>)}
               </select>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: "1 1 130px" }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "#475569" }}>📋 Estado:</span>
-              <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ flex: 1, padding: "6px 8px", borderRadius: "6px", border: "1.5px solid #2563eb", fontSize: "12px", background: "#ffffff", color: "#0f172a", fontWeight: "700", outline: "none" }}>
-                <option value="Todos">Todos</option>
-                {LISTA_ESTADOS.map((est, i) => <option key={i} value={est}>{est}</option>)}
-              </select>
-            </div>
+            {vistaPedidos === "Activos" && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: "1 1 130px" }}>
+                <span style={{ fontSize: "11px", fontWeight: "700", color: "#475569" }}>📋 Estado:</span>
+                <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ flex: 1, padding: "6px 8px", borderRadius: "6px", border: "1.5px solid #2563eb", fontSize: "12px", background: "#ffffff", color: "#0f172a", fontWeight: "700", outline: "none" }}>
+                  <option value="Todos">Todos</option>
+                  <option value="Ingresado">Ingresado</option>
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Grilla de Comandas y Detalle en Columna Móvil */}
           <div style={{ display: "flex", flexDirection: esMovil ? "column" : "row", gap: "12px", alignItems: "start" }}>
             <div style={{ width: esMovil ? "100%" : "55%" }}>
               <div style={{ fontSize: "11px", fontWeight: "800", color: "#475569", marginBottom: "8px", textTransform: "uppercase" }}>
-                Comandas Activas ({listaFiltrada.length})
+                {vistaPedidos === "Activos" ? "Comandas Activas" : "Historial"} ({listaFiltrada.length})
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {listaFiltrada.map(p => {
@@ -542,6 +593,21 @@ export default function MonitorPedidos() {
                         📋 Copiar para email
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {vistaPedidos === "Activos" ? (
+                  <button
+                    type="button"
+                    onClick={() => marcarPasadoDeposito(pedidoActivo)}
+                    disabled={procesandoDeposito}
+                    style={{ width: "100%", marginTop: "10px", background: "#16a34a", color: "#fff", border: "none", padding: "11px", borderRadius: "6px", fontSize: "12px", fontWeight: "900", cursor: procesandoDeposito ? "wait" : "pointer" }}
+                  >
+                    {procesandoDeposito ? "Procesando..." : "✅ PASADO A DEPÓSITO"}
+                  </button>
+                ) : (
+                  <div style={{ marginTop: "10px", padding: "9px 10px", borderRadius: "7px", background: "#eef2ff", color: "#3730a3", fontSize: "11px", fontWeight: "700" }}>
+                    📚 Pedido archivado como pasado a depósito. Podés volver a imprimirlo o reenviarlo por cualquiera de las vías disponibles.
                   </div>
                 )}
               </div>
