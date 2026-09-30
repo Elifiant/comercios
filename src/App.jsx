@@ -434,6 +434,32 @@ useEffect(() => {
   };
 
 
+  // 📍 Pide una coordenada REALMENTE nueva.
+  // Se usa en acciones que deben quedar georreferenciadas (capturas, visitas, etc.).
+  const obtenerUbicacionFresca = () => new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocalización no disponible"));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setPosicionActual([lat, lng]);
+        await transmitirUbicacionEnVivo(lat, lng);
+        resolve({ lat, lng, accuracy: position.coords.accuracy });
+      },
+      (error) => reject(error),
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      }
+    );
+  });
+
+
   const emitirActividadEnVivo = async () => {
     try {
       const email = sesion?.user?.email || perfil?.email;
@@ -445,9 +471,7 @@ useEffect(() => {
       await supabase.from("perfiles").update({ 
         ultima_conexion: new Date().toISOString(),
         activo_hoy: true,
-        latitud: posicionActual?.[0] || null,
-        longitud: posicionActual?.[1] || null,
-        ultima_posicion_at: new Date().toISOString() 
+        // La actividad no "fabrica" una posición nueva. El GPS vivo actualiza coordenadas y hora. 
       }).eq("email", email);
 
       // Registra en visitas para que el Supervisor lo tome como actividad hoy
@@ -473,9 +497,7 @@ useEffect(() => {
         .update({ 
           ultima_conexion: new Date().toISOString(),
         activo_hoy: true,
-        latitud: posicionActual?.[0] || null,
-        longitud: posicionActual?.[1] || null,
-        ultima_posicion_at: new Date().toISOString() 
+        // La actividad no "fabrica" una posición nueva. El GPS vivo actualiza coordenadas y hora.
         })
         .eq("email", emailUsuario);
     } catch (e) {
@@ -716,6 +738,14 @@ useEffect(() => {
         localStorage.setItem('hora_inicio_jornada', ahora);
       }
 
+      // Para una visita NO usamos una posición vieja: pedimos GPS fresco en este instante.
+      let coordsVisita = null;
+      try {
+        coordsVisita = await obtenerUbicacionFresca();
+      } catch (gpsError) {
+        console.warn("No se pudo obtener GPS fresco para la visita:", gpsError);
+      }
+
       const nuevaVisita = {
         comercio_id: comercio.id,
         comercio_nombre: comercio.nombre || ('Comercio #' + comercio.id),
@@ -724,8 +754,8 @@ useEffect(() => {
         empresa_id: perfil?.empresa_id || null,
         resultado: resultadoDirecto || resultadoVisita,
         observacion: observacionDirecta || observacionVisita || 'Visita registrada en campo',
-        latitud: posicionActual ? posicionActual[0] : (comercio.latitud || null),
-        longitud: posicionActual ? posicionActual[1] : (comercio.longitud || null),
+        latitud: coordsVisita?.lat ?? (posicionActual ? posicionActual[0] : (comercio.latitud || null)),
+        longitud: coordsVisita?.lng ?? (posicionActual ? posicionActual[1] : (comercio.longitud || null)),
         fecha: ahora
       };
 
@@ -1047,37 +1077,15 @@ const solicitarNoVisitar = async (comercio) => {
       }
     };
 
-   // Si el GPS en vivo ya tiene una posición, guardar inmediatamente
-if (posicionActual && posicionActual[0] && posicionActual[1]) {
-  guardarConCoords(posicionActual[0], posicionActual[1]);
-  return;
-}
-
-// Respaldo: si todavía no llegó una posición del GPS en vivo,
-// pedir una ubicación nueva
-if (navigator.geolocation) {
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      guardarConCoords(
-        pos.coords.latitude,
-        pos.coords.longitude
-      );
-    },
-    (err) => {
-      console.warn("No se pudo obtener ubicación:", err);
-      alert("Esperá unos segundos hasta que el GPS encuentre tu ubicación.");
-      setTextoBotonAgregar("➕ AGREGAR COMERCIO");
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0
-    }
-  );
-} else {
-  alert("Este dispositivo no tiene geolocalización disponible.");
-  setTextoBotonAgregar("➕ AGREGAR COMERCIO");
-} 
+   // Una captura SIEMPRE pide una coordenada fresca.
+// Nunca reutilizamos posicionActual, porque podría pertenecer a otro lugar.
+obtenerUbicacionFresca()
+  .then(({ lat, lng }) => guardarConCoords(lat, lng))
+  .catch((err) => {
+    console.warn("No se pudo obtener ubicación fresca:", err);
+    alert("No pude confirmar tu ubicación actual. Esperá unos segundos y volvé a intentar.");
+    setTextoBotonAgregar("➕ AGREGAR COMERCIO");
+  });
   };
 
   // 📊 MÉTRICA REAL DE VISITAS DE HOY
@@ -1241,25 +1249,26 @@ if (navigator.geolocation) {
 
   const [modoManejo, setModoManejo] = useState(false);
   const [renovarWakeLock, setRenovarWakeLock] = useState(0);
-// 📍 GPS EN VIVO PARA MODO MANEJO
+// 📍 GPS EN VIVO DURANTE TODA LA JORNADA
+// Ya no depende de Modo Manejo: funciona en HOY, ficha, pedidos, edición, etc.
 useEffect(() => {
-  if (!modoManejo) return;
+  if (!jornadaActiva || !sesion?.user?.id) return;
 
   if (!navigator.geolocation) {
     console.log("Geolocalización no disponible");
     return;
   }
 
+  const recibirPosicion = (position) => {
+    const lat = position.coords.latitude;
+    const lng = position.coords.longitude;
+    setPosicionActual([lat, lng]);
+    transmitirUbicacionEnVivo(lat, lng);
+  };
+
   const watchId = navigator.geolocation.watchPosition(
-    (position) => {
-      setPosicionActual([
-        position.coords.latitude,
-        position.coords.longitude,
-      ]);
-    },
-    (error) => {
-      console.error("Error GPS en Modo Manejo:", error);
-    },
+    recibirPosicion,
+    (error) => console.error("Error GPS durante la jornada:", error),
     {
       enableHighAccuracy: true,
       timeout: 15000,
@@ -1267,10 +1276,30 @@ useEffect(() => {
     }
   );
 
+  // Refuerzo mientras la app está visible: solicita una lectura fresca periódicamente.
+  // Así el Supervisor no depende únicamente de que watchPosition dispare un cambio.
+  const refrescarSiVisible = () => {
+    if (document.visibilityState !== "visible") return;
+    navigator.geolocation.getCurrentPosition(
+      recibirPosicion,
+      (error) => console.warn("Refresco GPS:", error.message),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+  refrescarSiVisible();
+  const intervaloGPS = window.setInterval(refrescarSiVisible, 30000);
+  const alVolverApp = () => refrescarSiVisible();
+  document.addEventListener("visibilitychange", alVolverApp);
+  window.addEventListener("focus", alVolverApp);
+
   return () => {
     navigator.geolocation.clearWatch(watchId);
+    window.clearInterval(intervaloGPS);
+    document.removeEventListener("visibilitychange", alVolverApp);
+    window.removeEventListener("focus", alVolverApp);
   };
-}, [modoManejo]);
+}, [jornadaActiva, sesion?.user?.id]);
 // 📋 CARGAR VISITAS PARA EL MAPA
 useEffect(() => {
   if (!sesion?.user) return;
