@@ -273,6 +273,9 @@ const reactivarComercio = async (comercio) => {
   const [pedidosReal, setPedidosReal] = useState([]);
   const [cargandoPedidosReal, setCargandoPedidosReal] = useState(false);
   const [pedidosSupervisor, setPedidosSupervisor] = useState([]);
+  const [disponibilidadArticulos, setDisponibilidadArticulos] = useState([]);
+  const [cargandoDisponibilidad, setCargandoDisponibilidad] = useState(false);
+  const [busquedaDisponibilidad, setBusquedaDisponibilidad] = useState("");
   const [seccionActiva, setSeccionActiva] = useState("monitoreo");
   const [cargando, setCargando] = useState(true);
   const [perfiles, setPerfiles] = useState([]);
@@ -327,6 +330,98 @@ const reactivarComercio = async (comercio) => {
   const [archivoListaPreciosNombre, setArchivoListaPreciosNombre] = useState("");
   const [vistaPreviaListaPrecios, setVistaPreviaListaPrecios] = useState(null);
   const inputArchivoListaPreciosRef = useRef(null);
+
+  // 📦 Stock — importación Excel del supervisor (primera etapa: lectura y vista previa)
+  const [archivoStockNombre, setArchivoStockNombre] = useState("");
+  const [vistaPreviaStock, setVistaPreviaStock] = useState(null);
+  const [cargandoStockArchivo, setCargandoStockArchivo] = useState(false);
+  const inputArchivoStockRef = useRef(null);
+
+  const leerArchivoStock = async (event) => {
+    const archivo = event.target.files?.[0];
+    if (!archivo) return;
+    setCargandoStockArchivo(true);
+    setArchivoStockNombre(archivo.name);
+    setVistaPreviaStock(null);
+
+    try {
+      const buffer = await archivo.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const hoja = workbook.Sheets[workbook.SheetNames[0]];
+      const matriz = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: "", raw: false });
+      const filasUtiles = matriz
+        .map((fila, indice) => ({ fila, numeroOriginal: indice + 1 }))
+        .filter(x => Array.isArray(x.fila) && x.fila.some(c => String(c ?? "").trim() !== ""));
+
+      if (!filasUtiles.length) throw new Error("La planilla está vacía.");
+
+      const normalizar = v => String(v ?? "").trim().toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const aliasCodigo = ["codigo", "cod", "sku", "codigo producto", "codigo articulo", "codigo_articulo"];
+      const aliasDescripcion = ["articulo", "producto", "descripcion", "nombre", "detalle"];
+      const aliasStock = ["stock", "existencia", "existencias", "cantidad", "disponible", "saldo"];
+
+      let encabezadoIndex = -1;
+      let colCodigo = -1;
+      let colDescripcion = -1;
+      let colStock = -1;
+
+      for (let i = 0; i < Math.min(filasUtiles.length, 20); i += 1) {
+        const cols = filasUtiles[i].fila.map(normalizar);
+        const buscar = aliases => cols.findIndex(c => aliases.includes(c));
+        const c = buscar(aliasCodigo);
+        const d = buscar(aliasDescripcion);
+        const st = buscar(aliasStock);
+        if (c >= 0 && d >= 0 && st >= 0) {
+          encabezadoIndex = i; colCodigo = c; colDescripcion = d; colStock = st; break;
+        }
+      }
+
+      if (encabezadoIndex < 0) {
+        throw new Error("No pude detectar automáticamente las columnas Código, Artículo/Descripción y Stock.");
+      }
+
+      const encabezado = filasUtiles[encabezadoIndex];
+      const datos = filasUtiles.slice(encabezadoIndex + 1);
+      const validos = [];
+      const invalidos = [];
+
+      datos.forEach(x => {
+        const codigo = String(x.fila[colCodigo] ?? "").trim();
+        const descripcion = String(x.fila[colDescripcion] ?? "").trim();
+        let stockTexto = String(x.fila[colStock] ?? "").trim().replace(/\s/g, "");
+        if (stockTexto.includes(",") && !stockTexto.includes(".")) stockTexto = stockTexto.replace(",", ".");
+        stockTexto = stockTexto.replace(/[^0-9.-]/g, "");
+        const stock = Number(stockTexto);
+        if (!codigo && !descripcion) return;
+        if (!codigo || !Number.isFinite(stock) || stock < 0) {
+          invalidos.push({ fila: x.numeroOriginal, codigo, descripcion, stock: x.fila[colStock], motivo: !codigo ? "Código vacío" : "Stock inválido" });
+          return;
+        }
+        validos.push({ fila: x.numeroOriginal, codigo, descripcion, stock });
+      });
+
+      setVistaPreviaStock({
+        hoja: workbook.SheetNames[0],
+        filaEncabezado: encabezado.numeroOriginal,
+        encabezados: encabezado.fila,
+        nombresColumnas: {
+          codigo: String(encabezado.fila[colCodigo] ?? "Código"),
+          descripcion: String(encabezado.fila[colDescripcion] ?? "Descripción"),
+          stock: String(encabezado.fila[colStock] ?? "Stock"),
+        },
+        validos, invalidos, totalFilas: validos.length + invalidos.length,
+      });
+    } catch (error) {
+      console.error("Error leyendo archivo de stock:", error);
+      alert("❌ No se pudo leer la planilla de stock: " + (error.message || "Formato inválido"));
+      setArchivoStockNombre("");
+      setVistaPreviaStock(null);
+    } finally {
+      setCargandoStockArchivo(false);
+      event.target.value = "";
+    }
+  };
   const [listasPreciosEmpresa, setListasPreciosEmpresa] = useState([]);
   const [listaPreciosSeleccionadaId, setListaPreciosSeleccionadaId] = useState("");
   const [cargandoListasPrecios, setCargandoListasPrecios] = useState(false);
@@ -397,6 +492,99 @@ const reactivarComercio = async (comercio) => {
 
     inicializarSupervisor();
   }, []);
+    // 📦 Disponibilidad operativa: productos pedidos hoy + estado manual del supervisor
+  const cargarDisponibilidadArticulos = async () => {
+    if (!perfilSupervisor?.empresa_id) return;
+    setCargandoDisponibilidad(true);
+    try {
+      const inicioHoy = new Date();
+      inicioHoy.setHours(0, 0, 0, 0);
+      const inicioManana = new Date(inicioHoy);
+      inicioManana.setDate(inicioManana.getDate() + 1);
+
+      const { data: productos, error: errorProductos } = await supabase
+        .from("productos")
+        .select("id, codigo_cge, nombre, marca, activo")
+        .neq("activo", false)
+        .order("nombre", { ascending: true });
+      if (errorProductos) throw errorProductos;
+
+      const { data: pedidosHoy, error: errorPedidos } = await supabase
+        .from("pedidos")
+        .select("id")
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .gte("created_at", inicioHoy.toISOString())
+        .lt("created_at", inicioManana.toISOString());
+      if (errorPedidos) throw errorPedidos;
+
+      const idsPedidos = (pedidosHoy || []).map(p => p.id).filter(Boolean);
+      let cantidades = new Map();
+      if (idsPedidos.length > 0) {
+        const { data: items, error: errorItems } = await supabase
+          .from("pedido_items")
+          .select("producto_id, cantidad")
+          .in("pedido_id", idsPedidos);
+        if (errorItems) throw errorItems;
+        (items || []).forEach(it => {
+          const k = String(it.producto_id);
+          cantidades.set(k, (cantidades.get(k) || 0) + Number(it.cantidad || 0));
+        });
+      }
+
+      const { data: estados, error: errorEstados } = await supabase
+        .from("productos_disponibilidad")
+        .select("producto_id, estado, observacion, actualizado_at")
+        .eq("empresa_id", perfilSupervisor.empresa_id);
+      if (errorEstados) throw errorEstados;
+      const estadosPorProducto = new Map((estados || []).map(e => [String(e.producto_id), e]));
+
+      setDisponibilidadArticulos((productos || []).map(p => {
+        const e = estadosPorProducto.get(String(p.id));
+        return {
+          ...p,
+          pedidosHoy: cantidades.get(String(p.id)) || 0,
+          estado: e?.estado || "disponible",
+          observacion: e?.observacion || "",
+          actualizado_at: e?.actualizado_at || null,
+        };
+      }));
+    } catch (err) {
+      console.error("Error cargando disponibilidad operativa:", err);
+      alert("❌ No se pudo cargar Disponibilidad: " + (err.message || "Error desconocido"));
+    } finally {
+      setCargandoDisponibilidad(false);
+    }
+  };
+
+  const cambiarEstadoDisponibilidad = async (producto, nuevoEstado) => {
+    if (!perfilSupervisor?.empresa_id || !producto?.id) return;
+    const anterior = disponibilidadArticulos;
+    setDisponibilidadArticulos(prev => prev.map(p =>
+      String(p.id) === String(producto.id) ? { ...p, estado: nuevoEstado } : p
+    ));
+    try {
+      const { error } = await supabase
+        .from("productos_disponibilidad")
+        .upsert({
+          empresa_id: perfilSupervisor.empresa_id,
+          producto_id: producto.id,
+          estado: nuevoEstado,
+          actualizado_at: new Date().toISOString(),
+          actualizado_por: sesionSupervisor?.user?.id || perfilSupervisor?.id || null,
+        }, { onConflict: "empresa_id,producto_id" });
+      if (error) throw error;
+    } catch (err) {
+      setDisponibilidadArticulos(anterior);
+      alert("❌ No se pudo cambiar el estado: " + (err.message || "Error desconocido"));
+    }
+  };
+
+  useEffect(() => {
+    if (seccionActiva === "disponibilidad" && perfilSupervisor?.empresa_id) {
+      cargarDisponibilidadArticulos();
+    }
+  }, [seccionActiva, perfilSupervisor?.empresa_id]);
+
     // 🔄 Mantener actualizada la actividad de los preventistas
 useEffect(() => {
   if (!perfilSupervisor?.empresa_id) return;
@@ -2123,6 +2311,18 @@ useEffect(() => {
           📦 Pedidos
         </button>
         <button
+          onClick={() => setSeccionActiva("stock")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "stock" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "stock" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          📥 CARGAR STOCK
+        </button>
+        <button
+          onClick={() => setSeccionActiva("disponibilidad")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "disponibilidad" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "disponibilidad" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          📦 Disponibilidad
+        </button>
+        <button
           onClick={() => setSeccionActiva("clientes")}
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "clientes" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "clientes" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
@@ -2633,6 +2833,120 @@ useEffect(() => {
             perfilSupervisor={perfilSupervisor}
             perfiles={perfiles}
           />
+                  ) : seccionActiva === "stock" ? (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>📊 Stock</h2>
+                <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>
+                  Cargá la planilla de stock de la empresa. Esta primera etapa solo lee y muestra una vista previa: todavía no modifica Supabase.
+                </p>
+              </div>
+              <button type="button" onClick={() => inputArchivoStockRef.current?.click()} disabled={cargandoStockArchivo} style={{ background: cargandoStockArchivo ? "#94a3b8" : "#2563eb", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 20px", fontSize: "14px", fontWeight: "900", cursor: cargandoStockArchivo ? "wait" : "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.25)" }}>
+                {cargandoStockArchivo ? "LEYENDO..." : "📥 CARGAR EXCEL DE STOCK"}
+              </button>
+              <input ref={inputArchivoStockRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoStock} style={{ display: "none" }} />
+            </div>
+
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "10px", padding: "12px", marginBottom: "14px", fontSize: "12px", color: "#1e3a8a" }}>
+              🔒 La carga queda asociada a la empresa del supervisor conectado. El stock de otras empresas no se mezcla.
+            </div>
+
+            {!vistaPreviaStock ? (
+              <div style={{ background: "#fff", border: "1px dashed #cbd5e1", borderRadius: "12px", padding: "40px 18px", textAlign: "center", color: "#64748b" }}>
+                <div style={{ fontSize: "34px", marginBottom: "8px" }}>📄</div>
+                <div style={{ fontWeight: "900", color: "#334155" }}>Todavía no cargaste una planilla</div>
+                <div style={{ marginTop: "5px", fontSize: "12px" }}>RutaComercio intentará detectar Código, Artículo/Descripción y Stock aunque los encabezados no estén en la primera fila.</div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "9px", marginBottom: "14px" }}>
+                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>ARCHIVO</div><div style={{ fontSize: "13px", fontWeight: "900", marginTop: "4px", overflowWrap: "anywhere" }}>{archivoStockNombre}</div></div>
+                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>ENCABEZADO DETECTADO</div><div style={{ fontSize: "20px", fontWeight: "900" }}>Fila {vistaPreviaStock.filaEncabezado}</div></div>
+                  <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#166534", fontWeight: "800" }}>FILAS VÁLIDAS</div><div style={{ fontSize: "22px", fontWeight: "900", color: "#15803d" }}>{vistaPreviaStock.validos.length}</div></div>
+                  <div style={{ background: vistaPreviaStock.invalidos.length ? "#fef2f2" : "#fff", border: `1px solid ${vistaPreviaStock.invalidos.length ? "#fecaca" : "#e2e8f0"}`, borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: vistaPreviaStock.invalidos.length ? "#991b1b" : "#64748b", fontWeight: "800" }}>A REVISAR</div><div style={{ fontSize: "22px", fontWeight: "900", color: vistaPreviaStock.invalidos.length ? "#dc2626" : "#0f172a" }}>{vistaPreviaStock.invalidos.length}</div></div>
+                </div>
+
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", marginBottom: "12px", fontSize: "12px", color: "#475569" }}>
+                  Detectado: <b>{vistaPreviaStock.nombresColumnas.codigo}</b> → Código · <b>{vistaPreviaStock.nombresColumnas.descripcion}</b> → Descripción · <b>{vistaPreviaStock.nombresColumnas.stock}</b> → Stock
+                </div>
+
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "650px" }}>
+                    <thead><tr style={{ background: "#f8fafc", textAlign: "left" }}><th style={{ padding: "10px" }}>Fila</th><th style={{ padding: "10px" }}>Código archivo</th><th style={{ padding: "10px" }}>Artículo / descripción</th><th style={{ padding: "10px", textAlign: "right" }}>Stock informado</th></tr></thead>
+                    <tbody>
+                      {vistaPreviaStock.validos.slice(0, 100).map((item, idx) => (
+                        <tr key={`${item.fila}-${idx}`} style={{ borderTop: "1px solid #f1f5f9" }}><td style={{ padding: "9px", color: "#64748b" }}>{item.fila}</td><td style={{ padding: "9px", fontWeight: "800" }}>{item.codigo}</td><td style={{ padding: "9px" }}>{item.descripcion || "—"}</td><td style={{ padding: "9px", textAlign: "right", fontWeight: "900" }}>{item.stock}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {vistaPreviaStock.validos.length > 100 && <div style={{ marginTop: "8px", fontSize: "11px", color: "#64748b" }}>Mostrando las primeras 100 filas de {vistaPreviaStock.validos.length}.</div>}
+                <div style={{ marginTop: "14px", padding: "12px", borderRadius: "9px", background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: "12px", fontWeight: "700" }}>
+                  ⚠️ Vista previa solamente. Todavía no se actualizó ningún stock. El próximo paso será relacionar los códigos del archivo con los productos de RutaComercio antes de confirmar.
+                </div>
+              </div>
+            )}
+          </div>
+                  ) : seccionActiva === "disponibilidad" ? (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>📦 Disponibilidad operativa</h2>
+                <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>
+                  No reemplaza el stock del depósito. Resume lo pedido hoy y permite advertir o bloquear artículos temporalmente.
+                </p>
+              </div>
+              <button type="button" onClick={cargarDisponibilidadArticulos} style={{ background: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 14px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}>
+                🔄 Actualizar
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "9px", marginBottom: "14px" }}>
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>ARTÍCULOS</div><div style={{ fontSize: "22px", fontWeight: "900" }}>{disponibilidadArticulos.length}</div></div>
+              <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#9a3412", fontWeight: "800" }}>STOCK CRÍTICO</div><div style={{ fontSize: "22px", fontWeight: "900", color: "#c2410c" }}>{disponibilidadArticulos.filter(p => p.estado === "critico").length}</div></div>
+              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#991b1b", fontWeight: "800" }}>BLOQUEADOS</div><div style={{ fontSize: "22px", fontWeight: "900", color: "#dc2626" }}>{disponibilidadArticulos.filter(p => p.estado === "bloqueado").length}</div></div>
+              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#1e40af", fontWeight: "800" }}>UNIDADES PEDIDAS HOY</div><div style={{ fontSize: "22px", fontWeight: "900", color: "#2563eb" }}>{disponibilidadArticulos.reduce((a,p) => a + Number(p.pedidosHoy || 0), 0)}</div></div>
+            </div>
+
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", marginBottom: "12px" }}>
+              <input value={busquedaDisponibilidad} onChange={e => setBusquedaDisponibilidad(e.target.value)} placeholder="🔍 Buscar artículo, marca o código CGE..." style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "13px" }} />
+            </div>
+
+            {cargandoDisponibilidad ? (
+              <div style={{ padding: "35px", textAlign: "center", color: "#64748b" }}>⏳ Cargando disponibilidad...</div>
+            ) : (
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>
+                {disponibilidadArticulos
+                  .filter(p => {
+                    const q = busquedaDisponibilidad.trim().toLowerCase();
+                    return !q || [p.nombre, p.marca, p.codigo_cge].some(v => String(v || "").toLowerCase().includes(q));
+                  })
+                  .sort((a,b) => Number(b.pedidosHoy || 0) - Number(a.pedidosHoy || 0) || String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"))
+                  .map(p => (
+                    <div key={p.id} style={{ display: "grid", gridTemplateColumns: "minmax(220px, 2fr) 110px minmax(280px, 1.4fr)", gap: "10px", alignItems: "center", padding: "11px 12px", borderBottom: "1px solid #f1f5f9" }}>
+                      <div>
+                        <div style={{ fontSize: "13px", fontWeight: "900", color: "#0f172a" }}>{p.nombre || "Artículo"}</div>
+                        <div style={{ fontSize: "10px", color: "#64748b", marginTop: "2px" }}>{p.codigo_cge || "Sin CGE"}{p.marca ? ` · ${p.marca}` : ""}</div>
+                      </div>
+                      <div style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: "18px", fontWeight: "900", color: Number(p.pedidosHoy) > 0 ? "#2563eb" : "#94a3b8" }}>{p.pedidosHoy}</div>
+                        <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>PEDIDAS HOY</div>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "5px" }}>
+                        {[
+                          ["disponible", "🟢 Disponible"],
+                          ["critico", "🟠 Crítico"],
+                          ["bloqueado", "🔴 Bloqueado"],
+                        ].map(([estado, etiqueta]) => (
+                          <button key={estado} type="button" onClick={() => cambiarEstadoDisponibilidad(p, estado)} style={{ padding: "7px 5px", borderRadius: "7px", border: p.estado === estado ? "2px solid #2563eb" : "1px solid #cbd5e1", background: p.estado === estado ? "#eff6ff" : "#fff", color: "#334155", fontSize: "10px", fontWeight: "800", cursor: "pointer" }}>{etiqueta}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
          ) : seccionActiva === "clientes" ? (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import * as XLSX from "xlsx";
 
 const PEDIDOS_DEMO = [];
 
@@ -11,6 +12,22 @@ export default function MonitorPedidos() {
   const [cargandoPedidos, setCargandoPedidos] = useState(true);
   const [preventistasReales, setPreventistasReales] = useState(["Todos"]);
   const [datosCabecera, setDatosCabecera] = useState({ empresa: "", abonado_hasta: null });
+  const [empresaIdActual, setEmpresaIdActual] = useState(null);
+  const [disponibilidadProductos, setDisponibilidadProductos] = useState({});
+  const [busquedaDisponibilidad, setBusquedaDisponibilidad] = useState("");
+  const [guardandoDisponibilidad, setGuardandoDisponibilidad] = useState(null);
+  const [archivoStockNombre, setArchivoStockNombre] = useState("");
+  const [stockVistaPrevia, setStockVistaPrevia] = useState([]);
+  const [stockColumnas, setStockColumnas] = useState({ codigo: "", descripcion: "", stock: "" });
+  const [stockEncabezadoFila, setStockEncabezadoFila] = useState(null);
+  const [stockMensaje, setStockMensaje] = useState("");
+  const [cargandoStockArchivo, setCargandoStockArchivo] = useState(false);
+  const [stockReconocidos, setStockReconocidos] = useState([]);
+  const [stockNoReconocidos, setStockNoReconocidos] = useState([]);
+  const [analizandoStock, setAnalizandoStock] = useState(false);
+  const [productosStockCatalogo, setProductosStockCatalogo] = useState([]);
+  const [productosNuevosPropuestos, setProductosNuevosPropuestos] = useState([]);
+  const [confirmandoImportacionStock, setConfirmandoImportacionStock] = useState(false);
 
   const cargarPedidosReales = async () => {
     try {
@@ -28,6 +45,7 @@ export default function MonitorPedidos() {
 
       if (errorPerfil) throw errorPerfil;
       if (!perfil?.empresa_id) throw new Error("El usuario no tiene empresa_id asignado.");
+      setEmpresaIdActual(perfil.empresa_id);
 
       // Datos visuales para repetir la cabecera real del Supervisor
       const { data: empresaCabecera } = await supabase
@@ -178,9 +196,40 @@ export default function MonitorPedidos() {
     }
   };
 
+  const cargarDisponibilidadProductos = async (empresaId = empresaIdActual) => {
+    if (!empresaId) return;
+    try {
+      const { data, error } = await supabase
+        .from("productos_disponibilidad")
+        .select("producto_id, estado, observacion, actualizado_at")
+        .eq("empresa_id", empresaId);
+
+      if (error) throw error;
+
+      const mapa = {};
+      (data || []).forEach(row => {
+        mapa[String(row.producto_id)] = {
+          estado: row.estado || "disponible",
+          observacion: row.observacion || "",
+          actualizado_at: row.actualizado_at || null,
+        };
+      });
+      setDisponibilidadProductos(mapa);
+    } catch (err) {
+      console.warn("Error leyendo disponibilidad:", err);
+    }
+  };
+
   useEffect(() => {
     cargarPedidosReales();
   }, []);
+
+  useEffect(() => {
+    if (empresaIdActual) {
+      cargarDisponibilidadProductos(empresaIdActual);
+      cargarCatalogoProductosStock();
+    }
+  }, [empresaIdActual]);
   const [filtroPreventista, setFiltroPreventista] = useState("Todos");
   const [filtroEstado, setFiltroEstado] = useState("Todos");
   const [pedidoActivo, setPedidoActivo] = useState(PEDIDOS_DEMO[0]);
@@ -220,6 +269,416 @@ export default function MonitorPedidos() {
   });
 
   const totalFacturado = listaFiltrada.reduce((acc, p) => acc + p.total, 0);
+
+  const resumenArticulosHoy = (() => {
+    const mapa = new Map();
+    pedidos.forEach(p => {
+      (p.items || []).forEach(it => {
+        const productoId = it.productoId ?? it.producto_id ?? null;
+        if (!productoId) return;
+        const clave = String(productoId);
+        const actual = mapa.get(clave) || {
+          productoId,
+          codigo: it.codigo || "",
+          nombre: it.nombre || it.producto_nombre || "Artículo",
+          cantidad: 0,
+          pedidos: new Set(),
+        };
+        actual.cantidad += Number(it.cant ?? it.cantidad ?? 0);
+        actual.pedidos.add(String(p.id));
+        if (!actual.codigo && it.codigo) actual.codigo = it.codigo;
+        if ((!actual.nombre || actual.nombre === "Artículo") && it.nombre) actual.nombre = it.nombre;
+        mapa.set(clave, actual);
+      });
+    });
+    return Array.from(mapa.values())
+      .map(x => ({ ...x, pedidosCount: x.pedidos.size }))
+      .sort((a, b) => b.cantidad - a.cantidad || a.nombre.localeCompare(b.nombre, "es"));
+  })();
+
+  const resumenArticulosFiltrado = resumenArticulosHoy.filter(it => {
+    const q = busquedaDisponibilidad.trim().toLowerCase();
+    if (!q) return true;
+    return `${it.codigo} ${it.nombre}`.toLowerCase().includes(q);
+  });
+
+  const totalUnidadesHoy = resumenArticulosHoy.reduce((acc, it) => acc + it.cantidad, 0);
+  const totalCriticos = resumenArticulosHoy.filter(it => (disponibilidadProductos[String(it.productoId)]?.estado || "disponible") === "critico").length;
+  const totalBloqueados = resumenArticulosHoy.filter(it => (disponibilidadProductos[String(it.productoId)]?.estado || "disponible") === "bloqueado").length;
+
+  const cambiarEstadoDisponibilidad = async (item, estado) => {
+    if (!empresaIdActual || !item?.productoId) return;
+    setGuardandoDisponibilidad(String(item.productoId));
+    try {
+      if (estado === "disponible") {
+        const { error } = await supabase
+          .from("productos_disponibilidad")
+          .delete()
+          .eq("empresa_id", empresaIdActual)
+          .eq("producto_id", item.productoId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("productos_disponibilidad")
+          .upsert([{
+            empresa_id: empresaIdActual,
+            producto_id: item.productoId,
+            estado,
+            actualizado_at: new Date().toISOString(),
+          }], { onConflict: "empresa_id,producto_id" });
+        if (error) throw error;
+      }
+
+      await cargarDisponibilidadProductos(empresaIdActual);
+    } catch (err) {
+      console.error("Error cambiando disponibilidad:", err);
+      alert("❌ No se pudo actualizar la disponibilidad: " + (err.message || "Error desconocido"));
+    } finally {
+      setGuardandoDisponibilidad(null);
+    }
+  };
+
+  const normalizarTextoStock = (valor) =>
+    String(valor ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+  const elegirColumnaStock = (encabezados, candidatos) => {
+    const normalizados = encabezados.map(h => ({ original: h, normal: normalizarTextoStock(h) }));
+    for (const candidato of candidatos) {
+      const exacta = normalizados.find(h => h.normal === candidato);
+      if (exacta) return exacta.original;
+    }
+    for (const candidato of candidatos) {
+      const parcial = normalizados.find(h => h.normal.includes(candidato));
+      if (parcial) return parcial.original;
+    }
+    return "";
+  };
+
+  const cargarCatalogoProductosStock = async () => {
+    if (!empresaIdActual) return;
+
+    try {
+      // 1. Solo las listas pertenecientes a la empresa del Supervisor.
+      const { data: listasEmpresa, error: errorListas } = await supabase
+        .from("listas_precios")
+        .select("id")
+        .eq("empresa_id", empresaIdActual)
+        .eq("activo", true);
+
+      if (errorListas) throw errorListas;
+
+      const idsListas = (listasEmpresa || []).map(l => l.id).filter(Boolean);
+      if (idsListas.length === 0) {
+        setProductosStockCatalogo([]);
+        return;
+      }
+
+      // 2. Solo los producto_id incluidos en esas listas.
+      const { data: filasLista, error: errorFilas } = await supabase
+        .from("lista_productos")
+        .select("producto_id")
+        .in("lista_id", idsListas)
+        .eq("activo", true);
+
+      if (errorFilas) throw errorFilas;
+
+      const idsProductos = [...new Set((filasLista || []).map(x => x.producto_id).filter(Boolean))];
+      if (idsProductos.length === 0) {
+        setProductosStockCatalogo([]);
+        return;
+      }
+
+      // 3. Recién ahora traer esos productos, nunca el catálogo global.
+      const { data: productosEmpresa, error: errorProductos } = await supabase
+        .from("productos")
+        .select("id, codigo_cge, nombre, marca, presentacion, descripcion, activo")
+        .in("id", idsProductos)
+        .eq("activo", true)
+        .order("nombre", { ascending: true });
+
+      if (errorProductos) throw errorProductos;
+      setProductosStockCatalogo(productosEmpresa || []);
+    } catch (error) {
+      console.error("Error cargando catálogo de stock de la empresa:", error);
+      setProductosStockCatalogo([]);
+    }
+  };
+
+  const textoProductoStock = (p) => {
+    if (!p) return "";
+    const codigo = p.codigo_cge || p.cge || p.codigo || "";
+    const nombre = p.nombre || p.descripcion || p.producto || "Producto";
+    const marca = p.marca || "";
+    const presentacion = p.presentacion || "";
+    return [codigo, nombre, marca, presentacion].filter(Boolean).join(" · ");
+  };
+
+  const analizarProductosStock = async (filas, columnas) => {
+    if (!empresaIdActual) throw new Error("No se pudo identificar la empresa del Supervisor.");
+
+    setAnalizandoStock(true);
+    setStockReconocidos([]);
+    setStockNoReconocidos([]);
+
+    try {
+      const { data: equivalencias, error: errorEquivalencias } = await supabase
+        .from("stock_equivalencias")
+        .select("codigo_archivo, producto_id, descripcion_archivo")
+        .eq("empresa_id", empresaIdActual);
+
+      if (errorEquivalencias) throw errorEquivalencias;
+
+      const idsProductos = [...new Set((equivalencias || []).map(e => e.producto_id).filter(Boolean))];
+      let productosPorId = {};
+
+      if (idsProductos.length > 0) {
+        const { data: productos, error: errorProductos } = await supabase
+          .from("productos")
+          .select("id, codigo_cge, nombre, marca, presentacion")
+          .in("id", idsProductos);
+
+        if (errorProductos) throw errorProductos;
+        (productos || []).forEach(p => {
+          productosPorId[String(p.id)] = p;
+        });
+      }
+
+      const equivalenciaPorCodigo = {};
+      (equivalencias || []).forEach(e => {
+        equivalenciaPorCodigo[String(e.codigo_archivo ?? "").trim()] = e;
+      });
+
+      const reconocidos = [];
+      const noReconocidos = [];
+
+      filas.forEach(fila => {
+        const codigoArchivo = columnas.codigo ? String(fila[columnas.codigo] ?? "").trim() : "";
+        const descripcionArchivo = columnas.descripcion ? String(fila[columnas.descripcion] ?? "").trim() : "";
+        const stockOriginal = columnas.stock ? fila[columnas.stock] : "";
+        const stockTexto = String(stockOriginal ?? "").trim();
+        const stockLimpio = stockTexto
+          .replace(/\s/g, "")
+          .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+          .replace(",", ".");
+        const stockNumero = stockTexto === "" ? NaN : Number(stockLimpio);
+
+        const base = {
+          fila: fila.__fila,
+          codigoArchivo,
+          descripcionArchivo,
+          stock: Number.isFinite(stockNumero) ? stockNumero : null,
+        };
+
+        const equivalencia = equivalenciaPorCodigo[codigoArchivo];
+        const producto = equivalencia ? productosPorId[String(equivalencia.producto_id)] : null;
+        const idsPermitidosEmpresa = new Set(productosStockCatalogo.map(p => String(p.id)));
+        const productoPermitido = producto && idsPermitidosEmpresa.has(String(producto.id));
+
+        if (equivalencia && productoPermitido) {
+          reconocidos.push({
+            ...base,
+            producto_id: producto.id,
+            codigo_cge: producto.codigo_cge || "",
+            producto_nombre: producto.nombre || "",
+            marca: producto.marca || "",
+            presentacion: producto.presentacion || "",
+          });
+        } else {
+          noReconocidos.push(base);
+        }
+      });
+
+      setStockReconocidos(reconocidos);
+      setStockNoReconocidos(noReconocidos);
+
+      // Los no reconocidos se muestran como PROPUESTAS de producto nuevo.
+      // No se crea nada todavía y NO se consume ningún CGE.
+      setProductosNuevosPropuestos(
+        noReconocidos.map(item => ({
+          codigo_archivo: item.codigoArchivo,
+          nombre: item.descripcionArchivo,
+          stock: item.stock,
+          crear: true,
+        }))
+      );
+
+      return { reconocidos, noReconocidos };
+    } finally {
+      setAnalizandoStock(false);
+    }
+  };
+
+  const cargarArchivoStock = async (event) => {
+    const archivo = event.target.files?.[0];
+    event.target.value = "";
+    if (!archivo) return;
+
+    setCargandoStockArchivo(true);
+    setStockMensaje("");
+    setStockVistaPrevia([]);
+    setStockReconocidos([]);
+    setStockNoReconocidos([]);
+    setProductosNuevosPropuestos([]);
+    setArchivoStockNombre(archivo.name);
+
+    try {
+      const buffer = await archivo.arrayBuffer();
+      // IMPORTANTE: raw:true toma el valor REAL guardado en la celda.
+      // Así ignoramos formatos visuales de Excel (moneda, región, "$", etc.)
+      // que pueden hacer que un stock numérico termine leído como texto.
+      const libro = XLSX.read(buffer, { type: "array", cellNF: false, cellText: false });
+      const hoja = libro.Sheets[libro.SheetNames[0]];
+      const matriz = XLSX.utils.sheet_to_json(hoja, {
+        header: 1,
+        defval: "",
+        raw: true,
+      });
+
+      const filasNoVacias = matriz
+        .map((fila, indice) => ({ fila, indice }))
+        .filter(x => (x.fila || []).some(celda => String(celda ?? "").trim() !== ""));
+
+      if (filasNoVacias.length === 0) throw new Error("La planilla está vacía.");
+
+      const palabrasClave = ["codigo", "código", "articulo", "artículo", "descripcion", "descripción", "stock", "existencia", "cantidad"];
+      let encabezado = filasNoVacias[0];
+
+      for (const candidata of filasNoVacias.slice(0, 20)) {
+        const textoFila = (candidata.fila || []).map(normalizarTextoStock);
+        const coincidencias = palabrasClave.filter(p => textoFila.some(c => c.includes(normalizarTextoStock(p)))).length;
+        if (coincidencias >= 2) {
+          encabezado = candidata;
+          break;
+        }
+      }
+
+      const encabezados = (encabezado.fila || []).map((v, i) => String(v ?? "").trim() || `Columna ${i + 1}`);
+      const codigo = elegirColumnaStock(encabezados, ["codigo", "cod", "sku", "id"]);
+      const descripcion = elegirColumnaStock(encabezados, ["articulo", "producto", "descripcion", "nombre"]);
+      const stock = elegirColumnaStock(encabezados, ["stock", "existencia", "existencias", "cantidad", "saldo"]);
+
+      setStockColumnas({ codigo, descripcion, stock });
+      setStockEncabezadoFila(encabezado.indice + 1);
+
+      const datos = matriz.slice(encabezado.indice + 1)
+        .filter(fila => (fila || []).some(celda => String(celda ?? "").trim() !== ""))
+        .slice(0, 100)
+        .map((fila, idx) => {
+          const obj = {};
+          encabezados.forEach((h, colIdx) => { obj[h] = fila?.[colIdx] ?? ""; });
+          return { __fila: encabezado.indice + 2 + idx, ...obj };
+        });
+
+      setStockVistaPrevia(datos);
+
+      if (!codigo || !stock) {
+        setStockMensaje("⚠️ La planilla se leyó, pero no pude detectar automáticamente Código y Stock. Todavía NO se modificó nada.");
+      } else {
+        const resultado = await analizarProductosStock(datos, { codigo, descripcion, stock });
+        setStockMensaje(
+          `✓ Planilla leída. ${resultado.reconocidos.length} reconocidos · ${resultado.noReconocidos.length} sin reconocer. Todavía NO se modificó el stock.`
+        );
+      }
+    } catch (error) {
+      console.error("Error leyendo planilla de stock:", error);
+      setStockMensaje("❌ No se pudo leer la planilla: " + (error.message || "Error desconocido"));
+    } finally {
+      setCargandoStockArchivo(false);
+    }
+  };
+
+
+  const confirmarImportacionStock = async () => {
+    if (!archivoStockNombre || confirmandoImportacionStock) return;
+
+    const nuevosSeleccionados = productosNuevosPropuestos.filter(p => p.crear);
+    const totalAProcesar = stockReconocidos.length + nuevosSeleccionados.length;
+
+    if (totalAProcesar === 0) {
+      alert("No hay productos seleccionados para importar.");
+      return;
+    }
+
+    const invalidos = [
+      ...stockReconocidos.map(p => ({ codigo: p.codigoArchivo, stock: p.stock })),
+      ...nuevosSeleccionados.map(p => ({ codigo: p.codigo_archivo, stock: p.stock })),
+    ].filter(p => p.stock === null || !Number.isFinite(Number(p.stock)) || Number(p.stock) < 0);
+
+    if (invalidos.length > 0) {
+      alert(`Hay ${invalidos.length} producto(s) con stock inválido. Corregí la planilla antes de confirmar.`);
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `¿Confirmás la importación de stock?\n\n` +
+      `Archivo: ${archivoStockNombre}\n` +
+      `Productos ya reconocidos: ${stockReconocidos.length}\n` +
+      `Productos nuevos a crear: ${nuevosSeleccionados.length}\n` +
+      `Total a procesar: ${totalAProcesar}\n\n` +
+      `Los productos nuevos recibirán un CGE y el stock físico quedará actualizado con las cantidades de esta planilla.`
+    );
+    if (!confirmar) return;
+
+    const productosParaImportar = [
+      ...stockReconocidos.map(item => ({
+        codigo_archivo: item.codigoArchivo,
+        descripcion: item.descripcionArchivo || item.producto_nombre || "",
+        stock: Number(item.stock),
+        crear: false,
+      })),
+      ...nuevosSeleccionados.map(item => ({
+        codigo_archivo: item.codigo_archivo,
+        descripcion: item.nombre || "",
+        stock: Number(item.stock),
+        crear: true,
+      })),
+    ];
+
+    try {
+      setConfirmandoImportacionStock(true);
+      setStockMensaje("⏳ Confirmando importación y guardando stock...");
+
+      const { data, error } = await supabase.rpc("confirmar_importacion_stock", {
+        p_nombre_archivo: archivoStockNombre,
+        p_productos: productosParaImportar,
+      });
+
+      if (error) throw error;
+      if (!data?.ok) throw new Error("Supabase no confirmó la importación.");
+
+      setStockMensaje(
+        `✅ Importación confirmada. ${Number(data.total_procesado || 0)} productos procesados · ` +
+        `${Number(data.productos_creados || 0)} nuevos creados · stock actualizado correctamente.`
+      );
+
+      setStockVistaPrevia([]);
+      setStockReconocidos([]);
+      setStockNoReconocidos([]);
+      setProductosNuevosPropuestos([]);
+      setStockColumnas({ codigo: "", descripcion: "", stock: "" });
+      setStockEncabezadoFila(null);
+      setArchivoStockNombre("");
+
+      await cargarCatalogoProductosStock();
+
+      alert(
+        `✅ IMPORTACIÓN COMPLETADA\n\n` +
+        `Productos procesados: ${Number(data.total_procesado || 0)}\n` +
+        `Productos nuevos creados: ${Number(data.productos_creados || 0)}\n` +
+        `Stock actualizado: ${Number(data.stock_actualizado || 0)}`
+      );
+    } catch (error) {
+      console.error("Error confirmando importación de stock:", error);
+      setStockMensaje("❌ No se pudo confirmar la importación: " + (error.message || "Error desconocido"));
+      alert("❌ No se guardó la importación. " + (error.message || "Error desconocido"));
+    } finally {
+      setConfirmandoImportacionStock(false);
+    }
+  };
 
   const getBadgeColor = (estado) => {
     switch(estado) {
@@ -425,6 +884,7 @@ export default function MonitorPedidos() {
       <div style={{ width: "100%" }}>
         <main style={{ padding: "16px 24px", maxWidth: "1500px", width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
           {/* Métricas Resumen */}
+          {vistaPedidos !== "Disponibilidad" && vistaPedidos !== "StockFisico" && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "8px", marginBottom: "12px" }}>
             <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
               <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "700" }}>TOTAL FACTURADO</div>
@@ -441,16 +901,338 @@ export default function MonitorPedidos() {
               </div>
             </div>
           </div>
+          )}
 
-          <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
-            {["Activos", "Historial"].map(v => (
+          <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
+            {["Activos", "Historial", "Disponibilidad", "StockFisico"].map(v => (
               <button key={v} type="button" onClick={() => { setVistaPedidos(v); setFiltroEstado("Todos"); setPedidoActivo(null); }}
                 style={{ padding: "8px 14px", borderRadius: "8px", border: vistaPedidos === v ? "1px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === v ? "#eff6ff" : "#fff", color: vistaPedidos === v ? "#1d4ed8" : "#475569", fontWeight: "800", cursor: "pointer" }}>
-                {v === "Activos" ? "📥 Comandas Activas" : "📚 Historial"}
+                {v === "Activos" ? "📥 Comandas Activas" : v === "Historial" ? "📚 Historial" : v === "Disponibilidad" ? "📦 Stock relativo" : "📊 Stock físico"}
               </button>
             ))}
           </div>
 
+          {vistaPedidos === "StockFisico" ? (
+            <div>
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
+                  <div>
+                    <div style={{ fontSize: "17px", fontWeight: "900", color: "#0f172a" }}>📊 Stock físico</div>
+                    <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                      El Supervisor carga la planilla de existencias de su empresa. Esta primera etapa solo muestra una vista previa y no modifica Supabase.
+                    </div>
+                  </div>
+
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      background: cargandoStockArchivo ? "#94a3b8" : "#2563eb",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "9px",
+                      padding: "12px 18px",
+                      fontSize: "13px",
+                      fontWeight: "900",
+                      cursor: cargandoStockArchivo ? "wait" : "pointer",
+                      boxShadow: "0 4px 10px rgba(37,99,235,0.20)"
+                    }}
+                  >
+                    {cargandoStockArchivo ? "Leyendo planilla..." : "📥 CARGAR EXCEL DE STOCK"}
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={cargarArchivoStock}
+                      disabled={cargandoStockArchivo}
+                      style={{ display: "none" }}
+                    />
+                  </label>
+                </div>
+
+                <div style={{ padding: "10px 12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", color: "#1e3a8a", fontSize: "11px", lineHeight: 1.5, marginBottom: "12px" }}>
+                  <strong>Importante:</strong> el stock bajo generará alertas, pero RutaComercio nunca bloqueará automáticamente un artículo. El bloqueo seguirá siendo una decisión manual del Supervisor.
+                </div>
+
+                {archivoStockNombre && (
+                  <div style={{ fontSize: "12px", color: "#334155", marginBottom: "8px" }}>
+                    <strong>Archivo:</strong> {archivoStockNombre}
+                    {stockEncabezadoFila ? ` · Encabezados detectados en fila ${stockEncabezadoFila}` : ""}
+                  </div>
+                )}
+
+                {stockMensaje && (
+                  <div style={{ padding: "9px 10px", borderRadius: "7px", background: stockMensaje.startsWith("❌") ? "#fef2f2" : "#f0fdf4", border: stockMensaje.startsWith("❌") ? "1px solid #fecaca" : "1px solid #bbf7d0", color: stockMensaje.startsWith("❌") ? "#991b1b" : "#166534", fontSize: "11px", fontWeight: "700", marginBottom: "12px" }}>
+                    {stockMensaje}
+                  </div>
+                )}
+
+                {stockVistaPrevia.length > 0 && (
+                  <>
+                    <div style={{ display: "grid", gridTemplateColumns: esMovil ? "1fr" : "repeat(3, minmax(180px, 1fr))", gap: "8px", marginBottom: "12px" }}>
+                      {[
+                        ["Código", stockColumnas.codigo],
+                        ["Artículo / descripción", stockColumnas.descripcion],
+                        ["Stock", stockColumnas.stock],
+                      ].map(([etiqueta, valor]) => (
+                        <div key={etiqueta} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "9px 10px" }}>
+                          <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>{etiqueta.toUpperCase()}</div>
+                          <div style={{ fontSize: "12px", color: valor ? "#0f172a" : "#dc2626", fontWeight: "800", marginTop: "2px" }}>
+                            {valor || "No detectada"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: esMovil ? "1fr" : "1fr 1fr", gap: "8px", marginBottom: "12px" }}>
+                      <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "11px" }}>
+                        <div style={{ fontSize: "10px", color: "#166534", fontWeight: "900" }}>✅ RECONOCIDOS AUTOMÁTICAMENTE</div>
+                        <div style={{ fontSize: "24px", color: "#15803d", fontWeight: "900", marginTop: "2px" }}>{stockReconocidos.length}</div>
+                        <div style={{ fontSize: "10px", color: "#166534" }}>Ya tienen equivalencia guardada para esta empresa.</div>
+                      </div>
+                      <div style={{ background: stockNoReconocidos.length ? "#fff7ed" : "#f8fafc", border: stockNoReconocidos.length ? "1px solid #fed7aa" : "1px solid #e2e8f0", borderRadius: "8px", padding: "11px" }}>
+                        <div style={{ fontSize: "10px", color: stockNoReconocidos.length ? "#9a3412" : "#475569", fontWeight: "900" }}>⚠️ SIN RECONOCER</div>
+                        <div style={{ fontSize: "24px", color: stockNoReconocidos.length ? "#c2410c" : "#475569", fontWeight: "900", marginTop: "2px" }}>{stockNoReconocidos.length}</div>
+                        <div style={{ fontSize: "10px", color: stockNoReconocidos.length ? "#9a3412" : "#64748b" }}>Todavía no tienen equivalencia para esta empresa.</div>
+                      </div>
+                    </div>
+
+                    {analizandoStock && (
+                      <div style={{ marginBottom: "10px", fontSize: "11px", color: "#2563eb", fontWeight: "800" }}>Buscando equivalencias de esta empresa...</div>
+                    )}
+
+                    {stockReconocidos.length > 0 && (
+                      <div style={{ marginBottom: "12px", overflowX: "auto", border: "1px solid #bbf7d0", borderRadius: "8px" }}>
+                        <div style={{ padding: "8px 10px", background: "#f0fdf4", color: "#166534", fontSize: "11px", fontWeight: "900" }}>Productos reconocidos</div>
+                        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "700px", fontSize: "11px" }}>
+                          <thead><tr style={{ background: "#f8fafc" }}>
+                            <th style={{ textAlign: "left", padding: "8px" }}>Código Excel</th>
+                            <th style={{ textAlign: "left", padding: "8px" }}>CGE</th>
+                            <th style={{ textAlign: "left", padding: "8px" }}>Producto RutaComercio</th>
+                            <th style={{ textAlign: "right", padding: "8px" }}>Stock informado</th>
+                          </tr></thead>
+                          <tbody>
+                            {stockReconocidos.slice(0, 30).map((item, idx) => (
+                              <tr key={idx} style={{ borderTop: "1px solid #dcfce7" }}>
+                                <td style={{ padding: "8px", fontWeight: "800" }}>{item.codigoArchivo || "—"}</td>
+                                <td style={{ padding: "8px" }}>{item.codigo_cge || "—"}</td>
+                                <td style={{ padding: "8px" }}>{item.producto_nombre || "—"}{item.marca ? ` · ${item.marca}` : ""}</td>
+                                <td style={{ padding: "8px", textAlign: "right", fontWeight: "900" }}>{item.stock ?? "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {stockNoReconocidos.length > 0 && (
+                      <div style={{ marginBottom: "12px", border: "1px solid #fed7aa", borderRadius: "8px", overflow: "hidden" }}>
+                        <div style={{ padding: "9px 10px", background: "#fff7ed", color: "#9a3412", fontSize: "11px", fontWeight: "900" }}>
+                          ⚠️ Productos no encontrados en el catálogo de esta empresa
+                        </div>
+                        <div style={{ padding: "10px", background: "#fff", display: "flex", flexDirection: "column", gap: "7px" }}>
+                          {stockNoReconocidos.slice(0, 50).map((item, idx) => (
+                            <div key={`${item.codigoArchivo}-${idx}`} style={{ display: "grid", gridTemplateColumns: esMovil ? "1fr" : "100px minmax(260px,1fr) 100px", gap: "8px", alignItems: "center", padding: "9px 10px", border: "1px solid #e2e8f0", borderRadius: "7px", background: "#f8fafc" }}>
+                              <div>
+                                <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>CÓDIGO EXCEL</div>
+                                <div style={{ fontSize: "12px", fontWeight: "900" }}>{item.codigoArchivo || "—"}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>ARTÍCULO</div>
+                                <div style={{ fontSize: "12px", fontWeight: "700" }}>{item.descripcionArchivo || "—"}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>STOCK</div>
+                                <div style={{ fontSize: "13px", fontWeight: "900", color: item.stock === null ? "#dc2626" : "#0f172a" }}>{item.stock ?? "No válido"}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ padding: "10px", background: "#fffbeb", borderTop: "1px solid #fed7aa" }}>
+                          <div style={{ fontSize: "11px", fontWeight: "900", color: "#92400e", marginBottom: "6px" }}>
+                            Revisión antes de incorporar productos nuevos
+                          </div>
+                          <div style={{ fontSize: "10px", color: "#92400e", lineHeight: 1.5, marginBottom: "9px" }}>
+                            Estos artículos no existen actualmente en el catálogo de esta empresa. RutaComercio puede prepararlos como productos nuevos, pero todavía no crea nada, no genera CGE y no modifica stock.
+                          </div>
+
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            {productosNuevosPropuestos.map((p, idx) => (
+                              <label key={`${p.codigo_archivo}-${idx}`} style={{ display: "grid", gridTemplateColumns: "28px 90px minmax(220px,1fr) 80px", gap: "7px", alignItems: "center", padding: "7px 8px", background: "#fff", border: "1px solid #fde68a", borderRadius: "7px" }}>
+                                <input
+                                  type="checkbox"
+                                  checked={p.crear}
+                                  onChange={e => setProductosNuevosPropuestos(prev => prev.map((x, i) => i === idx ? { ...x, crear: e.target.checked } : x))}
+                                />
+                                <span style={{ fontSize: "10px", fontWeight: "900" }}>{p.codigo_archivo || "—"}</span>
+                                <span style={{ fontSize: "10px", fontWeight: "700" }}>{p.nombre || "Sin descripción"}</span>
+                                <span style={{ fontSize: "10px", textAlign: "right", fontWeight: "900" }}>{p.stock ?? "—"} u.</span>
+                              </label>
+                            ))}
+                          </div>
+
+                          <div style={{ marginTop: "9px", padding: "8px 9px", borderRadius: "7px", background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e40af", fontSize: "10px", lineHeight: 1.45 }}>
+                            Seleccionados para una futura incorporación: <strong>{productosNuevosPropuestos.filter(p => p.crear).length}</strong>. El Supervisor puede desmarcar cualquier fila que no quiera incorporar. El CGE se generará en Supabase recién al confirmar en un paso posterior.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ marginBottom: "12px", padding: "10px 12px", borderRadius: "8px", background: "#f8fafc", border: "1px solid #cbd5e1" }}>
+                      <div style={{ fontSize: "11px", fontWeight: "900", color: "#0f172a" }}>Estado de esta importación</div>
+                      <div style={{ marginTop: "4px", fontSize: "10px", color: "#475569", lineHeight: 1.5 }}>
+                        ✅ Reconocidos: <strong>{stockReconocidos.length}</strong> ·
+                        🆕 Nuevos propuestos: <strong>{productosNuevosPropuestos.filter(p => p.crear).length}</strong> ·
+                        ⛔ Excluidos por el Supervisor: <strong>{productosNuevosPropuestos.filter(p => !p.crear).length}</strong>
+                      </div>
+                      <div style={{ marginTop: "5px", fontSize: "10px", color: "#b45309", fontWeight: "800" }}>
+                        Modo revisión: todavía NO se crean productos, NO se generan CGE y NO se actualiza stock.
+                      </div>
+                    </div>
+
+                    <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "650px", fontSize: "11px" }}>
+                        <thead>
+                          <tr style={{ background: "#f8fafc" }}>
+                            <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Fila</th>
+                            <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Código</th>
+                            <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Artículo</th>
+                            <th style={{ textAlign: "right", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Stock</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stockVistaPrevia.slice(0, 30).map((fila, idx) => (
+                            <tr key={idx}>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", color: "#64748b" }}>{fila.__fila}</td>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", fontWeight: "700" }}>{stockColumnas.codigo ? String(fila[stockColumnas.codigo] ?? "") : "—"}</td>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9" }}>{stockColumnas.descripcion ? String(fila[stockColumnas.descripcion] ?? "") : "—"}</td>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", textAlign: "right", fontWeight: "800" }}>{stockColumnas.stock ? String(fila[stockColumnas.stock] ?? "") : "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ marginTop: "14px", padding: "14px", border: "1px solid #bbf7d0", borderRadius: "9px", background: "#f0fdf4" }}>
+                      <div style={{ fontSize: "11px", color: "#166534", fontWeight: "900", marginBottom: "8px" }}>
+                        Todo listo para confirmar
+                      </div>
+                      <div style={{ fontSize: "10px", color: "#166534", lineHeight: 1.5, marginBottom: "10px" }}>
+                        Se procesarán <strong>{stockReconocidos.length + productosNuevosPropuestos.filter(p => p.crear).length}</strong> productos. Los nuevos seleccionados recibirán su CGE al confirmar.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={confirmarImportacionStock}
+                        disabled={confirmandoImportacionStock || (stockReconocidos.length + productosNuevosPropuestos.filter(p => p.crear).length === 0)}
+                        style={{ width: "100%", padding: "13px 16px", border: "none", borderRadius: "8px", background: confirmandoImportacionStock ? "#94a3b8" : "#16a34a", color: "#fff", fontSize: "13px", fontWeight: "900", cursor: confirmandoImportacionStock ? "wait" : "pointer", boxShadow: "0 4px 10px rgba(22,163,74,0.20)" }}
+                      >
+                        {confirmandoImportacionStock ? "⏳ GUARDANDO IMPORTACIÓN..." : "✅ CONFIRMAR IMPORTACIÓN"}
+                      </button>
+                    </div>
+
+                    <div style={{ marginTop: "10px", fontSize: "10px", color: "#64748b" }}>
+                      Vista previa de hasta 30 filas en pantalla. El stock solo se modifica después de confirmar.
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          ) : vistaPedidos === "Disponibilidad" ? (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
+                <div style={{ background: "#fff", padding: "12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                  <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>ARTÍCULOS CON MOVIMIENTO</div>
+                  <div style={{ fontSize: "20px", fontWeight: "900", color: "#2563eb", marginTop: "3px" }}>{resumenArticulosHoy.length}</div>
+                </div>
+                <div style={{ background: "#fffbeb", padding: "12px", borderRadius: "8px", border: "1px solid #fde68a" }}>
+                  <div style={{ fontSize: "10px", color: "#92400e", fontWeight: "800" }}>STOCK CRÍTICO</div>
+                  <div style={{ fontSize: "20px", fontWeight: "900", color: "#d97706", marginTop: "3px" }}>{totalCriticos}</div>
+                </div>
+                <div style={{ background: "#fef2f2", padding: "12px", borderRadius: "8px", border: "1px solid #fecaca" }}>
+                  <div style={{ fontSize: "10px", color: "#991b1b", fontWeight: "800" }}>BLOQUEADOS</div>
+                  <div style={{ fontSize: "20px", fontWeight: "900", color: "#dc2626", marginTop: "3px" }}>{totalBloqueados}</div>
+                </div>
+              </div>
+
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
+                  <div>
+                    <div style={{ fontSize: "15px", fontWeight: "900", color: "#0f172a" }}>📦 Stock relativo</div>
+                    <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                      Seguimiento relativo según los pedidos registrados en RutaComercio. No representa stock físico ni cantidad disponible en depósito.
+                    </div>
+                  </div>
+                  <input
+                    value={busquedaDisponibilidad}
+                    onChange={e => setBusquedaDisponibilidad(e.target.value)}
+                    placeholder="Buscar artículo o código..."
+                    style={{ minWidth: esMovil ? "100%" : "260px", padding: "9px 10px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "12px", boxSizing: "border-box" }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: "10px", padding: "9px 10px", borderRadius: "8px", background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e3a8a", fontSize: "11px", lineHeight: 1.45 }}>
+                  <strong>¿Qué significa Stock relativo?</strong> RutaComercio muestra cuánto se pidió de cada artículo durante la jornada y permite al Supervisor comunicar su situación comercial como Disponible, Crítico o Bloqueado. No calcula existencias físicas.
+                </div>
+
+                {resumenArticulosFiltrado.length === 0 ? (
+                  <div style={{ padding: "24px", textAlign: "center", color: "#64748b", fontSize: "12px", background: "#f8fafc", borderRadius: "8px" }}>
+                    Todavía no hay artículos pedidos para mostrar hoy.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
+                    {resumenArticulosFiltrado.map(item => {
+                      const estado = disponibilidadProductos[String(item.productoId)]?.estado || "disponible";
+                      const guardando = guardandoDisponibilidad === String(item.productoId);
+                      return (
+                        <div key={String(item.productoId)} style={{ display: "grid", gridTemplateColumns: esMovil ? "1fr" : "minmax(260px, 1.6fr) 110px 100px minmax(300px, 1.3fr)", gap: "8px", alignItems: "center", padding: "10px", border: "1px solid #e2e8f0", borderRadius: "8px", background: estado === "bloqueado" ? "#fef2f2" : estado === "critico" ? "#fffbeb" : "#fff" }}>
+                          <div>
+                            <div style={{ fontSize: "12px", fontWeight: "900", color: "#0f172a" }}>{item.nombre}</div>
+                            <div style={{ fontSize: "10px", color: "#64748b", marginTop: "2px" }}>{item.codigo || "Sin código"}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>PEDIDO HOY</div>
+                            <div style={{ fontSize: "15px", fontWeight: "900", color: "#0f172a" }}>{item.cantidad} u.</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>COMANDAS</div>
+                            <div style={{ fontSize: "13px", fontWeight: "800" }}>{item.pedidosCount}</div>
+                          </div>
+                          <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
+                            {[
+                              ["disponible", "🟢 Disponible"],
+                              ["critico", "🟠 Crítico"],
+                              ["bloqueado", "🔴 Bloqueado"],
+                            ].map(([valor, etiqueta]) => (
+                              <button
+                                key={valor}
+                                type="button"
+                                disabled={guardando}
+                                onClick={() => cambiarEstadoDisponibilidad(item, valor)}
+                                style={{
+                                  padding: "7px 9px",
+                                  borderRadius: "7px",
+                                  border: estado === valor ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                                  background: estado === valor ? "#eff6ff" : "#fff",
+                                  color: "#334155",
+                                  fontSize: "10px",
+                                  fontWeight: "800",
+                                  cursor: guardando ? "wait" : "pointer",
+                                  opacity: guardando ? 0.6 : 1,
+                                }}
+                              >
+                                {etiqueta}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+          <>
           {/* Barra de Filtros */}
           <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "12px", display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: "1 1 140px" }}>
@@ -613,6 +1395,8 @@ export default function MonitorPedidos() {
               </div>
             )}
           </div>
+          </>
+          )}
         </main>
       </div>
     </div>

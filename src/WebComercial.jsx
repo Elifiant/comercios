@@ -255,6 +255,8 @@ export default function WebComercial() {
                   lineHeight: "1.02",
                   letterSpacing: "-2.5px",
                   fontWeight: "950",
+                  color: "#0f172a",
+                  WebkitTextFillColor: "#0f172a",
                 }}
               >
                 Tu equipo vende en la calle.
@@ -572,6 +574,8 @@ export default function WebComercial() {
                   fontSize: "clamp(28px, 4vw, 40px)",
                   lineHeight: "1.1",
                   letterSpacing: "-1.2px",
+                  color: "#0f172a",
+                  WebkitTextFillColor: "#0f172a",
                 }}
               >
                 El preventista trabaja. El supervisor tiene visibilidad.
@@ -891,7 +895,9 @@ export default function WebComercial() {
                 fontSize: "clamp(29px, 5vw, 44px)",
                 lineHeight: "1.08",
                 letterSpacing: "-1.4px",
-              }}
+                color: "#0f172a",
+                  WebkitTextFillColor: "#0f172a",
+                }}
             >
               Mirá cómo puede funcionar con tu equipo
             </h2>
@@ -974,7 +980,9 @@ export default function WebComercial() {
                 textAlign: "center",
                 fontSize: "clamp(26px, 4vw, 36px)",
                 margin: "0 0 26px",
-              }}
+                color: "#0f172a",
+                  WebkitTextFillColor: "#0f172a",
+                }}
             >
               Preguntas frecuentes
             </h2>

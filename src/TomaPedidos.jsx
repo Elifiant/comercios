@@ -6,6 +6,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   const [categoriaSel, setCategoriaSel] = useState('TODOS');
   const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || []);
   const [catalogo, setCatalogo] = useState([]);
+  const [disponibilidad, setDisponibilidad] = useState({});
   const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
   const [errorCatalogo, setErrorCatalogo] = useState('');
   const [medioPago, setMedioPago] = useState('Efectivo');
@@ -103,6 +104,57 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     return () => { cancelado = true; };
   }, [comercio?.id]);
 
+  // Disponibilidad operativa definida por el Supervisor para esta empresa.
+  useEffect(() => {
+    let cancelado = false;
+
+    const cargarDisponibilidad = async () => {
+      const empresaId = usuario?.empresa_id || comercio?.empresa_id || null;
+      if (!empresaId) {
+        if (!cancelado) setDisponibilidad({});
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('productos_disponibilidad')
+        .select('producto_id, estado, observacion, actualizado_at')
+        .eq('empresa_id', empresaId);
+
+      if (error) {
+        console.error('Error cargando disponibilidad operativa:', error);
+        return;
+      }
+
+      const mapa = {};
+      (data || []).forEach(row => {
+        mapa[String(row.producto_id)] = {
+          estado: row.estado || 'disponible',
+          observacion: row.observacion || '',
+          actualizado_at: row.actualizado_at || null,
+        };
+      });
+
+      if (!cancelado) setDisponibilidad(mapa);
+    };
+
+    cargarDisponibilidad();
+
+    // Refresco periódico: si el Supervisor bloquea o marca crítico un artículo,
+    // el preventista recibe el cambio sin tener que salir de la toma de pedido.
+    const timer = setInterval(cargarDisponibilidad, 15000);
+
+    return () => {
+      cancelado = true;
+      clearInterval(timer);
+    };
+  }, [usuario?.empresa_id, comercio?.empresa_id]);
+
+  const estadoProducto = (productoId) =>
+    disponibilidad[String(productoId)]?.estado || 'disponible';
+
+  const observacionProducto = (productoId) =>
+    disponibilidad[String(productoId)]?.observacion || '';
+
   const categoriasDisponibles = ['TODOS', ...Array.from(new Set(catalogo.map(p => p.categoria).filter(Boolean)))];
 
   const catalogoFiltrado = catalogo.filter(p => {
@@ -112,6 +164,17 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   });
 
   const agregarAlPedido = (producto) => {
+    const estado = estadoProducto(producto.productoId);
+    if (estado === 'bloqueado') {
+      alert(`🔴 ARTÍCULO MOMENTÁNEAMENTE NO DISPONIBLE\n\n${producto.nombre}\n\nLa venta fue bloqueada por el Supervisor.${observacionProducto(producto.productoId) ? `\n\n${observacionProducto(producto.productoId)}` : ''}`);
+      return;
+    }
+
+    if (estado === 'critico') {
+      const seguir = window.confirm(`🟠 STOCK CRÍTICO\n\n${producto.nombre}\n\nLa disponibilidad es limitada. ¿Querés agregarlo igualmente?${observacionProducto(producto.productoId) ? `\n\n${observacionProducto(producto.productoId)}` : ''}`);
+      if (!seguir) return;
+    }
+
     const yaExiste = itemsPedido.find(it => it.codigo === producto.codigo);
     if (yaExiste) {
       setItemsPedido(itemsPedido.map(it => it.codigo === producto.codigo ? { ...it, cant: it.cant + 1 } : it));
@@ -132,6 +195,19 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   };
 
   const modificarCant = (id, delta) => {
+    const itemObjetivo = itemsPedido.find(it => it.id === id);
+    if (delta > 0 && itemObjetivo) {
+      const estado = estadoProducto(itemObjetivo.productoId);
+      if (estado === 'bloqueado') {
+        alert(`🔴 ARTÍCULO MOMENTÁNEAMENTE NO DISPONIBLE\n\n${itemObjetivo.nombre}\n\nNo se puede aumentar la cantidad porque fue bloqueado por el Supervisor.`);
+        return;
+      }
+      if (estado === 'critico') {
+        const seguir = window.confirm(`🟠 STOCK CRÍTICO\n\n${itemObjetivo.nombre}\n\n¿Querés aumentar igualmente la cantidad?`);
+        if (!seguir) return;
+      }
+    }
+
     setItemsPedido(itemsPedido.map(it => {
       if (it.id === id) {
         const nueva = it.cant + delta;
@@ -157,6 +233,17 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   const confirmarPedido = async () => {
     if (itemsPedido.length === 0) {
       alert('Agregá al menos un artículo al pedido');
+      return;
+    }
+
+    const bloqueadosEnPedido = itemsPedido.filter(it => estadoProducto(it.productoId) === 'bloqueado');
+    if (bloqueadosEnPedido.length > 0) {
+      alert(
+        '🔴 NO SE PUEDE CONFIRMAR EL PEDIDO\n\n' +
+        'El Supervisor bloqueó momentáneamente:\n\n' +
+        bloqueadosEnPedido.map(it => `• ${it.codigo ? it.codigo + ' - ' : ''}${it.nombre}`).join('\n') +
+        '\n\nQuitá esos artículos para continuar.'
+      );
       return;
     }
 
@@ -386,21 +473,54 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             {!cargandoCatalogo && catalogoFiltrado.length === 0 && (
               <div style={{ padding: '12px 8px', fontSize: '13px', color: '#64748b' }}>No se encontraron artículos con esa búsqueda.</div>
             )}
-            {catalogoFiltrado.map(prod => (
-              <div key={prod.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 8px', borderBottom: '1px solid #f1f5f9' }}>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '800' }}>{prod.codigo} · {prod.marca}</div>
-                  <div style={{ fontSize: '13px', fontWeight: '700' }}>{prod.nombre}</div>
-                  <div style={{ fontSize: '12px', color: '#16a34a', fontWeight: '800' }}>${prod.precio.toLocaleString()}</div>
+            {catalogoFiltrado.map(prod => {
+              const estado = estadoProducto(prod.productoId);
+              const bloqueado = estado === 'bloqueado';
+              const critico = estado === 'critico';
+
+              return (
+                <div key={prod.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 8px', borderBottom: '1px solid #f1f5f9', backgroundColor: bloqueado ? '#fef2f2' : critico ? '#fffbeb' : '#ffffff' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '800' }}>{prod.codigo} · {prod.marca}</div>
+                    <div style={{ fontSize: '13px', fontWeight: '700' }}>{prod.nombre}</div>
+                    <div style={{ fontSize: '12px', color: '#16a34a', fontWeight: '800' }}>${prod.precio.toLocaleString()}</div>
+
+                    {critico && (
+                      <div style={{ marginTop: '4px', fontSize: '11px', fontWeight: '900', color: '#b45309' }}>
+                        🟠 STOCK CRÍTICO · Consultar disponibilidad
+                      </div>
+                    )}
+                    {bloqueado && (
+                      <div style={{ marginTop: '4px', fontSize: '11px', fontWeight: '900', color: '#b91c1c' }}>
+                        🔴 MOMENTÁNEAMENTE NO DISPONIBLE
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    disabled={bloqueado}
+                    onClick={() => {
+                      if (!bloqueado) {
+                        agregarAlPedido(prod);
+                        setBusqueda('');
+                      }
+                    }}
+                    style={{
+                      backgroundColor: bloqueado ? '#e2e8f0' : critico ? '#fef3c7' : '#eff6ff',
+                      color: bloqueado ? '#64748b' : critico ? '#92400e' : '#2563eb',
+                      border: bloqueado ? '1px solid #cbd5e1' : critico ? '1px solid #f59e0b' : '1px solid #bfdbfe',
+                      borderRadius: '8px',
+                      padding: '6px 12px',
+                      fontWeight: '800',
+                      fontSize: '12px',
+                      cursor: bloqueado ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {bloqueado ? '🚫 Bloqueado' : '➕ Agregar'}
+                  </button>
                 </div>
-                <button
-                  onClick={() => { agregarAlPedido(prod); setBusqueda(''); }}
-                  style={{ backgroundColor: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '6px 12px', fontWeight: '800', fontSize: '12px', cursor: 'pointer' }}
-                >
-                  ➕ Agregar
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -436,6 +556,16 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                         )}
                       </div>
                       <div style={{ fontSize: '14px', fontWeight: '800', margin: '4px 0' }}>{item.nombre}</div>
+                      {estadoProducto(item.productoId) === 'critico' && (
+                        <div style={{ fontSize: '11px', fontWeight: '900', color: '#b45309', marginTop: '3px' }}>
+                          🟠 STOCK CRÍTICO
+                        </div>
+                      )}
+                      {estadoProducto(item.productoId) === 'bloqueado' && (
+                        <div style={{ fontSize: '11px', fontWeight: '900', color: '#b91c1c', marginTop: '3px' }}>
+                          🔴 BLOQUEADO POR SUPERVISOR · quitar del pedido
+                        </div>
+                      )}
                     </div>
                     <button onClick={() => eliminarItem(item.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '4px' }}>
                       🗑️
