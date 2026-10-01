@@ -383,21 +383,13 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         </div>
       </header>
 
-      <main style={{ maxWidth: '600px', margin: '0 auto', padding: '16px' }}>
-        {/* Ficha rápida del local */}
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '14px', border: '1px solid #e2e8f0', marginBottom: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <span style={{ backgroundColor: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase' }}>
-                Ficha #{comercio?.id || 104}
-              </span>
-              <h2 style={{ margin: '4px 0 2px', fontSize: '17px', fontWeight: '800' }}>{comercio?.nombre || 'Almacén Los Amigos'}</h2>
-              <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>📍 {comercio?.direccion || 'Av. Mitre 4820, Avellaneda'}</p>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '12px', color: '#64748b' }}>{itemsPedido.length} renglones</div>
-              <div style={{ fontSize: '18px', fontWeight: '800', color: '#16a34a' }}>${totalFinal.toLocaleString()}</div>
-            </div>
+      <main style={{ maxWidth: '600px', margin: '0 auto', padding: '10px 16px 16px' }}>
+        {/* Resumen compacto del pedido */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '8px 12px', marginBottom: '8px' }}>
+          <div style={{ fontSize: '14px', fontWeight: '900', color: '#1d4ed8' }}>{comercio?.nombre || 'Comercio'}</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: '12px', color: '#2563eb', fontWeight: '800' }}>{itemsPedido.length} renglones</span>
+            <span style={{ fontSize: '17px', fontWeight: '900', color: '#16a34a' }}>${totalFinal.toLocaleString()}</span>
           </div>
         </div>
 
@@ -415,29 +407,29 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         )}
 
         {/* Buscador de artículos por código o nombre */}
-        <div style={{ marginBottom: '14px' }}>
+        <div style={{ marginBottom: '8px' }}>
           <div style={{ position: 'relative' }}>
             <input
               type="text"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               placeholder="Buscar por código (ej: CGE-102) o nombre..."
-              style={{ width: '100%', boxSizing: 'border-box', padding: '12px 14px 12px 38px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none' }}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px 10px 38px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none' }}
             />
-            <span style={{ position: 'absolute', left: '12px', top: '12px', color: '#94a3b8', fontSize: '16px' }}>🔍</span>
+            <span style={{ position: 'absolute', left: '12px', top: '10px', color: '#94a3b8', fontSize: '16px' }}>🔍</span>
             {busqueda && (
               <button onClick={() => setBusqueda('')} style={{ position: 'absolute', right: '10px', top: '10px', background: '#e2e8f0', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer' }}>✕</button>
             )}
           </div>
 
           {/* Categorías */}
-          <div style={{ display: 'flex', gap: '6px', marginTop: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+          <div style={{ display: 'flex', gap: '6px', marginTop: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
             {categoriasDisponibles.map(cat => (
               <button
                 key={cat}
                 onClick={() => setCategoriaSel(cat)}
                 style={{
-                  padding: '6px 14px',
+                  padding: '5px 12px',
                   borderRadius: '20px',
                   fontSize: '12px',
                   fontWeight: '700',
@@ -479,11 +471,11 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
               const critico = estado === 'critico';
 
               return (
-                <div key={prod.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 8px', borderBottom: '1px solid #f1f5f9', backgroundColor: bloqueado ? '#fef2f2' : critico ? '#fffbeb' : '#ffffff' }}>
+                <div key={prod.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', padding: '5px 6px', borderBottom: '1px solid #f1f5f9', backgroundColor: bloqueado ? '#fef2f2' : critico ? '#fffbeb' : '#ffffff' }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '800' }}>{prod.codigo} · {prod.marca}</div>
-                    <div style={{ fontSize: '13px', fontWeight: '700' }}>{prod.nombre}</div>
-                    <div style={{ fontSize: '12px', color: '#16a34a', fontWeight: '800' }}>${prod.precio.toLocaleString()}</div>
+                    <div style={{ fontSize: '10px', color: '#2563eb', fontWeight: '800' }}>{prod.codigo} · {prod.marca}</div>
+                    <div style={{ fontSize: '12px', fontWeight: '700' }}>{prod.nombre}</div>
+                    <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: '800' }}>${prod.precio.toLocaleString()}</div>
 
                     {critico && (
                       <div style={{ marginTop: '4px', fontSize: '11px', fontWeight: '900', color: '#b45309' }}>
@@ -510,9 +502,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                       color: bloqueado ? '#64748b' : critico ? '#92400e' : '#2563eb',
                       border: bloqueado ? '1px solid #cbd5e1' : critico ? '1px solid #f59e0b' : '1px solid #bfdbfe',
                       borderRadius: '8px',
-                      padding: '6px 12px',
+                      padding: '5px 9px',
                       fontWeight: '800',
-                      fontSize: '12px',
+                      fontSize: '11px',
                       cursor: bloqueado ? 'not-allowed' : 'pointer'
                     }}
                   >
@@ -525,15 +517,15 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         )}
 
         {/* Lista de Renglones Cargados */}
-        <div style={{ marginBottom: '18px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        <div style={{ marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
             <span style={{ fontSize: '14px', fontWeight: '800' }}>Renglones del Pedido</span>
             <span style={{ fontSize: '12px', color: '#64748b' }}>{itemsPedido.length} artículos</span>
           </div>
 
           {itemsPedido.length === 0 ? (
-            <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '24px', textAlign: 'center', color: '#94a3b8', border: '2px dashed #cbd5e1' }}>
-              No hay artículos en la comanda. Buscá arriba por código o nombre para sumar renglones.
+            <div style={{ backgroundColor: '#ffffff', borderRadius: '10px', padding: '10px 12px', textAlign: 'center', fontSize: '12px', color: '#94a3b8', border: '2px dashed #cbd5e1' }}>
+              No hay art. en la venta. Buscá arriba por código o nombre.
             </div>
           ) : (
             itemsPedido.map(item => {
@@ -578,14 +570,26 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <span style={{ fontSize: '12px', color: '#64748b' }}>% Desc:</span>
                       <select
-                        value={item.bonif}
-                        onChange={(e) => cambiarBonif(item.id, e.target.value)}
+                        value={[0, 10].includes(Number(item.bonif)) ? Number(item.bonif) : 'otro'}
+                        onChange={(e) => {
+                          if (e.target.value === 'otro') {
+                            const ingresado = window.prompt('Ingresá el porcentaje de descuento:', String(item.bonif || ''));
+                            if (ingresado === null) return;
+                            const porcentaje = Number(String(ingresado).replace(',', '.'));
+                            if (!Number.isFinite(porcentaje) || porcentaje < 0 || porcentaje > 100) {
+                              alert('Ingresá un porcentaje válido entre 0 y 100.');
+                              return;
+                            }
+                            cambiarBonif(item.id, porcentaje);
+                          } else {
+                            cambiarBonif(item.id, e.target.value);
+                          }
+                        }}
                         style={{ padding: '4px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: '700', outline: 'none' }}
                       >
                         <option value={0}>0% Normal</option>
-                        <option value={5}>5% Bonif.</option>
                         <option value={10}>10% OFF</option>
-                        <option value={15}>15% Mayor</option>
+                        <option value="otro">{![0, 10].includes(Number(item.bonif)) ? `${item.bonif}% Personalizado` : 'Otro %'}</option>
                       </select>
                     </div>
 
@@ -645,11 +649,11 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
         {/* Envío WhatsApp */}
         <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '12px 14px', border: '1px solid #e2e8f0', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>
             <input type="checkbox" checked={enviarWsp} onChange={(e) => setEnviarWsp(e.target.checked)} />
             <span>💬 Enviar comanda por WhatsApp</span>
           </label>
-          <span style={{ fontSize: '12px', color: '#16a34a', fontWeight: '800' }}>
+          <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: '800' }}>
             {comercio?.telefono || '11-4820-9912'}
           </span>
         </div>

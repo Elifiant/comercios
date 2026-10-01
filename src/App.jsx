@@ -723,6 +723,53 @@ useEffect(() => {
   const [guardandoVisita, setGuardandoVisita] = useState(false);
   const [visitaRegistradaHoy, setVisitaRegistradaHoy] = useState(false);
 
+  // 📊 Métricas reales del día: se reconstruyen desde Supabase y sobreviven a un refresh.
+  const [ventaHoyReal, setVentaHoyReal] = useState(0);
+
+  useEffect(() => {
+    if (!sesion?.user || !(perfil || perfilProp)) return;
+
+    const cargarVentaHoyReal = async () => {
+      try {
+        const pActivo = perfil || perfilProp;
+        const hoy = fechaLocalISO();
+        const { data, error } = await supabase.from("pedidos").select("*");
+        if (error) throw error;
+
+        const pedidosHoy = (data || []).filter((pedido) => {
+          const fechaPedido = pedido.fecha || pedido.created_at || pedido.fecha_creacion || pedido.fecha_pedido;
+          if (!fechaPedido) return false;
+          const fecha = new Date(fechaPedido);
+          if (Number.isNaN(fecha.getTime()) || fechaLocalISO(fecha) !== hoy) return false;
+
+          if (pActivo?.empresa_id && pedido.empresa_id && String(pedido.empresa_id) !== String(pActivo.empresa_id)) return false;
+          if (pActivo?.nombre && pedido.preventista && String(pedido.preventista).trim().toLowerCase() !== String(pActivo.nombre).trim().toLowerCase()) return false;
+          return true;
+        });
+
+        const total = pedidosHoy.reduce((acum, pedido) => {
+          const valor = pedido.total ?? pedido.total_final ?? pedido.importe_total ?? pedido.importe ?? pedido.monto ?? 0;
+          let numero = Number(valor);
+          if (!Number.isFinite(numero)) {
+            const limpio = String(valor).replace(/[^0-9,.-]/g, "");
+            const normalizado = limpio.includes(",")
+              ? limpio.replace(/\./g, "").replace(",", ".")
+              : limpio;
+            numero = Number(normalizado);
+          }
+          return acum + (Number.isFinite(numero) ? numero : 0);
+        }, 0);
+
+        setVentaHoyReal(total);
+      } catch (error) {
+        console.error("Error cargando venta real de hoy:", error);
+        setVentaHoyReal(0);
+      }
+    };
+
+    cargarVentaHoyReal();
+  }, [sesion?.user?.id, perfil, perfilProp, visitasMapa]);
+
   const registrarVisitaCheckIn = async (comercio, resultadoDirecto = null, observacionDirecta = null) => {
     if (!comercio) return;
     setGuardandoVisita(true);
@@ -919,12 +966,25 @@ const solicitarNoVisitar = async (comercio) => {
   const [jornadaActiva, setJornadaActiva] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [vistaComercios, setVistaComercios] = useState("HOY");
+  const [ordenComerciosHoy, setOrdenComerciosHoy] = useState(() => {
+    try {
+      return localStorage.getItem("rutacomercio_orden_hoy") || "cercania";
+    } catch {
+      return "cercania";
+    }
+  });
   const [destinoMapa, setDestinoMapa] = useState(null);
   const [llegueDestino, setLlegueDestino] = useState(null);
   const [tieneStockDestino, setTieneStockDestino] = useState(null);
   const [confirmarSaltoVisita, setConfirmarSaltoVisita] = useState(false);
   const [fechaRevisitaManual, setFechaRevisitaManual] = useState("");
   const [motivoRevisita, setMotivoRevisita] = useState("");
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("rutacomercio_orden_hoy", ordenComerciosHoy);
+    } catch {}
+  }, [ordenComerciosHoy]);
 
   // 📍 Cada comercio empieza su corrección de ubicación desde SU propio punto.
   // Evita que quede visible la posición usada al editar el comercio anterior.
@@ -1225,6 +1285,22 @@ obtenerUbicacionFresca()
     };
   })
   .sort((a, b) => {
+    // En HOY el preventista puede elegir entre la hoja de ruta del supervisor
+    // o la cercanía GPS. En TODOS conservamos siempre el orden por cercanía.
+    if (vistaComercios === "HOY" && ordenComerciosHoy === "ruta") {
+      const ordA =
+        a.orden_visita !== null && a.orden_visita !== undefined
+          ? Number(a.orden_visita)
+          : 999999;
+      const ordB =
+        b.orden_visita !== null && b.orden_visita !== undefined
+          ? Number(b.orden_visita)
+          : 999999;
+
+      if (ordA !== ordB) return ordA - ordB;
+      return String(a.nombre || "").localeCompare(String(b.nombre || ""));
+    }
+
     if (a.distancia_actual === null && b.distancia_actual === null) return 0;
     if (a.distancia_actual === null) return 1;
     if (b.distancia_actual === null) return -1;
@@ -3008,14 +3084,20 @@ onChange={(e) =>
           <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Venta Hoy</div>
             <div style={{ fontSize: "19px", lineHeight: 1.05, fontWeight: "900", color: "#4ade80", marginTop: "1px" }}>
-              {jornadaActiva ? "$ 148.5K" : "$ 0"}
+              {`$ ${Math.round(ventaHoyReal).toLocaleString("es-AR")}`}
             </div>
           </div>
 
           <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Efectividad</div>
             <div style={{ fontSize: "20px", lineHeight: 1.05, fontWeight: "900", color: "#facc15", marginTop: "1px" }}>
-              {jornadaActiva ? "44%" : "0%"}
+              {`${visitasRealizadasHoy > 0 ? Math.round((Array.from(idsVisitadosHoy).filter((id) =>
+                (visitasMapa || []).some((v) =>
+                  String(v.comercio_id) === String(id) &&
+                  v?.fecha && new Date(v.fecha) >= inicioHoyMetricas &&
+                  String(v.resultado || "").toLowerCase() === "venta"
+                )
+              ).length / visitasRealizadasHoy) * 100) : 0}%`}
             </div>
           </div>
         </div>
@@ -3073,6 +3155,56 @@ onChange={(e) =>
     TODOS
   </button>
 </div>
+
+      {vistaComercios === "HOY" && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            margin: "7px 16px 0",
+          }}
+        >
+          <span style={{ color: "#94a3b8", fontSize: "11px", fontWeight: "800" }}>
+            ORDEN:
+          </span>
+          <button
+            type="button"
+            onClick={() => setOrdenComerciosHoy("cercania")}
+            style={{
+              flex: 1,
+              padding: "6px 8px",
+              borderRadius: "7px",
+              border: ordenComerciosHoy === "cercania" ? "1px solid #60a5fa" : "1px solid #334155",
+              background: ordenComerciosHoy === "cercania" ? "#1d4ed8" : "#0f172a",
+              color: "#fff",
+              fontSize: "12px",
+              fontWeight: "800",
+              cursor: "pointer",
+            }}
+          >
+            📍 CERCANÍA
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrdenComerciosHoy("ruta")}
+            style={{
+              flex: 1,
+              padding: "6px 8px",
+              borderRadius: "7px",
+              border: ordenComerciosHoy === "ruta" ? "1px solid #60a5fa" : "1px solid #334155",
+              background: ordenComerciosHoy === "ruta" ? "#1d4ed8" : "#0f172a",
+              color: "#fff",
+              fontSize: "12px",
+              fontWeight: "800",
+              cursor: "pointer",
+            }}
+          >
+            🛣️ RUTA
+          </button>
+        </div>
+      )}
+
       {/* PRÓXIMO DESTINO SEGÚN RUTA SUGERIDA */}
       {vistaComercios === "HOY" && (
         <div style={{ padding: "7px 16px 0" }}>
