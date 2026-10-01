@@ -612,6 +612,49 @@ useEffect(() => {
 
   return () => clearInterval(timer);
 }, [perfilSupervisor?.empresa_id]);
+
+// 🏪 Mantener comercios/capturas sincronizados con Supabase.
+// Esto hace que altas, ediciones y eliminaciones hechas por el preventista
+// aparezcan en el Supervisor sin tener que refrescar la página.
+useEffect(() => {
+  if (!perfilSupervisor?.empresa_id) return;
+
+  let cancelado = false;
+
+  const actualizarComercios = async () => {
+    const { data, error } = await supabase
+      .from("comercios")
+      .select("*")
+      .eq("empresa_id", perfilSupervisor.empresa_id)
+      .order("id", { ascending: false });
+
+    if (error) {
+      console.error("Error actualizando comercios/capturas:", error);
+      return;
+    }
+
+    if (!cancelado) setComercios(data || []);
+  };
+
+  // Sincroniza inmediatamente al entrar/cambiar de empresa.
+  actualizarComercios();
+
+  // Refuerzo confiable para Safari/iPhone y para eliminaciones hechas desde otro equipo.
+  const timerComercios = setInterval(actualizarComercios, 3000);
+
+  // Al volver a la pestaña, sincroniza en el acto sin esperar al próximo intervalo.
+  const alVolverALaPantalla = () => {
+    if (document.visibilityState === "visible") actualizarComercios();
+  };
+  document.addEventListener("visibilitychange", alVolverALaPantalla);
+
+  return () => {
+    cancelado = true;
+    clearInterval(timerComercios);
+    document.removeEventListener("visibilitychange", alVolverALaPantalla);
+  };
+}, [perfilSupervisor?.empresa_id]);
+
   // 📍 Cargar visitas reales de hoy y mantenerlas actualizadas
   useEffect(() => {
     if (!perfilSupervisor?.empresa_id) return;
@@ -886,9 +929,19 @@ useEffect(() => {
     }
   };
 
+  // En Monitoreo, los números del mapa representan el orden REAL de captura:
+  // 1 = primera captura, 2 = segunda, etc.
+  // El planificador conserva su orden manual de visitas.
   const listaParaMapa = (seccionActiva === "planificador" && secuenciaPersonalizada.length > 0)
     ? secuenciaPersonalizada
-    : comerciosVisibles;
+    : [...comerciosVisibles].sort((a, b) => {
+        const idA = Number(a.id);
+        const idB = Number(b.id);
+        if (Number.isFinite(idA) && Number.isFinite(idB)) return idA - idB;
+        const fechaA = new Date(a.created_at || a.fecha || 0).getTime();
+        const fechaB = new Date(b.created_at || b.fecha || 0).getTime();
+        return fechaA - fechaB;
+      });
 
   const coordenadasValidas = listaParaMapa
     .map(c => [c.ubicacion_exacta_latitud || c.latitud, c.ubicacion_exacta_longitud || c.longitud])
@@ -937,7 +990,15 @@ useEffect(() => {
       return n === nombrePrev || n.includes(nombrePrev) || nombrePrev.includes(n);
     });
 
-    const ultimaSenal = perfilPrev?.ultima_conexion || perfilPrev?.ultima_posicion_at || null;
+    // Usar siempre la señal MÁS RECIENTE disponible.
+    // Una ultima_conexion antigua nunca debe tapar una posicion GPS nueva.
+    const fechasSenal = [perfilPrev?.ultima_posicion_at, perfilPrev?.ultima_conexion]
+      .filter(Boolean)
+      .map((fecha) => new Date(fecha))
+      .filter((fecha) => !Number.isNaN(fecha.getTime()));
+    const ultimaSenal = fechasSenal.length
+      ? new Date(Math.max(...fechasSenal.map((fecha) => fecha.getTime()))).toISOString()
+      : null;
     const minutosDesdeSenal = ultimaSenal ? (Date.now() - new Date(ultimaSenal).getTime()) / 60000 : Infinity;
     // En línea si el celular reportó actividad en los últimos 60 minutos.
     // Las visitas de hoy se muestran aparte, pero no mantienen al preventista "en línea".
@@ -3898,11 +3959,11 @@ useEffect(() => {
                 <AutoCentradoMapa puntos={coordenadasValidas} puntoActivo={comercioFoco ? [comercioFoco.ubicacion_exacta_latitud || comercioFoco.latitud, comercioFoco.ubicacion_exacta_longitud || comercioFoco.longitud] : null} />
                 <ControlCentradoMapa accion={accionMapa} puntoPreventista={puntoPreventistaMapa} puntosRecorrido={coordenadasValidas} />
 
-                {rutaRecorrida.length > 1 && (
+                {seccionActiva === "planificador" && rutaRecorrida.length > 1 && (
                   <Polyline positions={rutaRecorrida} pathOptions={{ color: "#16a34a", weight: 4, opacity: 0.85 }} />
                 )}
 
-                {rutaRestante.length > 1 && (
+                {seccionActiva === "planificador" && rutaRestante.length > 1 && (
                   <Polyline positions={rutaRestante} pathOptions={{ color: "#2563eb", weight: 3, dashArray: "6, 8", opacity: 0.75 }} />
                 )}
 
@@ -3912,11 +3973,13 @@ useEffect(() => {
                   if (!lat || !lng) return null;
                   const estadoPin = c.no_visitar === true
                     ? "no_visitar"
-                    : i < rutaRecorrida.length
-                      ? "visitado"
-                      : i === rutaRecorrida.length
-                        ? "activo"
-                        : "pendiente";
+                    : seccionActiva === "planificador"
+                      ? (i < rutaRecorrida.length
+                          ? "visitado"
+                          : i === rutaRecorrida.length
+                            ? "activo"
+                            : "pendiente")
+                      : "pendiente";
                   return (
                     <Marker key={c.id} position={[lat, lng]} icon={iconoNumero(i + 1, estadoPin)}>
                       <Popup>
@@ -3929,6 +3992,9 @@ useEffect(() => {
                           </div>
                           <strong style={{ fontSize: "12px" }}>{c.nombre || ("Comercio #" + c.id)}</strong>
                           <p style={{ margin: "2px 0 0 0", fontSize: "10px", color: "#64748b" }}>{c.direccion || "Sin dirección"}</p>
+                          <p style={{ margin: "4px 0 0 0", fontSize: "10px", color: "#475569", fontWeight: "700" }}>
+                            🕒 Capturado: {c.created_at ? new Date(c.created_at).toLocaleString("es-AR") : (c.fecha ? new Date(c.fecha).toLocaleString("es-AR") : "Sin fecha registrada")}
+                          </p>
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setComercioDetalleModal(c); setEditPrevFicha(c.preventista || ""); setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : ""); }}
@@ -4047,6 +4113,10 @@ useEffect(() => {
     </button>
   </div>
 )}
+                <div style={{ background: "#eef6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "10px", fontSize: "11px", color: "#1e3a8a", fontWeight: "800" }}>
+                  🕒 Fecha y hora de captura: {comercioDetalleModal.created_at ? new Date(comercioDetalleModal.created_at).toLocaleString("es-AR") : (comercioDetalleModal.fecha ? new Date(comercioDetalleModal.fecha).toLocaleString("es-AR") : "Sin fecha registrada")}
+                </div>
+
                 {/* DATOS FISCALES */}
                 <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px" }}>
                   <div style={{ fontSize: "11px", fontWeight: "bold", color: "#1e293b", marginBottom: "6px" }}>🏢 DATOS FISCALES</div>
