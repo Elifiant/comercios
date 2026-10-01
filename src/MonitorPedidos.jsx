@@ -301,6 +301,27 @@ export default function MonitorPedidos() {
     return matchVista && matchPrev && matchEst;
   });
 
+  // Abrir directamente una NVI enviada desde el Supervisor.
+  useEffect(() => {
+    if (!pedidos.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const nviSolicitada = params.get("nvi");
+    if (!nviSolicitada) return;
+
+    const buscada = String(nviSolicitada).replace(/^0+/, "") || "0";
+    const encontrada = pedidos.find((p) => {
+      const numero = String(p.numeroVisible || "").replace(/^0+/, "") || "0";
+      return numero === buscada || String(p.id) === String(nviSolicitada);
+    });
+    if (!encontrada) return;
+
+    setFiltroPreventista("Todos");
+    setFiltroEstado("Todos");
+    setVistaPedidos(esPasadoDeposito(encontrada) ? "Historial" : "Activos");
+    setPedidoActivo(encontrada);
+    setMostrarExportacion(false);
+  }, [pedidos]);
+
   // Si el pedido seleccionado ya no pertenece a la vista actual
   // (por ejemplo, pasó de Activos a Historial), cerrar su detalle.
   useEffect(() => {

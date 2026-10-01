@@ -300,6 +300,8 @@ const reactivarComercio = async (comercio) => {
   const [audioActivoObj, setAudioActivoObj] = useState(null);
   const [datosAbono, setDatosAbono] = useState(null);
   const [visitasHoy, setVisitasHoy] = useState([]);
+  const [nviHoyActividad, setNviHoyActividad] = useState([]);
+  const [nviActividadSeleccionada, setNviActividadSeleccionada] = useState(null);
   const [filtroEstadoCuenta, setFiltroEstadoCuenta] = useState("todos");
   const [filtroPreventistaCuenta, setFiltroPreventistaCuenta] = useState("TODOS");
   const [busquedaCuenta, setBusquedaCuenta] = useState("");
@@ -736,6 +738,37 @@ useEffect(() => {
     return () => clearInterval(timer);
   }, [perfilSupervisor?.empresa_id]);
 
+  // 🧾 NVI de hoy para la cronología del Supervisor.
+  // Incluye activas + Historial/Depósito: una venta no deja de existir por cambiar de etapa.
+  useEffect(() => {
+    if (!perfilSupervisor?.empresa_id) return;
+
+    const cargarNviHoyActividad = async () => {
+      const inicioHoy = new Date();
+      inicioHoy.setHours(0, 0, 0, 0);
+      const inicioManana = new Date(inicioHoy);
+      inicioManana.setDate(inicioManana.getDate() + 1);
+
+      const { data, error } = await supabase
+        .from("pedidos")
+        .select("*")
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .gte("created_at", inicioHoy.toISOString())
+        .lt("created_at", inicioManana.toISOString())
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Error cargando NVI de hoy para actividad:", error);
+        return;
+      }
+      setNviHoyActividad(data || []);
+    };
+
+    cargarNviHoyActividad();
+    const timerNviActividad = setInterval(cargarNviHoyActividad, 10000);
+    return () => clearInterval(timerNviActividad);
+  }, [perfilSupervisor?.empresa_id]);
+
   // 🚫 Cargar solicitudes pendientes de NO VISITAR MÁS
 useEffect(() => {
   if (!perfilSupervisor?.empresa_id) return;
@@ -1073,6 +1106,88 @@ useEffect(() => {
     const nombre = normalizarNombrePrev(v.preventista);
     return target && (nombre === target || nombre.includes(target) || target.includes(nombre));
   });
+
+  // 🕐 Actividad de hoy del preventista seleccionado:
+  // capturas de nuevos comercios + visitas + NVI, ordenadas por hora.
+  const actividadHoyPreventista = (() => {
+    const target = normalizarNombrePrev(preventistaSeleccionado?.nombre || preventistaSeleccionado);
+    if (!target) return [];
+
+    const coincidePreventista = (valor) => {
+      const nombre = normalizarNombrePrev(valor);
+      return nombre && (nombre === target || nombre.includes(target) || target.includes(nombre));
+    };
+
+    const esHoy = (valorFecha) => {
+      if (!valorFecha) return false;
+      const f = new Date(valorFecha);
+      if (Number.isNaN(f.getTime())) return false;
+      const h = new Date();
+      return f.getFullYear() === h.getFullYear() &&
+        f.getMonth() === h.getMonth() &&
+        f.getDate() === h.getDate();
+    };
+
+    const capturas = (comercios || [])
+      .filter(c => coincidePreventista(c.preventista) && esHoy(c.created_at || c.fecha_registro || c.fecha))
+      .map(c => ({
+        id: `captura-${c.id}`,
+        tipo: "captura",
+        fecha: c.created_at || c.fecha_registro || c.fecha,
+        titulo: c.nombre || `Comercio #${c.id}`,
+        detalle: c.direccion || (c.rubro && String(c.rubro).toLowerCase() !== "general" ? c.rubro : ""),
+      }));
+
+    const visitas = (visitasPreventistaSeleccionado || []).map((v, i) => ({
+      id: `visita-${v.id || i}`,
+      tipo: "visita",
+      fecha: v.fecha || v.created_at || null,
+      horaTexto: v.hora || "",
+      titulo: v.comercio_nombre || v.nombre_comercio || (v.comercio_id ? `Comercio #${v.comercio_id}` : "Visita"),
+      detalle: v.resultado || v.tipo || v.observacion || v.observaciones || v.notas || "Visita registrada",
+    }));
+
+    const nvis = (nviHoyActividad || [])
+      .filter(p => coincidePreventista(p.preventista))
+      .map(p => ({
+        id: `nvi-${p.id}`,
+        tipo: "nvi",
+        fecha: p.created_at || p.fecha || null,
+        titulo: `NVI #${String(p.numero_pedido || p.id || "").padStart(6, "0")}`,
+        detalle: `${p.comercio_nombre || (p.comercio_id ? `Comercio #${p.comercio_id}` : "Comercio")} · $${Number(p.total || 0).toLocaleString("es-AR")}`,
+        estado: p.estado || "",
+        pedidoCompleto: p,
+      }));
+
+    const valorOrden = (item) => {
+      if (item.fecha) {
+        const t = new Date(item.fecha).getTime();
+        if (!Number.isNaN(t)) return t;
+      }
+      if (item.horaTexto) {
+        const m = String(item.horaTexto).match(/(\d{1,2}):(\d{2})/);
+        if (m) {
+          const h = new Date();
+          h.setHours(Number(m[1]), Number(m[2]), 0, 0);
+          return h.getTime();
+        }
+      }
+      return 0;
+    };
+
+    return [...capturas, ...visitas, ...nvis]
+      .sort((a, b) => valorOrden(b) - valorOrden(a));
+  })();
+
+  const horaActividad = (item) => {
+    if (item.fecha) {
+      const f = new Date(item.fecha);
+      if (!Number.isNaN(f.getTime())) {
+        return f.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+      }
+    }
+    return item.horaTexto || "--:--";
+  };
 
   const activosEnCalle = telemetriaFlota.filter(p => p.activoHoy).length;
   const porcentajeActivos = telemetriaFlota.length > 0 ? Math.round((activosEnCalle / telemetriaFlota.length) * 100) : 0;
@@ -2843,7 +2958,7 @@ useEffect(() => {
                                 <div style={{ marginTop: "3px" }}>📍 {r.latitud}, {r.longitud}</div>
                                 <div style={{ marginTop: "3px" }}>🗺️ {r.direccionEncontrada}</div>
                                 {r.origen === "geoapify" && (
-                                  <div style={{ marginTop: "3px", color: "#64748b" }}>
+                                  <div style={{ marginTop: "2px", color: "#64748b", fontSize: "11px", lineHeight: "1.1" }}>
                                     Precisión informada: {Math.round((r.confianza || 0) * 100)}% · tipo: {r.tipoResultado || "sin dato"}
                                   </div>
                                 )}
@@ -3126,7 +3241,7 @@ useEffect(() => {
               ) : solicitudesPendientes.map((solicitud) => (
                 <div key={solicitud.id} style={{ border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: "9px", padding: "12px", marginTop: "8px" }}>
                   <div style={{ fontWeight: "900", fontSize: "13px" }}>🏪 {solicitud.comercio_nombre}</div>
-                  <div style={{ fontSize: "12px", marginTop: "4px", color: "#475569" }}>👤 Preventista: <strong>{solicitud.preventista || "Sin informar"}</strong></div>
+                  <div style={{ fontSize: "12px", marginTop: "2px", color: "#475569", fontSize: "12px", lineHeight: "1.15" }}>👤 Preventista: <strong>{solicitud.preventista || "Sin informar"}</strong></div>
                   <div style={{ fontSize: "12px", marginTop: "4px", color: "#475569" }}>💬 Motivo: <strong>{solicitud.motivo || "Sin motivo"}</strong></div>
                   <div style={{ fontSize: "11px", marginTop: "4px", color: "#94a3b8" }}>{solicitud.created_at ? new Date(solicitud.created_at).toLocaleString("es-AR") : ""}</div>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
@@ -3804,26 +3919,40 @@ useEffect(() => {
 
         {preventistaSeleccionado && (
           <div style={{ backgroundColor: "#eff6ff", borderRadius: "10px", border: "2px solid #2563eb", padding: "14px 16px", marginBottom: "16px", boxShadow: "0 2px 8px rgba(37,99,235,0.12)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "10px", flexWrap: "wrap" }}>
               <div style={{ fontSize: "14px", fontWeight: "900", color: "#1d4ed8" }}>
-                📍 VISITAS DE HOY — {nombrePrevActivo}
+                🕐 ACTIVIDAD DE HOY — {nombrePrevActivo}
               </div>
-              <div style={{ fontSize: "11px", fontWeight: "800", color: "#2563eb" }}>{visitasPreventistaSeleccionado.length}</div>
+              <div style={{ fontSize: "11px", fontWeight: "800", color: "#2563eb" }}>
+                {actividadHoyPreventista.length} movimiento{actividadHoyPreventista.length === 1 ? "" : "s"}
+              </div>
             </div>
-            {visitasPreventistaSeleccionado.length === 0 ? (
-              <div style={{ fontSize: "11px", color: "#64748b", padding: "8px 0" }}>Todavía no hay visitas registradas hoy.</div>
+
+            {actividadHoyPreventista.length === 0 ? (
+              <div style={{ fontSize: "11px", color: "#64748b", padding: "8px 0" }}>
+                Todavía no hay capturas, visitas ni NVI registradas hoy.
+              </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" }}>
-                {visitasPreventistaSeleccionado.map((v, i) => (
-                  <div key={v.id || i} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "7px", padding: "8px 10px", fontSize: "11px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
-                      <strong style={{ color: "#0f172a" }}>🏪 {v.comercio_nombre || v.nombre_comercio || (v.comercio_id ? `Comercio #${v.comercio_id}` : "Actividad")}</strong>
-                      <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>🕐 {v.hora || (v.created_at ? new Date(v.created_at).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) : "")}</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "260px", overflowY: "auto" }}>
+                {actividadHoyPreventista.map((item) => {
+                  const icono = item.tipo === "nvi" ? "🧾" : item.tipo === "visita" ? "🏪" : "📍";
+                  const etiqueta = item.tipo === "nvi" ? "VENTA / NVI" : item.tipo === "visita" ? "VISITA" : "CAPTURA";
+                  return (
+                    <div key={item.id} style={{background:"#fff",border:"1px solid #dbeafe",borderRadius:"6px",padding:"5px 8px",display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",minWidth:0}}>
+                      {item.tipo === "nvi" ? (<>
+                        <span>🧾</span>
+                        <button type="button" onClick={() => setNviActividadSeleccionada(item.pedidoCompleto)} title="Ver detalle de esta NVI"
+                          style={{border:"none",background:"transparent",padding:0,margin:0,color:"#1d4ed8",fontSize:"12px",fontWeight:"900",textDecoration:"underline",cursor:"pointer",whiteSpace:"nowrap"}}>{item.titulo}</button>
+                        {item.detalle && <span style={{color:"#334155",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0,flex:1}}>· {item.detalle}</span>}
+                      </>) : (<>
+                        <span style={{color:"#2563eb",fontWeight:"900",whiteSpace:"nowrap"}}>{item.tipo === "visita" ? "🏪 VISITA" : "📍 CAPTURA"}</span>
+                        <span style={{color:"#0f172a",fontWeight:"800",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>· {item.titulo}</span>
+                        {item.detalle && <span style={{color:"#475569",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0,flex:1}}>· {item.tipo === "visita" ? "💬 " : ""}{item.detalle}</span>}
+                      </>)}
+                      <span style={{color:"#475569",whiteSpace:"nowrap",fontWeight:"800",marginLeft:"auto"}}>· 🕐 {horaActividad(item)}</span>
                     </div>
-                    {(v.resultado || v.tipo) && <div style={{ marginTop: "3px", color: "#475569" }}>✅ {v.resultado || v.tipo}</div>}
-                    {(v.observacion || v.observaciones || v.notas) && <div style={{ marginTop: "3px", color: "#475569" }}>💬 {v.observacion || v.observaciones || v.notas}</div>}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -4390,6 +4519,49 @@ useEffect(() => {
             )}
           </div>
         )}
+          {nviActividadSeleccionada && (() => {
+            const nvi = nviActividadSeleccionada;
+            const itemsNvi = Array.isArray(nvi.items) ? nvi.items : Array.isArray(nvi.detalle) ? nvi.detalle : Array.isArray(nvi.productos) ? nvi.productos : [];
+            const notaNvi = nvi.nota || nvi.notas || nvi.observacion || nvi.observaciones || "";
+            return (
+              <div onClick={() => setNviActividadSeleccionada(null)}
+                style={{ position:"fixed", inset:0, background:"rgba(15,23,42,.55)", zIndex:9999, display:"flex", alignItems:"center", justifyContent:"center", padding:"18px" }}>
+                <div onClick={e => e.stopPropagation()}
+                  style={{ width:"min(620px,96vw)", maxHeight:"82vh", overflowY:"auto", background:"#fff", borderRadius:"14px", boxShadow:"0 20px 60px rgba(0,0,0,.25)", padding:"18px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:"12px", marginBottom:"12px" }}>
+                    <div>
+                      <div style={{ fontSize:"11px", fontWeight:"900", color:"#2563eb" }}>🧾 NOTA DE VENTA INTERNA</div>
+                      <div style={{ fontSize:"20px", fontWeight:"900" }}>NVI #{String(nvi.numero_pedido || nvi.id || "").padStart(6,"0")}</div>
+                      <div style={{ fontSize:"14px", fontWeight:"800", color:"#334155" }}>{nvi.comercio_nombre || nvi.cliente || (nvi.comercio_id ? `Comercio #${nvi.comercio_id}` : "Comercio")}</div>
+                    </div>
+                    <button onClick={() => setNviActividadSeleccionada(null)}
+                      style={{ border:"1px solid #cbd5e1", background:"#f8fafc", borderRadius:"8px", padding:"7px 10px", fontWeight:"900", cursor:"pointer" }}>✕ Cerrar</button>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:"7px", marginBottom:"12px" }}>
+                    <div style={{ background:"#f8fafc", padding:"8px", borderRadius:"8px" }}><small>PREVENTISTA</small><div style={{fontWeight:"800"}}>{nvi.preventista || "—"}</div></div>
+                    <div style={{ background:"#f8fafc", padding:"8px", borderRadius:"8px" }}><small>ESTADO</small><div style={{fontWeight:"800"}}>{nvi.estado || "—"}</div></div>
+                    <div style={{ background:"#eff6ff", padding:"8px", borderRadius:"8px" }}><small>TOTAL VENDIDO</small><div style={{fontWeight:"900",color:"#1d4ed8"}}>${Number(nvi.total || 0).toLocaleString("es-AR")}</div></div>
+                  </div>
+                  {notaNvi && <div style={{ background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:"8px", padding:"9px", marginBottom:"12px" }}><strong>💬 COMENTARIO / NOTA</strong><div style={{marginTop:"3px"}}>{notaNvi}</div></div>}
+                  <div style={{ fontSize:"11px", fontWeight:"900", color:"#475569", marginBottom:"6px" }}>MERCADERÍA</div>
+                  {itemsNvi.length ? itemsNvi.map((it,idx) => {
+                    const cant=Number(it.cantidad || it.qty || 1), precio=Number(it.precio || it.precio_unitario || it.price || 0);
+                    const subtotal=Number(it.subtotal || it.total || cant*precio);
+                    return <div key={it.id || idx} style={{display:"flex",justifyContent:"space-between",gap:"10px",borderBottom:"1px solid #e2e8f0",padding:"6px 0",fontSize:"12px"}}>
+                      <div><strong>{it.descripcion || it.nombre || it.producto || `Artículo ${idx+1}`}</strong><div style={{color:"#64748b"}}>{cant} × ${precio.toLocaleString("es-AR")}</div></div><strong>${subtotal.toLocaleString("es-AR")}</strong>
+                    </div>
+                  }) : <button type="button"
+                    onClick={() => {
+                      const numeroNvi = String(nvi.numero_pedido || nvi.id || "");
+                      window.location.href = `/pedidos?nvi=${encodeURIComponent(numeroNvi)}`;
+                    }}
+                    style={{width:"100%",marginTop:"10px",padding:"11px 12px",border:"none",borderRadius:"8px",background:"#2563eb",color:"#fff",fontWeight:"900",fontSize:"13px",cursor:"pointer"}}>
+                    🧾 VER NOTA DE VENTA COMPLETA →
+                  </button>}
+                </div>
+              </div>
+            );
+          })()}
           </>
         )}
       </main>
