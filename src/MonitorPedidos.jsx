@@ -134,7 +134,9 @@ export default function MonitorPedidos() {
           const direccionReal = direccionPorComercio[String(p.comercio_id)] || "";
           return {
             id: p.id || ("PED-" + String(p.created_at || Date.now()).slice(-4)),
+            empresa_id: p.empresa_id || perfil.empresa_id,
             numeroVisible: String(p.numero_pedido || "").padStart(6, "0"),
+            fechaCreacion: p.created_at || null,
             hora: p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "En curso",
             preventista: p.preventista || p.vendedor || "Walter",
             ruta: p.ruta || "Ruta de Visita",
@@ -159,6 +161,8 @@ export default function MonitorPedidos() {
         if (!listaConsolidada.some(p => String(p.id) === String(loc.id))) {
           listaConsolidada.push({
             id: loc.id || ("LOC-" + Date.now()),
+            empresa_id: loc.empresa_id || perfil.empresa_id,
+            fechaCreacion: loc.fecha || loc.created_at || null,
             hora: loc.fecha ? new Date(loc.fecha).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "En curso",
             preventista: loc.preventista || "Walter",
             ruta: "Ruta 01",
@@ -167,24 +171,53 @@ export default function MonitorPedidos() {
             condicion: "Consumidor Final",
             bultos: Array.isArray(loc.items) ? loc.items.length : 1,
             total: Number(loc.total || 0),
-            estado: "Ingresado",
+            estado: loc.estado || "Ingresado",
+            pasado_deposito_at: loc.pasado_deposito_at || null,
             items: Array.isArray(loc.items) ? loc.items : [],
             nota: loc.notas || "Guardado en app"
           });
         }
       });
 
-      setPedidos(listaConsolidada);
-      if (listaConsolidada.length > 0) {
-        setPedidoActivo(listaConsolidada[0]);
-      }
+      // 3. Refuerzo multiempresa:
+      // empresa_id + numero_pedido identifica la representación visible.
+      // Si hubiera dos representaciones dentro de la misma empresa, se prioriza
+      // la que ya está Pasado a Depósito / En Depósito.
+      const pedidosPorEmpresaYNumero = new Map();
+
+      listaConsolidada.forEach((pedido) => {
+        const empresaClave = String(pedido.empresa_id || perfil.empresa_id || "");
+        const pedidoClave = String(pedido.numeroVisible || pedido.id);
+        const clave = `${empresaClave}::${pedidoClave}`;
+        const existente = pedidosPorEmpresaYNumero.get(clave);
+
+        if (!existente) {
+          pedidosPorEmpresaYNumero.set(clave, pedido);
+          return;
+        }
+
+        const nuevoEnDeposito = ["PASADO A DEPOSITO", "EN DEPOSITO"].includes(normalizarEstado(pedido.estado));
+        const existenteEnDeposito = ["PASADO A DEPOSITO", "EN DEPOSITO"].includes(normalizarEstado(existente.estado));
+
+        if (nuevoEnDeposito && !existenteEnDeposito) {
+          pedidosPorEmpresaYNumero.set(clave, pedido);
+        }
+      });
+
+      const listaSinDuplicados = Array.from(pedidosPorEmpresaYNumero.values());
+
+      setPedidos(listaSinDuplicados);
+
+      // No dejamos seleccionado automáticamente un pedido que podría no
+      // pertenecer a la vista actual.
+      setPedidoActivo(null);
 
       // 4. Preventistas reales de la empresa, tengan pedidos o no
       const prevs = [
         "Todos",
         ...new Set([
           ...(perfilesEmpresa || []).map(p => p.nombre || p.email).filter(Boolean),
-          ...listaConsolidada.map(p => p.preventista).filter(Boolean),
+          ...listaSinDuplicados.map(p => p.preventista).filter(Boolean),
         ]),
       ];
       setPreventistasReales(prevs);
@@ -268,7 +301,55 @@ export default function MonitorPedidos() {
     return matchVista && matchPrev && matchEst;
   });
 
-  const totalFacturado = listaFiltrada.reduce((acc, p) => acc + p.total, 0);
+  // Si el pedido seleccionado ya no pertenece a la vista actual
+  // (por ejemplo, pasó de Activos a Historial), cerrar su detalle.
+  useEffect(() => {
+    if (!pedidoActivo) return;
+    const sigueVisible = listaFiltrada.some(
+      p => String(p.id) === String(pedidoActivo.id)
+    );
+    if (!sigueVisible) {
+      setPedidoActivo(null);
+      setMostrarExportacion(false);
+    }
+  }, [pedidos, vistaPedidos, filtroPreventista, filtroEstado, pedidoActivo]);
+
+  // 📊 Resumen comercial por fecha.
+  // Se calcula sobre TODAS las NVI cargadas (Activas + Historial).
+  // Pasar una NVI a Depósito no modifica lo vendido.
+  const inicioDia = (fecha) => new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+  const mismaFecha = (a, b) =>
+    a && b &&
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const ahoraMetricas = new Date();
+  const hoyMetricas = inicioDia(ahoraMetricas);
+  const ayerMetricas = new Date(hoyMetricas);
+  ayerMetricas.setDate(ayerMetricas.getDate() - 1);
+
+  const pedidosConFecha = pedidos
+    .map(p => ({ ...p, _fechaNvi: p.fechaCreacion ? new Date(p.fechaCreacion) : null }))
+    .filter(p => p._fechaNvi && !Number.isNaN(p._fechaNvi.getTime()));
+
+  const nviHoy = pedidosConFecha.filter(p => mismaFecha(p._fechaNvi, hoyMetricas));
+  const nviAyer = pedidosConFecha.filter(p => mismaFecha(p._fechaNvi, ayerMetricas));
+  const nviMes = pedidosConFecha.filter(p =>
+    p._fechaNvi.getFullYear() === ahoraMetricas.getFullYear() &&
+    p._fechaNvi.getMonth() === ahoraMetricas.getMonth()
+  );
+
+  const sumarVentas = (lista) => lista.reduce((acc, p) => acc + Number(p.total || 0), 0);
+  const vendidoHoy = sumarVentas(nviHoy);
+  const vendidoAyer = sumarVentas(nviAyer);
+  const vendidoMes = sumarVentas(nviMes);
+
+  const fechaCorta = (fecha) =>
+    fecha.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" });
+  const nombreMesActual = ahoraMetricas
+    .toLocaleDateString("es-AR", { month: "long" })
+    .toUpperCase();
 
   const resumenArticulosHoy = (() => {
     const mapa = new Map();
@@ -698,7 +779,7 @@ export default function MonitorPedidos() {
   const armarTextoPedido = (pedido) => {
     if (!pedido) return "";
 
-    const lineas = [`PEDIDO #${pedido.numeroVisible}`];
+    const lineas = [`NVI #${pedido.numeroVisible}`];
 
     if (opcionesEnvio.cliente) lineas.push(`Cliente: ${pedido.cliente}`);
     if (opcionesEnvio.direccion) lineas.push(`Dirección: ${pedido.direccion}`);
@@ -745,7 +826,7 @@ export default function MonitorPedidos() {
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>Pedido #${escapar(pedido.numeroVisible)}</title>
+          <title>NVI #${escapar(pedido.numeroVisible)}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 28px; color: #111827; }
             h1 { margin: 0 0 4px; font-size: 22px; }
@@ -754,7 +835,7 @@ export default function MonitorPedidos() {
           </style>
         </head>
         <body>
-          <h1>RutaComercio · Pedido #${escapar(pedido.numeroVisible)}</h1>
+          <h1>RutaComercio · NVI #${escapar(pedido.numeroVisible)}</h1>
           <div class="sub">${escapar(datosCabecera.empresa || "")}</div>
           <pre>${escapar(texto)}</pre>
           <script>window.onload = () => window.print();<\/script>
@@ -782,7 +863,7 @@ export default function MonitorPedidos() {
   };
 
   const copiarParaEmail = async (pedido) => {
-    const asunto = `Pedido #${pedido.numeroVisible} - ${pedido.cliente}`;
+    const asunto = `NVI #${pedido.numeroVisible} - ${pedido.cliente}`;
     const contenido = `Asunto: ${asunto}\n\n${armarTextoPedido(pedido)}`;
 
     try {
@@ -795,7 +876,7 @@ export default function MonitorPedidos() {
 
   const marcarPasadoDeposito = async (pedido) => {
     if (!pedido?.id) return;
-    const confirmar = window.confirm(`¿Confirmás que el pedido #${pedido.numeroVisible} ya fue pasado a depósito?\n\nSeguirá disponible en Historial para consultar, imprimir o reenviar.`);
+    const confirmar = window.confirm(`¿Confirmás que la NVI #${pedido.numeroVisible} ya fue pasada a depósito?\n\nSeguirá disponible en Historial para consultar, imprimir o reenviar.`);
     if (!confirmar) return;
 
     try {
@@ -811,9 +892,22 @@ export default function MonitorPedidos() {
       setPedidos(prev => prev.map(p => String(p.id) === String(pedido.id)
         ? { ...p, estado: "Pasado a Depósito", pasado_deposito_at: ahora }
         : p));
+
+      try {
+        const pedidosLocales = JSON.parse(localStorage.getItem("pedidos_local") || "[]");
+        const actualizados = pedidosLocales.map(loc =>
+          String(loc.id) === String(pedido.id)
+            ? { ...loc, estado: "Pasado a Depósito", pasado_deposito_at: ahora }
+            : loc
+        );
+        localStorage.setItem("pedidos_local", JSON.stringify(actualizados));
+      } catch (errorLocal) {
+        console.warn("No se pudo sincronizar el respaldo local del pedido:", errorLocal);
+      }
+
       setPedidoActivo(null);
       setMostrarExportacion(false);
-      alert("✓ Pedido pasado a depósito. Ya está disponible en Historial.");
+      alert("✓ NVI pasada a depósito. Ya está disponible en Historial.");
     } catch (e) {
       console.error("Error pasando pedido a depósito:", e);
       alert("No se pudo marcar el pedido como pasado a depósito.");
@@ -885,20 +979,30 @@ export default function MonitorPedidos() {
         <main style={{ padding: "16px 24px", maxWidth: "1500px", width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
           {/* Métricas Resumen */}
           {vistaPedidos !== "Disponibilidad" && vistaPedidos !== "StockFisico" && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "8px", marginBottom: "12px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: "8px", marginBottom: "12px" }}>
             <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "700" }}>TOTAL FACTURADO</div>
-              <div style={{ fontSize: "16px", fontWeight: "800", color: "#2563eb", marginTop: "2px" }}>${totalFacturado.toLocaleString("es-AR")}</div>
+              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>💰 VENDIDO HOY · {fechaCorta(hoyMetricas)}</div>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: "#2563eb", marginTop: "2px" }}>${vendidoHoy.toLocaleString("es-AR")}</div>
             </div>
             <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "700" }}>PEDIDOS HOY</div>
-              <div style={{ fontSize: "16px", fontWeight: "800", color: "#16a34a", marginTop: "2px" }}>{listaFiltrada.length} comandas</div>
+              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>💰 VENDIDO AYER · {fechaCorta(ayerMetricas)}</div>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: "#2563eb", marginTop: "2px" }}>${vendidoAyer.toLocaleString("es-AR")}</div>
             </div>
             <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "700" }}>TICKET PROMEDIO</div>
-              <div style={{ fontSize: "16px", fontWeight: "800", color: "#d97706", marginTop: "2px" }}>
-                ${listaFiltrada.length ? Math.round(totalFacturado / listaFiltrada.length).toLocaleString("es-AR") : 0}
-              </div>
+              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>💰 VENDIDO EN {nombreMesActual}</div>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: "#2563eb", marginTop: "2px" }}>${vendidoMes.toLocaleString("es-AR")}</div>
+            </div>
+            <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>🧾 NVI HOY · {fechaCorta(hoyMetricas)}</div>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: "#16a34a", marginTop: "2px" }}>{nviHoy.length}</div>
+            </div>
+            <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>🧾 NVI AYER · {fechaCorta(ayerMetricas)}</div>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: "#16a34a", marginTop: "2px" }}>{nviAyer.length}</div>
+            </div>
+            <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+              <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>🧾 NVI EN {nombreMesActual}</div>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: "#16a34a", marginTop: "2px" }}>{nviMes.length}</div>
             </div>
           </div>
           )}
@@ -907,7 +1011,7 @@ export default function MonitorPedidos() {
             {["Activos", "Historial", "Disponibilidad", "StockFisico"].map(v => (
               <button key={v} type="button" onClick={() => { setVistaPedidos(v); setFiltroEstado("Todos"); setPedidoActivo(null); }}
                 style={{ padding: "8px 14px", borderRadius: "8px", border: vistaPedidos === v ? "1px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === v ? "#eff6ff" : "#fff", color: vistaPedidos === v ? "#1d4ed8" : "#475569", fontWeight: "800", cursor: "pointer" }}>
-                {v === "Activos" ? "📥 Comandas Activas" : v === "Historial" ? "📚 Historial" : v === "Disponibilidad" ? "📦 Stock relativo" : "📊 Stock físico"}
+                {v === "Activos" ? "🧾 Notas de Venta Activas (NVI)" : v === "Historial" ? "📚 Historial" : v === "Disponibilidad" ? "📦 Stock relativo" : "📊 Stock físico"}
               </button>
             ))}
           </div>
@@ -1194,7 +1298,7 @@ export default function MonitorPedidos() {
                             <div style={{ fontSize: "15px", fontWeight: "900", color: "#0f172a" }}>{item.cantidad} u.</div>
                           </div>
                           <div>
-                            <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>COMANDAS</div>
+                            <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>NVI</div>
                             <div style={{ fontSize: "13px", fontWeight: "800" }}>{item.pedidosCount}</div>
                           </div>
                           <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
@@ -1257,7 +1361,7 @@ export default function MonitorPedidos() {
           <div style={{ display: "flex", flexDirection: esMovil ? "column" : "row", gap: "12px", alignItems: "start" }}>
             <div style={{ width: esMovil ? "100%" : "55%" }}>
               <div style={{ fontSize: "11px", fontWeight: "800", color: "#475569", marginBottom: "8px", textTransform: "uppercase" }}>
-                {vistaPedidos === "Activos" ? "Comandas Activas" : "Historial"} ({listaFiltrada.length})
+                {vistaPedidos === "Activos" ? "Notas de Venta Activas (NVI)" : "Historial"} ({listaFiltrada.length})
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {listaFiltrada.map(p => {
@@ -1267,7 +1371,7 @@ export default function MonitorPedidos() {
                     <div key={p.id} onClick={() => setPedidoActivo(p)} style={{ background: activo ? "#eff6ff" : "#fff", border: activo ? "2px solid #2563eb" : "1px solid #e2e8f0", borderRadius: "8px", padding: "10px", cursor: "pointer" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                         <div>
-                          <span style={{ fontWeight: "800", fontSize: "12px", color: "#2563eb" }}>Pedido #{p.numeroVisible}</span>
+                          <span style={{ fontWeight: "800", fontSize: "12px", color: "#2563eb" }}>NVI #{p.numeroVisible}</span>
                           <span style={{ fontSize: "10px", color: "#64748b", marginLeft: "4px" }}>{p.hora}</span>
                         </div>
                         <span style={{ background: b.bg, color: b.text, border: "1px solid " + b.border, fontSize: "9px", fontWeight: "800", padding: "2px 6px", borderRadius: "10px" }}>
@@ -1291,7 +1395,7 @@ export default function MonitorPedidos() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", marginBottom: "10px" }}>
                   <div>
                     <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "700" }}>DETALLE SELECCIONADO</div>
-                    <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Pedido #{pedidoActivo.numeroVisible} · {pedidoActivo.cliente}</div>
+                    <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>NVI #{pedidoActivo.numeroVisible} · {pedidoActivo.cliente}</div>
                   </div>
                   <span style={{ background: "#dcfce7", color: "#15803d", fontSize: "10px", fontWeight: "800", padding: "3px 6px", borderRadius: "4px" }}>
                     {pedidoActivo.lista}

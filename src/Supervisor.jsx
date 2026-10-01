@@ -323,6 +323,48 @@ const reactivarComercio = async (comercio) => {
   const [importandoClientes, setImportandoClientes] = useState(false);
   const inputArchivoClientesRef = useRef(null);
 
+  // 📦 Pedidos activos del Supervisor
+  // Los pedidos que ya pasaron a Depósito/Historial no deben seguir apareciendo acá.
+  const cargarPedidosSupabase = async () => {
+    if (!perfilSupervisor?.empresa_id) return;
+
+    try {
+      setCargandoPedidosReal(true);
+
+      const { data, error } = await supabase
+        .from("pedidos")
+        .select("*")
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const normalizarEstado = (valor) =>
+        String(valor || "")
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "");
+
+      const pedidosActivos = (data || []).filter((pedido) => {
+        const estado = normalizarEstado(pedido.estado);
+        return ![
+          "pasado a deposito",
+          "en deposito",
+          "deposito",
+          "historico",
+          "historial",
+        ].includes(estado);
+      });
+
+      setPedidosReal(pedidosActivos);
+    } catch (error) {
+      console.error("Error cargando pedidos activos del Supervisor:", error);
+    } finally {
+      setCargandoPedidosReal(false);
+    }
+  };
+
   // 💲 Listas de precios — primera etapa visual, todavía no guarda nada
   const [numeroListaPrecios, setNumeroListaPrecios] = useState("");
   const [vigenciaListaPrecios, setVigenciaListaPrecios] = useState("");
@@ -654,6 +696,15 @@ useEffect(() => {
     document.removeEventListener("visibilitychange", alVolverALaPantalla);
   };
 }, [perfilSupervisor?.empresa_id]);
+
+  // 📦 Mantener pedidos activos sincronizados sin refrescar la pantalla
+  useEffect(() => {
+    if (!perfilSupervisor?.empresa_id) return;
+
+    cargarPedidosSupabase();
+    const timerPedidos = setInterval(cargarPedidosSupabase, 10000);
+    return () => clearInterval(timerPedidos);
+  }, [perfilSupervisor?.empresa_id]);
 
   // 📍 Cargar visitas reales de hoy y mantenerlas actualizadas
   useEffect(() => {
@@ -3752,10 +3803,10 @@ useEffect(() => {
         </div>
 
         {preventistaSeleccionado && (
-          <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "12px 14px", marginBottom: "14px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-              <div style={{ fontSize: "12px", fontWeight: "800", color: "#0f172a" }}>
-                📍 Visitas de hoy — {nombrePrevActivo}
+          <div style={{ backgroundColor: "#eff6ff", borderRadius: "10px", border: "2px solid #2563eb", padding: "14px 16px", marginBottom: "16px", boxShadow: "0 2px 8px rgba(37,99,235,0.12)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+              <div style={{ fontSize: "14px", fontWeight: "900", color: "#1d4ed8" }}>
+                📍 VISITAS DE HOY — {nombrePrevActivo}
               </div>
               <div style={{ fontSize: "11px", fontWeight: "800", color: "#2563eb" }}>{visitasPreventistaSeleccionado.length}</div>
             </div>
