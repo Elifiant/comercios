@@ -2351,6 +2351,19 @@ useEffect(() => {
         </div>
       </header>
 
+      <style>{`
+        @media (max-width: 700px) {
+          .supervisor-mapa-layout {
+            grid-template-columns: minmax(0, 1fr) !important;
+            width: 100% !important;
+          }
+          .supervisor-mapa-layout > div {
+            min-width: 0 !important;
+            width: 100% !important;
+          }
+        }
+      `}</style>
+
       {/* PESTAÑAS */}
       <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px" }}>
         <button
@@ -3812,7 +3825,7 @@ useEffect(() => {
       )}
 
         {/* CUERPO PRINCIPAL: SECUENCIADOR COMPACTO A LA IZQUIERDA + MAPA A LA DERECHA */}
-        <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: "16px", alignItems: "start" }}>
+        <div className="supervisor-mapa-layout" style={{ display: "grid", gridTemplateColumns: "360px minmax(0, 1fr)", gap: "16px", alignItems: "start", width: "100%", minWidth: 0 }}>
           
           {/* COLUMNA IZQUIERDA: LISTADO DE PARADAS Y ORDENADOR */}
           <div style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "12px", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
