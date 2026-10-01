@@ -9,7 +9,9 @@ const obtenerDiaActual = () => {
 import Supervisor from './Supervisor';
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap,
+  Polyline,
+} from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -973,6 +975,7 @@ const solicitarNoVisitar = async (comercio) => {
       return "cercania";
     }
   });
+  const [mostrarMapaRutaHoy, setMostrarMapaRutaHoy] = useState(false);
   const [destinoMapa, setDestinoMapa] = useState(null);
   const [llegueDestino, setLlegueDestino] = useState(null);
   const [tieneStockDestino, setTieneStockDestino] = useState(null);
@@ -1202,6 +1205,27 @@ obtenerUbicacionFresca()
   const rutaSugeridaHoy = [...comerciosProgramadosHoy]
     .filter((c) => Number.isFinite(Number(c.orden_visita)))
     .sort((a, b) => Number(a.orden_visita) - Number(b.orden_visita));
+  // 🗺️ Mapa compacto de la ruta de hoy.
+  // Usa únicamente comercios asignados para hoy y respeta orden_visita.
+  const comerciosMapaRutaHoy = [...comerciosProgramadosHoy]
+    .filter((r) => {
+      const lat = Number(r.ubicacionExactaLatitud ?? r.ubicacion_exacta_latitud ?? r.latitud);
+      const lng = Number(r.ubicacionExactaLongitud ?? r.ubicacion_exacta_longitud ?? r.longitud);
+      return Number.isFinite(lat) && Number.isFinite(lng);
+    })
+    .sort((a, b) => {
+      const ordA = a.orden_visita !== null && a.orden_visita !== undefined ? Number(a.orden_visita) : 999999;
+      const ordB = b.orden_visita !== null && b.orden_visita !== undefined ? Number(b.orden_visita) : 999999;
+      if (ordA !== ordB) return ordA - ordB;
+      return String(a.nombre || "").localeCompare(String(b.nombre || ""));
+    });
+
+  const puntosMapaRutaHoy = comerciosMapaRutaHoy.map((r) => [
+    Number(r.ubicacionExactaLatitud ?? r.ubicacion_exacta_latitud ?? r.latitud),
+    Number(r.ubicacionExactaLongitud ?? r.ubicacion_exacta_longitud ?? r.longitud),
+  ]);
+
+
 
   const proximoDestino = rutaSugeridaHoy.find(
     (c) => !idsVisitadosHoy.has(String(c.id))
@@ -3574,7 +3598,99 @@ onChange={(e) =>
       >
         +
       </button>
-    </div>
+    
+      {vistaComercios === "HOY" && (
+        <div style={{ margin: "12px 16px 18px" }}>
+          <button
+            type="button"
+            onClick={() => setMostrarMapaRutaHoy((v) => !v)}
+            style={{
+              width: "100%",
+              padding: "9px 12px",
+              borderRadius: "9px",
+              border: "1px solid #334155",
+              background: "#0f172a",
+              color: "#fff",
+              fontSize: "13px",
+              fontWeight: "900",
+              cursor: "pointer",
+            }}
+          >
+            🗺️ {mostrarMapaRutaHoy ? "OCULTAR MAPA DE LA RUTA DE HOY ▴" : "VER MAPA DE LA RUTA DE HOY ▾"}
+          </button>
+
+          {mostrarMapaRutaHoy && (
+            <div
+              style={{
+                marginTop: "7px",
+                height: "235px",
+                borderRadius: "10px",
+                overflow: "hidden",
+                border: "1px solid #334155",
+              }}
+            >
+              {puntosMapaRutaHoy.length > 0 ? (
+                <MapContainer
+                  key={`ruta-hoy-${puntosMapaRutaHoy.length}`}
+                  bounds={puntosMapaRutaHoy}
+                  boundsOptions={{ padding: [24, 24] }}
+                  style={{ width: "100%", height: "100%" }}
+                  scrollWheelZoom={false}
+                >
+                  <TileLayer
+                    attribution="&copy; OpenStreetMap contributors"
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  {puntosMapaRutaHoy.length > 1 && (
+                    <Polyline positions={puntosMapaRutaHoy} pathOptions={{ weight: 3 }} />
+                  )}
+                  {comerciosMapaRutaHoy.map((r, index) => {
+                    const lat = Number(r.ubicacionExactaLatitud ?? r.ubicacion_exacta_latitud ?? r.latitud);
+                    const lng = Number(r.ubicacionExactaLongitud ?? r.ubicacion_exacta_longitud ?? r.longitud);
+                    return (
+                      <Marker
+                        key={`ruta-hoy-${r.id}`}
+                        position={[lat, lng]}
+                        icon={L.divIcon({
+                          className: "ruta-hoy-numero",
+                          html: `<div style="width:30px;height:30px;border-radius:50%;background:#2563eb;color:white;border:2px solid white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;box-shadow:0 2px 7px rgba(0,0,0,.45);">${index + 1}</div>`,
+                          iconSize: [30, 30],
+                          iconAnchor: [15, 15],
+                          popupAnchor: [0, -16],
+                        })}
+                      >
+                        <Popup>
+                          <strong>{index + 1}. {r.nombre || `Comercio #${r.id}`}</strong>
+                          {r.direccion ? <><br />{r.direccion}</> : null}
+                        </Popup>
+                      </Marker>
+                    );
+                  })}
+                </MapContainer>
+              ) : (
+                <div
+                  style={{
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "20px",
+                    textAlign: "center",
+                    color: "#94a3b8",
+                    background: "#0f172a",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                  }}
+                >
+                  No hay comercios de la ruta de hoy con ubicación disponible.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+</div>
   );
 }
 
