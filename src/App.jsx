@@ -1249,10 +1249,11 @@ obtenerUbicacionFresca()
 
   const [modoManejo, setModoManejo] = useState(false);
   const [renovarWakeLock, setRenovarWakeLock] = useState(0);
-// 📍 GPS EN VIVO DURANTE TODA LA JORNADA
-// Ya no depende de Modo Manejo: funciona en HOY, ficha, pedidos, edición, etc.
+// 📍 GPS EN VIVO MIENTRAS RUTACOMERCIO ESTÁ ABIERTO
+// No depende de Jornada ni de Modo Manejo.
+// Con sesión iniciada, mantiene la posición actualizada en HOY, ficha, pedidos, edición, etc.
 useEffect(() => {
-  if (!jornadaActiva || !sesion?.user?.id) return;
+  if (!sesion?.user?.id) return;
 
   if (!navigator.geolocation) {
     console.log("Geolocalización no disponible");
@@ -1299,7 +1300,7 @@ useEffect(() => {
     document.removeEventListener("visibilitychange", alVolverApp);
     window.removeEventListener("focus", alVolverApp);
   };
-}, [jornadaActiva, sesion?.user?.id]);
+}, [sesion?.user?.id]);
 // 📋 CARGAR VISITAS PARA EL MAPA
 useEffect(() => {
   if (!sesion?.user) return;
