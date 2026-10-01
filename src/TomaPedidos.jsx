@@ -589,7 +589,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                       >
                         <option value={0}>0% Normal</option>
                         <option value={10}>10% OFF</option>
-                        <option value="otro">{![0, 10].includes(Number(item.bonif)) ? `${item.bonif}% Personalizado` : 'Otro %'}</option>
+                        <option value="otro">{![0, 10].includes(Number(item.bonif)) ? `${item.bonif}%` : 'Otro %'}</option>
                       </select>
                     </div>
 

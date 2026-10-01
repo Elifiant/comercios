@@ -119,11 +119,8 @@ export default function MonitorPedidos() {
           } else {
             (comerciosData || []).forEach(c => {
               direccionPorComercio[String(c.id)] = [
-                c.direccion,
                 c.localidad,
                 c.partido,
-                c.provincia,
-                c.pais,
               ].filter(Boolean).join(", ");
             });
           }
@@ -137,11 +134,12 @@ export default function MonitorPedidos() {
             empresa_id: p.empresa_id || perfil.empresa_id,
             numeroVisible: String(p.numero_pedido || "").padStart(6, "0"),
             fechaCreacion: p.created_at || null,
+            fechaCorta: p.created_at ? new Date(p.created_at).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" }) : "--/--",
             hora: p.created_at ? new Date(p.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "En curso",
             preventista: p.preventista || p.vendedor || "Walter",
             ruta: p.ruta || "Ruta de Visita",
             cliente: p.cliente || p.comercio_nombre || ("Comercio #" + (p.comercio_id || "")),
-            direccion: p.direccion || direccionReal || "Sin dirección cargada",
+            direccion: direccionReal || p.direccion || "Sin localidad/partido cargado",
             condicion: p.condicion || "Consumidor Final",
             bultos: p.bultos || itemsReales.reduce((acc, it) => acc + Number(it.cant || 0), 0) || 1,
             total: Number(p.total || p.total_pedido || 0),
@@ -297,9 +295,34 @@ export default function MonitorPedidos() {
   const listaFiltrada = pedidos.filter(p => {
     const matchVista = vistaPedidos === "Historial" ? esPasadoDeposito(p) : !esPasadoDeposito(p);
     const matchPrev = filtroPreventista === "Todos" || p.preventista === filtroPreventista;
-    const matchEst = filtroEstado === "Todos" || p.estado === filtroEstado;
-    return matchVista && matchPrev && matchEst;
+    return matchVista && matchPrev;
   });
+
+  const esDeHoy = (fecha) => {
+    if (!fecha) return false;
+    const d = new Date(fecha);
+    const h = new Date();
+    return d.getFullYear() === h.getFullYear() &&
+      d.getMonth() === h.getMonth() &&
+      d.getDate() === h.getDate();
+  };
+
+  const totalVendidoHoyTodos = pedidos
+    .filter(p => esDeHoy(p.fechaCreacion))
+    .reduce((acc, p) => acc + Number(p.total || 0), 0);
+
+  const totalVendidoHoyVendedor = filtroPreventista === "Todos"
+    ? totalVendidoHoyTodos
+    : pedidos
+        .filter(p => p.preventista === filtroPreventista && esDeHoy(p.fechaCreacion))
+        .reduce((acc, p) => acc + Number(p.total || 0), 0);
+
+  const porcentajeVendedorHoy = totalVendidoHoyTodos > 0
+    ? ((totalVendidoHoyVendedor / totalVendidoHoyTodos) * 100).toLocaleString("es-AR", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      })
+    : "0,0";
 
   // Abrir directamente una NVI enviada desde el Supervisor.
   useEffect(() => {
@@ -1367,43 +1390,42 @@ export default function MonitorPedidos() {
                 {preventistasReales.map((p, i) => <option key={i} value={p}>{p}</option>)}
               </select>
             </div>
-            {vistaPedidos === "Activos" && (
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: "1 1 130px" }}>
-                <span style={{ fontSize: "11px", fontWeight: "700", color: "#475569" }}>📋 Estado:</span>
-                <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ flex: 1, padding: "6px 8px", borderRadius: "6px", border: "1.5px solid #2563eb", fontSize: "12px", background: "#ffffff", color: "#0f172a", fontWeight: "700", outline: "none" }}>
-                  <option value="Todos">Todos</option>
-                  <option value="Ingresado">Ingresado</option>
-                </select>
-              </div>
-            )}
           </div>
 
           {/* Grilla de Comandas y Detalle en Columna Móvil */}
           <div style={{ display: "flex", flexDirection: esMovil ? "column" : "row", gap: "12px", alignItems: "start" }}>
             <div style={{ width: esMovil ? "100%" : "55%" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "7px 10px", marginBottom: "7px", fontSize: "12px", fontWeight: "900", color: "#0f172a" }}>
+                <span>💰 VENDIDO HOY — TOTAL: ${totalVendidoHoyTodos.toLocaleString("es-AR")}</span>
+                {filtroPreventista !== "Todos" && (
+                  <span style={{ color: "#1d4ed8" }}>👤 {filtroPreventista}: ${totalVendidoHoyVendedor.toLocaleString("es-AR")} ({porcentajeVendedorHoy}% del total)</span>
+                )}
+              </div>
               <div style={{ fontSize: "11px", fontWeight: "800", color: "#475569", marginBottom: "8px", textTransform: "uppercase" }}>
                 {vistaPedidos === "Activos" ? "Notas de Venta Activas (NVI)" : "Historial"} ({listaFiltrada.length})
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                 {listaFiltrada.map(p => {
                   const b = getBadgeColor(p.estado);
                   const activo = pedidoActivo && pedidoActivo.id === p.id;
                   return (
-                    <div key={p.id} onClick={() => setPedidoActivo(p)} style={{ background: activo ? "#eff6ff" : "#fff", border: activo ? "2px solid #2563eb" : "1px solid #e2e8f0", borderRadius: "8px", padding: "10px", cursor: "pointer" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                        <div>
-                          <span style={{ fontWeight: "800", fontSize: "12px", color: "#2563eb" }}>NVI #{p.numeroVisible}</span>
-                          <span style={{ fontSize: "10px", color: "#64748b", marginLeft: "4px" }}>{p.hora}</span>
+                    <div key={p.id} onClick={() => setPedidoActivo(p)} style={{ background: activo ? "#eff6ff" : "#fff", border: activo ? "2px solid #2563eb" : "1px solid #dbe3ee", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap", overflow: "hidden" }}>
+                            <span style={{ fontWeight: "900", fontSize: "13px", color: "#2563eb", flexShrink: 0 }}>NVI #{p.numeroVisible}</span>
+                            <span style={{ fontWeight: "900", fontSize: "13px", color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis" }}>· {p.cliente}</span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "7px", flexShrink: 0 }}>
+                            <span style={{ fontSize: "15px", fontWeight: "900", color: "#0f172a" }}>${p.total.toLocaleString("es-AR")}</span>
+                            <span style={{ background: b.bg, color: b.text, border: "1px solid " + b.border, fontSize: "10px", fontWeight: "900", padding: "2px 6px", borderRadius: "8px" }}>{p.estado}</span>
+                          </div>
                         </div>
-                        <span style={{ background: b.bg, color: b.text, border: "1px solid " + b.border, fontSize: "9px", fontWeight: "800", padding: "2px 6px", borderRadius: "10px" }}>
-                          {p.estado}
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: "700", fontSize: "13px", color: "#0f172a" }}>{p.cliente}</div>
-                      <div style={{ fontSize: "10px", color: "#64748b", marginTop: "1px" }}>📍 {p.direccion}</div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", paddingTop: "6px", borderTop: "1px solid #f1f5f9" }}>
-                        <span style={{ fontSize: "10px", color: "#475569" }}>👤 <strong>{p.preventista}</strong> ({cantidadUnidades(p)} unidades)</span>
-                        <span style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>${p.total.toLocaleString("es-AR")}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "7px", fontSize: "12px", fontWeight: "800", color: "#334155", whiteSpace: "nowrap", overflow: "hidden" }}>
+                          <span>👤 {p.preventista} · {cantidadUnidades(p)} unid.</span>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>· 📍 {p.direccion}</span>
+                          <span style={{ marginLeft: "auto", flexShrink: 0 }}>· 📅 {p.fechaCorta || (p.fechaCreacion ? new Date(p.fechaCreacion).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" }) : "--/--")} · 🕐 {p.hora}</span>
+                        </div>
                       </div>
                     </div>
                   );

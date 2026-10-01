@@ -278,8 +278,15 @@ console.log("🚗 APP SE ESTÁ RENDERIZANDO");
       }
     } catch (err) {}
     try {
+      // Conservamos preferencias locales del dispositivo al cerrar sesión.
+      const ordenHoyGuardado = localStorage.getItem("rutacomercio_orden_hoy");
+
       localStorage.clear();
       sessionStorage.clear();
+
+      if (ordenHoyGuardado === "ruta" || ordenHoyGuardado === "cercania") {
+        localStorage.setItem("rutacomercio_orden_hoy", ordenHoyGuardado);
+      }
     } catch (e) {}
     if (typeof setSesion === 'function') setSesion(null);
     if (typeof setPerfil === 'function') setPerfil(null);
@@ -970,7 +977,8 @@ const solicitarNoVisitar = async (comercio) => {
   const [vistaComercios, setVistaComercios] = useState("HOY");
   const [ordenComerciosHoy, setOrdenComerciosHoy] = useState(() => {
     try {
-      return localStorage.getItem("rutacomercio_orden_hoy") || "cercania";
+      const guardado = localStorage.getItem("rutacomercio_orden_hoy");
+      return guardado === "ruta" || guardado === "cercania" ? guardado : "cercania";
     } catch {
       return "cercania";
     }
