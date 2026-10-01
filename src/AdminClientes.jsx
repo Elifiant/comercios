@@ -495,9 +495,24 @@ export default function AdminClientes() {
           </div>
           <p style={{ margin: "4px 0 0 0", color: "#94a3b8", fontSize: "13px" }}>Control financiero, gestión completa de empresas y bajas de preventistas</p>
         </div>
-        <div style={{ display: "flex", gap: "10px" }}>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button type="button" onClick={() => { window.location.href = "/promotores"; }} style={{ backgroundColor: "#b45309", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px", boxShadow: "0 4px 12px rgba(180,83,9,0.25)" }}>
+            🤝 Promotores
+          </button>
           <button type="button" onClick={() => { setEmpresaEditando(null); setNombreEmpresa(""); setMostrarModalEmpresa(true); }} style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px", boxShadow: "0 4px 12px rgba(37,99,235,0.3)" }}>
             + Nueva Empresa
+          </button>
+          <button type="button" onClick={async () => {
+            const confirmar = window.confirm("¿Cerrar sesión de SuperAdmin?");
+            if (!confirmar) return;
+            const { error } = await supabase.auth.signOut();
+            if (error) {
+              alert("No se pudo cerrar la sesión: " + error.message);
+              return;
+            }
+            window.location.replace("/");
+          }} style={{ backgroundColor: "#334155", color: "#fff", border: "1px solid #64748b", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px" }}>
+            🚪 Salir
           </button>
         </div>
       </header>

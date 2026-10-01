@@ -153,8 +153,12 @@ if (ruta.startsWith("/admin")) {
   return null;
 }
 
-// Rutas directas accesibles
-if (ruta.startsWith("/promotores")) return <AdminPromotores />;
+// Promotores: acceso exclusivo del SuperAdmin
+if (ruta.startsWith("/promotores")) {
+  if (rol === "superadmin") return <AdminPromotores />;
+  window.location.replace("/");
+  return null;
+}
   if (ruta.startsWith("/pedidos")) return <MonitorPedidos />;
   if (ruta.startsWith("/pagos")) {
     if (typeof PortalPagos !== "undefined") return <PortalPagos />;
