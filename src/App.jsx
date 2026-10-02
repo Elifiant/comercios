@@ -1235,6 +1235,43 @@ obtenerUbicacionFresca()
 
   const [tomandoPedido, setTomandoPedido] = useState(false);
   const [viendoHistorialCliente, setViendoHistorialCliente] = useState(false);
+  const [resumenComprasCliente, setResumenComprasCliente] = useState({
+    cargando: false, cantidad: 0, total: 0, ultimaFecha: null, ultimaTotal: 0,
+  });
+
+  // 🛒 Resumen rápido de compras del comercio seleccionado
+  useEffect(() => {
+    let cancelado = false;
+    const cargarResumenComprasCliente = async () => {
+      if (!comercioSeleccionado?.id) {
+        setResumenComprasCliente({ cargando: false, cantidad: 0, total: 0, ultimaFecha: null, ultimaTotal: 0 });
+        return;
+      }
+      setResumenComprasCliente((prev) => ({ ...prev, cargando: true }));
+      try {
+        const { data, error } = await supabase
+          .from("pedidos")
+          .select("fecha, total")
+          .eq("comercio_id", String(comercioSeleccionado.id))
+          .order("fecha", { ascending: false });
+        if (error) throw error;
+        if (cancelado) return;
+        const ventas = data || [];
+        setResumenComprasCliente({
+          cargando: false,
+          cantidad: ventas.length,
+          total: ventas.reduce((acc, p) => acc + Number(p.total || 0), 0),
+          ultimaFecha: ventas[0]?.fecha || null,
+          ultimaTotal: Number(ventas[0]?.total || 0),
+        });
+      } catch (error) {
+        console.error("Error cargando resumen de compras:", error);
+        if (!cancelado) setResumenComprasCliente({ cargando: false, cantidad: 0, total: 0, ultimaFecha: null, ultimaTotal: 0 });
+      }
+    };
+    cargarResumenComprasCliente();
+    return () => { cancelado = true; };
+  }, [comercioSeleccionado?.id]);
   
   const [posicionBotonManejo, setPosicionBotonManejo] = useState(() => {
     try {
@@ -2224,7 +2261,28 @@ if (comercioSeleccionado) {
             : "🔵 SIN DEUDA"}
         </div>
 
-      <button
+              <div style={{
+          width: "100%", boxSizing: "border-box", marginBottom: "12px",
+          padding: "10px 12px", borderRadius: "9px",
+          backgroundColor: "#0f172a", border: "1px solid #334155", color: "#ffffff",
+        }}>
+          {resumenComprasCliente.cargando ? (
+            <div style={{ fontSize: "13px", fontWeight: "800", color: "#cbd5e1" }}>⏳ Cargando compras...</div>
+          ) : resumenComprasCliente.cantidad > 0 ? (
+            <>
+              <div style={{ fontSize: "13px", fontWeight: "900", marginBottom: "4px" }}>
+                🛒 Última compra: {new Date(resumenComprasCliente.ultimaFecha).toLocaleDateString("es-AR")} · ${Number(resumenComprasCliente.ultimaTotal || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+              </div>
+              <div style={{ fontSize: "12px", color: "#cbd5e1", fontWeight: "800" }}>
+                📦 Compras: {resumenComprasCliente.cantidad} · 💰 Total histórico: ${Number(resumenComprasCliente.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: "13px", fontWeight: "800", color: "#94a3b8" }}>🛒 Sin compras registradas</div>
+          )}
+        </div>
+
+<button
    type="button"
       onClick={() => setTomandoPedido(true)}
    style={{
