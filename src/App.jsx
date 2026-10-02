@@ -1,5 +1,6 @@
 /* v2.4.9-logo-ok */
 import TomaPedidos from "./TomaPedidos";
+import HistorialCliente from "./HistorialCliente";
 const obtenerDiaActual = () => {
   const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
   const d = dias[new Date().getDay()];
@@ -9,9 +10,7 @@ const obtenerDiaActual = () => {
 import Supervisor from './Supervisor';
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap,
-  Polyline,
-} from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -278,15 +277,8 @@ console.log("🚗 APP SE ESTÁ RENDERIZANDO");
       }
     } catch (err) {}
     try {
-      // Conservamos preferencias locales del dispositivo al cerrar sesión.
-      const ordenHoyGuardado = localStorage.getItem("rutacomercio_orden_hoy");
-
       localStorage.clear();
       sessionStorage.clear();
-
-      if (ordenHoyGuardado === "ruta" || ordenHoyGuardado === "cercania") {
-        localStorage.setItem("rutacomercio_orden_hoy", ordenHoyGuardado);
-      }
     } catch (e) {}
     if (typeof setSesion === 'function') setSesion(null);
     if (typeof setPerfil === 'function') setPerfil(null);
@@ -732,53 +724,6 @@ useEffect(() => {
   const [guardandoVisita, setGuardandoVisita] = useState(false);
   const [visitaRegistradaHoy, setVisitaRegistradaHoy] = useState(false);
 
-  // 📊 Métricas reales del día: se reconstruyen desde Supabase y sobreviven a un refresh.
-  const [ventaHoyReal, setVentaHoyReal] = useState(0);
-
-  useEffect(() => {
-    if (!sesion?.user || !(perfil || perfilProp)) return;
-
-    const cargarVentaHoyReal = async () => {
-      try {
-        const pActivo = perfil || perfilProp;
-        const hoy = fechaLocalISO();
-        const { data, error } = await supabase.from("pedidos").select("*");
-        if (error) throw error;
-
-        const pedidosHoy = (data || []).filter((pedido) => {
-          const fechaPedido = pedido.fecha || pedido.created_at || pedido.fecha_creacion || pedido.fecha_pedido;
-          if (!fechaPedido) return false;
-          const fecha = new Date(fechaPedido);
-          if (Number.isNaN(fecha.getTime()) || fechaLocalISO(fecha) !== hoy) return false;
-
-          if (pActivo?.empresa_id && pedido.empresa_id && String(pedido.empresa_id) !== String(pActivo.empresa_id)) return false;
-          if (pActivo?.nombre && pedido.preventista && String(pedido.preventista).trim().toLowerCase() !== String(pActivo.nombre).trim().toLowerCase()) return false;
-          return true;
-        });
-
-        const total = pedidosHoy.reduce((acum, pedido) => {
-          const valor = pedido.total ?? pedido.total_final ?? pedido.importe_total ?? pedido.importe ?? pedido.monto ?? 0;
-          let numero = Number(valor);
-          if (!Number.isFinite(numero)) {
-            const limpio = String(valor).replace(/[^0-9,.-]/g, "");
-            const normalizado = limpio.includes(",")
-              ? limpio.replace(/\./g, "").replace(",", ".")
-              : limpio;
-            numero = Number(normalizado);
-          }
-          return acum + (Number.isFinite(numero) ? numero : 0);
-        }, 0);
-
-        setVentaHoyReal(total);
-      } catch (error) {
-        console.error("Error cargando venta real de hoy:", error);
-        setVentaHoyReal(0);
-      }
-    };
-
-    cargarVentaHoyReal();
-  }, [sesion?.user?.id, perfil, perfilProp, visitasMapa]);
-
   const registrarVisitaCheckIn = async (comercio, resultadoDirecto = null, observacionDirecta = null) => {
     if (!comercio) return;
     setGuardandoVisita(true);
@@ -975,27 +920,12 @@ const solicitarNoVisitar = async (comercio) => {
   const [jornadaActiva, setJornadaActiva] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [vistaComercios, setVistaComercios] = useState("HOY");
-  const [ordenComerciosHoy, setOrdenComerciosHoy] = useState(() => {
-    try {
-      const guardado = localStorage.getItem("rutacomercio_orden_hoy");
-      return guardado === "ruta" || guardado === "cercania" ? guardado : "cercania";
-    } catch {
-      return "cercania";
-    }
-  });
-  const [mostrarMapaRutaHoy, setMostrarMapaRutaHoy] = useState(false);
   const [destinoMapa, setDestinoMapa] = useState(null);
   const [llegueDestino, setLlegueDestino] = useState(null);
   const [tieneStockDestino, setTieneStockDestino] = useState(null);
   const [confirmarSaltoVisita, setConfirmarSaltoVisita] = useState(false);
   const [fechaRevisitaManual, setFechaRevisitaManual] = useState("");
   const [motivoRevisita, setMotivoRevisita] = useState("");
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("rutacomercio_orden_hoy", ordenComerciosHoy);
-    } catch {}
-  }, [ordenComerciosHoy]);
 
   // 📍 Cada comercio empieza su corrección de ubicación desde SU propio punto.
   // Evita que quede visible la posición usada al editar el comercio anterior.
@@ -1213,27 +1143,6 @@ obtenerUbicacionFresca()
   const rutaSugeridaHoy = [...comerciosProgramadosHoy]
     .filter((c) => Number.isFinite(Number(c.orden_visita)))
     .sort((a, b) => Number(a.orden_visita) - Number(b.orden_visita));
-  // 🗺️ Mapa compacto de la ruta de hoy.
-  // Usa únicamente comercios asignados para hoy y respeta orden_visita.
-  const comerciosMapaRutaHoy = [...comerciosProgramadosHoy]
-    .filter((r) => {
-      const lat = Number(r.ubicacionExactaLatitud ?? r.ubicacion_exacta_latitud ?? r.latitud);
-      const lng = Number(r.ubicacionExactaLongitud ?? r.ubicacion_exacta_longitud ?? r.longitud);
-      return Number.isFinite(lat) && Number.isFinite(lng);
-    })
-    .sort((a, b) => {
-      const ordA = a.orden_visita !== null && a.orden_visita !== undefined ? Number(a.orden_visita) : 999999;
-      const ordB = b.orden_visita !== null && b.orden_visita !== undefined ? Number(b.orden_visita) : 999999;
-      if (ordA !== ordB) return ordA - ordB;
-      return String(a.nombre || "").localeCompare(String(b.nombre || ""));
-    });
-
-  const puntosMapaRutaHoy = comerciosMapaRutaHoy.map((r) => [
-    Number(r.ubicacionExactaLatitud ?? r.ubicacion_exacta_latitud ?? r.latitud),
-    Number(r.ubicacionExactaLongitud ?? r.ubicacion_exacta_longitud ?? r.longitud),
-  ]);
-
-
 
   const proximoDestino = rutaSugeridaHoy.find(
     (c) => !idsVisitadosHoy.has(String(c.id))
@@ -1317,22 +1226,6 @@ obtenerUbicacionFresca()
     };
   })
   .sort((a, b) => {
-    // En HOY el preventista puede elegir entre la hoja de ruta del supervisor
-    // o la cercanía GPS. En TODOS conservamos siempre el orden por cercanía.
-    if (vistaComercios === "HOY" && ordenComerciosHoy === "ruta") {
-      const ordA =
-        a.orden_visita !== null && a.orden_visita !== undefined
-          ? Number(a.orden_visita)
-          : 999999;
-      const ordB =
-        b.orden_visita !== null && b.orden_visita !== undefined
-          ? Number(b.orden_visita)
-          : 999999;
-
-      if (ordA !== ordB) return ordA - ordB;
-      return String(a.nombre || "").localeCompare(String(b.nombre || ""));
-    }
-
     if (a.distancia_actual === null && b.distancia_actual === null) return 0;
     if (a.distancia_actual === null) return 1;
     if (b.distancia_actual === null) return -1;
@@ -1341,6 +1234,7 @@ obtenerUbicacionFresca()
   });
 
   const [tomandoPedido, setTomandoPedido] = useState(false);
+  const [viendoHistorialCliente, setViendoHistorialCliente] = useState(false);
   
   const [posicionBotonManejo, setPosicionBotonManejo] = useState(() => {
     try {
@@ -1985,6 +1879,15 @@ useEffect(() => {
     );
   }
 
+  if (viendoHistorialCliente && comercioSeleccionado) {
+    return (
+      <HistorialCliente
+        comercio={comercioSeleccionado}
+        onVolver={() => setViendoHistorialCliente(false)}
+      />
+    );
+  }
+
   if (tomandoPedido && comercioSeleccionado) {
   return (
     <TomaPedidos
@@ -2297,7 +2200,7 @@ if (comercioSeleccionado) {
           margin: "0 auto",
         }}
       >
-        <h2 style={{ marginTop: 0, marginBottom: "8px" }}>
+        <h2 style={{ marginTop: 0, marginBottom: "8px", color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>
           {comercioSeleccionado.nombre || "Comercio"}
         </h2>
 
@@ -2338,6 +2241,25 @@ if (comercioSeleccionado) {
   }}
         >
   📦 TOMAR PEDIDO
+    </button>
+
+    <button
+      type="button"
+      onClick={() => setViendoHistorialCliente(true)}
+      style={{
+        width: "100%",
+        padding: "14px",
+        marginBottom: "16px",
+        backgroundColor: "#0f766e",
+        color: "#fff",
+        border: "none",
+        borderRadius: "8px",
+        fontSize: "16px",
+        fontWeight: "bold",
+        cursor: "pointer",
+      }}
+    >
+      🧾 HISTORIAL DE COMPRAS
     </button>
     <div
   style={{
@@ -3116,20 +3038,14 @@ onChange={(e) =>
           <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Venta Hoy</div>
             <div style={{ fontSize: "19px", lineHeight: 1.05, fontWeight: "900", color: "#4ade80", marginTop: "1px" }}>
-              {`$ ${Math.round(ventaHoyReal).toLocaleString("es-AR")}`}
+              {jornadaActiva ? "$ 148.5K" : "$ 0"}
             </div>
           </div>
 
           <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Efectividad</div>
             <div style={{ fontSize: "20px", lineHeight: 1.05, fontWeight: "900", color: "#facc15", marginTop: "1px" }}>
-              {`${visitasRealizadasHoy > 0 ? Math.round((Array.from(idsVisitadosHoy).filter((id) =>
-                (visitasMapa || []).some((v) =>
-                  String(v.comercio_id) === String(id) &&
-                  v?.fecha && new Date(v.fecha) >= inicioHoyMetricas &&
-                  String(v.resultado || "").toLowerCase() === "venta"
-                )
-              ).length / visitasRealizadasHoy) * 100) : 0}%`}
+              {jornadaActiva ? "44%" : "0%"}
             </div>
           </div>
         </div>
@@ -3187,56 +3103,6 @@ onChange={(e) =>
     TODOS
   </button>
 </div>
-
-      {vistaComercios === "HOY" && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            margin: "7px 16px 0",
-          }}
-        >
-          <span style={{ color: "#94a3b8", fontSize: "11px", fontWeight: "800" }}>
-            ORDEN:
-          </span>
-          <button
-            type="button"
-            onClick={() => setOrdenComerciosHoy("cercania")}
-            style={{
-              flex: 1,
-              padding: "6px 8px",
-              borderRadius: "7px",
-              border: ordenComerciosHoy === "cercania" ? "1px solid #60a5fa" : "1px solid #334155",
-              background: ordenComerciosHoy === "cercania" ? "#1d4ed8" : "#0f172a",
-              color: "#fff",
-              fontSize: "12px",
-              fontWeight: "800",
-              cursor: "pointer",
-            }}
-          >
-            📍 CERCANÍA
-          </button>
-          <button
-            type="button"
-            onClick={() => setOrdenComerciosHoy("ruta")}
-            style={{
-              flex: 1,
-              padding: "6px 8px",
-              borderRadius: "7px",
-              border: ordenComerciosHoy === "ruta" ? "1px solid #60a5fa" : "1px solid #334155",
-              background: ordenComerciosHoy === "ruta" ? "#1d4ed8" : "#0f172a",
-              color: "#fff",
-              fontSize: "12px",
-              fontWeight: "800",
-              cursor: "pointer",
-            }}
-          >
-            🛣️ RUTA
-          </button>
-        </div>
-      )}
-
       {/* PRÓXIMO DESTINO SEGÚN RUTA SUGERIDA */}
       {vistaComercios === "HOY" && (
         <div style={{ padding: "7px 16px 0" }}>
@@ -3606,99 +3472,7 @@ onChange={(e) =>
       >
         +
       </button>
-    
-      {vistaComercios === "HOY" && (
-        <div style={{ margin: "12px 16px 18px" }}>
-          <button
-            type="button"
-            onClick={() => setMostrarMapaRutaHoy((v) => !v)}
-            style={{
-              width: "100%",
-              padding: "9px 12px",
-              borderRadius: "9px",
-              border: "1px solid #334155",
-              background: "#0f172a",
-              color: "#fff",
-              fontSize: "13px",
-              fontWeight: "900",
-              cursor: "pointer",
-            }}
-          >
-            🗺️ {mostrarMapaRutaHoy ? "OCULTAR MAPA DE LA RUTA DE HOY ▴" : "VER MAPA DE LA RUTA DE HOY ▾"}
-          </button>
-
-          {mostrarMapaRutaHoy && (
-            <div
-              style={{
-                marginTop: "7px",
-                height: "235px",
-                borderRadius: "10px",
-                overflow: "hidden",
-                border: "1px solid #334155",
-              }}
-            >
-              {puntosMapaRutaHoy.length > 0 ? (
-                <MapContainer
-                  key={`ruta-hoy-${puntosMapaRutaHoy.length}`}
-                  bounds={puntosMapaRutaHoy}
-                  boundsOptions={{ padding: [24, 24] }}
-                  style={{ width: "100%", height: "100%" }}
-                  scrollWheelZoom={false}
-                >
-                  <TileLayer
-                    attribution="&copy; OpenStreetMap contributors"
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  {puntosMapaRutaHoy.length > 1 && (
-                    <Polyline positions={puntosMapaRutaHoy} pathOptions={{ weight: 3 }} />
-                  )}
-                  {comerciosMapaRutaHoy.map((r, index) => {
-                    const lat = Number(r.ubicacionExactaLatitud ?? r.ubicacion_exacta_latitud ?? r.latitud);
-                    const lng = Number(r.ubicacionExactaLongitud ?? r.ubicacion_exacta_longitud ?? r.longitud);
-                    return (
-                      <Marker
-                        key={`ruta-hoy-${r.id}`}
-                        position={[lat, lng]}
-                        icon={L.divIcon({
-                          className: "ruta-hoy-numero",
-                          html: `<div style="width:30px;height:30px;border-radius:50%;background:#2563eb;color:white;border:2px solid white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;box-shadow:0 2px 7px rgba(0,0,0,.45);">${index + 1}</div>`,
-                          iconSize: [30, 30],
-                          iconAnchor: [15, 15],
-                          popupAnchor: [0, -16],
-                        })}
-                      >
-                        <Popup>
-                          <strong>{index + 1}. {r.nombre || `Comercio #${r.id}`}</strong>
-                          {r.direccion ? <><br />{r.direccion}</> : null}
-                        </Popup>
-                      </Marker>
-                    );
-                  })}
-                </MapContainer>
-              ) : (
-                <div
-                  style={{
-                    height: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "20px",
-                    textAlign: "center",
-                    color: "#94a3b8",
-                    background: "#0f172a",
-                    fontSize: "12px",
-                    fontWeight: "700",
-                  }}
-                >
-                  No hay comercios de la ruta de hoy con ubicación disponible.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-</div>
+    </div>
   );
 }
 
