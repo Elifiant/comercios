@@ -268,6 +268,7 @@ export default function MonitorPedidos() {
   const [esMovil, setEsMovil] = useState(window.innerWidth < 800);
   const [mostrarExportacion, setMostrarExportacion] = useState(false);
   const [vistaPedidos, setVistaPedidos] = useState("Activos");
+  const [busquedaHistorialCliente, setBusquedaHistorialCliente] = useState("");
   const [procesandoDeposito, setProcesandoDeposito] = useState(false);
   const [opcionesEnvio, setOpcionesEnvio] = useState({
     cliente: true,
@@ -297,6 +298,48 @@ export default function MonitorPedidos() {
     const matchPrev = filtroPreventista === "Todos" || p.preventista === filtroPreventista;
     return matchVista && matchPrev;
   });
+
+  // 🏪 Historial completo por cliente: incluye NVI activas + enviadas a Depósito.
+  const historialClientes = (() => {
+    const mapa = new Map();
+
+    pedidos.forEach((p) => {
+      const nombre = String(p.cliente || "Cliente sin nombre").trim();
+      const clave = nombre.toLowerCase();
+      const actual = mapa.get(clave) || {
+        cliente: nombre,
+        compras: 0,
+        total: 0,
+        ultimaFecha: null,
+        ultimaTotal: 0,
+        pedidos: [],
+      };
+
+      actual.compras += 1;
+      actual.total += Number(p.total || 0);
+      actual.pedidos.push(p);
+
+      const fecha = p.fechaCreacion ? new Date(p.fechaCreacion) : null;
+      if (fecha && !Number.isNaN(fecha.getTime())) {
+        const ultima = actual.ultimaFecha ? new Date(actual.ultimaFecha) : null;
+        if (!ultima || fecha > ultima) {
+          actual.ultimaFecha = p.fechaCreacion;
+          actual.ultimaTotal = Number(p.total || 0);
+        }
+      }
+
+      mapa.set(clave, actual);
+    });
+
+    const q = busquedaHistorialCliente.trim().toLowerCase();
+    return Array.from(mapa.values())
+      .filter(c => !q || c.cliente.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const fa = a.ultimaFecha ? new Date(a.ultimaFecha).getTime() : 0;
+        const fb = b.ultimaFecha ? new Date(b.ultimaFecha).getTime() : 0;
+        return fb - fa;
+      });
+  })();
 
   const esDeHoy = (fecha) => {
     if (!fecha) return false;
@@ -1052,15 +1095,78 @@ export default function MonitorPedidos() {
           )}
 
           <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
-            {["Activos", "Historial", "Disponibilidad", "StockFisico"].map(v => (
+            {["Activos", "Historial", "HistorialClientes", "Disponibilidad", "StockFisico"].map(v => (
               <button key={v} type="button" onClick={() => { setVistaPedidos(v); setFiltroEstado("Todos"); setPedidoActivo(null); }}
                 style={{ padding: "8px 14px", borderRadius: "8px", border: vistaPedidos === v ? "1px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === v ? "#eff6ff" : "#fff", color: vistaPedidos === v ? "#1d4ed8" : "#475569", fontWeight: "800", cursor: "pointer" }}>
-                {v === "Activos" ? "🧾 Notas de Venta Activas (NVI)" : v === "Historial" ? "📚 Historial" : v === "Disponibilidad" ? "📦 Stock relativo" : "📊 Stock físico"}
+                {v === "Activos" ? "🧾 Notas de Venta Activas (NVI)" : v === "Historial" ? "🧑‍💼 Historial Vendedores" : v === "HistorialClientes" ? "🏪 Historial Clientes" : v === "Disponibilidad" ? "📦 Stock relativo" : "📊 Stock físico"}
               </button>
             ))}
           </div>
 
-          {vistaPedidos === "StockFisico" ? (
+          {vistaPedidos === "HistorialClientes" ? (
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
+              <div style={{ fontSize: "18px", fontWeight: "900", marginBottom: "4px" }}>🏪 Historial de ventas por cliente</div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "12px" }}>
+                Incluye todas las NVI del cliente, tanto activas como enviadas a Depósito.
+              </div>
+
+              <input
+                type="text"
+                value={busquedaHistorialCliente}
+                onChange={(e) => setBusquedaHistorialCliente(e.target.value)}
+                placeholder="🔎 Buscar cliente..."
+                style={{ width: "100%", maxWidth: "520px", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", marginBottom: "14px", fontSize: "13px" }}
+              />
+
+              {historialClientes.length === 0 ? (
+                <div style={{ padding: "18px", color: "#64748b", background: "#f8fafc", borderRadius: "8px" }}>
+                  No hay clientes con ventas para mostrar.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {historialClientes.map((cliente) => (
+                    <div key={cliente.cliente.toLowerCase()} style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", background: "#f8fafc" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: "15px", fontWeight: "900", color: "#0f172a" }}>🏪 {cliente.cliente}</div>
+                          <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px" }}>
+                            📦 Compras: <strong>{cliente.compras}</strong> · 💰 Total histórico: <strong>${cliente.total.toLocaleString("es-AR")}</strong>
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#475569", marginTop: "3px" }}>
+                            🛒 Última compra: <strong>{cliente.ultimaFecha ? new Date(cliente.ultimaFecha).toLocaleDateString("es-AR") : "Sin fecha"}</strong>
+                            {cliente.ultimaFecha ? ` · $${Number(cliente.ultimaTotal || 0).toLocaleString("es-AR")}` : ""}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: "10px", display: "grid", gap: "6px" }}>
+                        {[...cliente.pedidos]
+                          .sort((a, b) => new Date(b.fechaCreacion || 0) - new Date(a.fechaCreacion || 0))
+                          .map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                setVistaPedidos(esPasadoDeposito(p) ? "Historial" : "Activos");
+                                setFiltroPreventista("Todos");
+                                setFiltroEstado("Todos");
+                                setPedidoActivo(p);
+                              }}
+                              style={{ width: "100%", textAlign: "left", padding: "9px 10px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", cursor: "pointer", color: "#0f172a" }}
+                            >
+                              <strong>🧾 NVI #{p.numeroVisible}</strong>
+                              {" · "}{p.fechaCreacion ? new Date(p.fechaCreacion).toLocaleDateString("es-AR") : "Sin fecha"}
+                              {" · "}${Number(p.total || 0).toLocaleString("es-AR")}
+                              {" · "}🧑‍💼 {p.preventista || "Sin vendedor"}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : vistaPedidos === "StockFisico" ? (
             <div>
               <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
