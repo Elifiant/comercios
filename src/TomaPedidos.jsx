@@ -65,7 +65,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         // Así no dependemos de que Supabase resuelva automáticamente la relación anidada.
         const { data: productos, error: errProductos } = await supabase
           .from('productos')
-          .select('id, codigo_cge, nombre, marca, descripcion, activo')
+          .select('id, codigo_cge, nombre, marca, descripcion, activo, usa_color, usa_talle')
           .in('id', productoIds);
 
         if (errProductos) throw errProductos;
@@ -84,6 +84,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             nombre: r.detalle_en_lista || producto.nombre || 'Artículo',
             categoria: producto.descripcion || 'General',
             precio: Number(r.precio || 0),
+            usaColor: producto.usa_color === true,
+            usaTalle: producto.usa_talle === true,
           }))
           .sort((a, b) => a.codigo.localeCompare(b.codigo, 'es', { numeric: true }));
 
@@ -190,6 +192,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
       ajustePct: 0,
       color: '',
       talle: '',
+      usaColor: producto.usaColor === true,
+      usaTalle: producto.usaTalle === true,
       cant: 1,
       confirmadoItem: false,
       esNuevo: !!pedidoExistente,
@@ -228,20 +232,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     setItemsPedido(itemsPedido.map(it => it.id === id ? { ...it, ...cambios } : it));
   };
 
-  const requiereVariante = (item) => {
-    const codigo = String(item?.codigo || '').toUpperCase();
-    const marca = String(item?.marca || '').toUpperCase();
-    return codigo.startsWith('WELT') || marca.includes('WELT');
-  };
-
-  const requiereTalle = requiereVariante;
-  const requiereColor = requiereVariante;
-
-  const _requiereTalleAnterior = (item) => {
-    const codigo = String(item?.codigo || '').toUpperCase();
-    const marca = String(item?.marca || '').toUpperCase();
-    return codigo.startsWith('WELT') || marca.includes('WELT');
-  };
+  const requiereColor = (item) => item?.usaColor === true;
+  const requiereTalle = (item) => item?.usaTalle === true;
 
   const confirmarItem = (id) => {
     const item = itemsPedido.find(it => it.id === id);
@@ -290,13 +282,13 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
     const itemsSinColor = itemsPedido.filter(it => requiereColor(it) && !String(it.color || '').trim());
     if (itemsSinColor.length > 0) {
-      alert('Hay artículos WELT sin color. Ingresá el color antes de confirmar el pedido.');
+      alert('Hay artículos que requieren color y todavía no lo tienen.');
       return;
     }
 
     const itemsSinTalle = itemsPedido.filter(it => requiereTalle(it) && !it.talle);
     if (itemsSinTalle.length > 0) {
-      alert('Hay artículos WELT sin talle. Elegí el talle antes de confirmar el pedido.');
+      alert('Hay artículos que requieren talle y todavía no lo tienen.');
       return;
     }
 
@@ -375,8 +367,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         return {
           pedido_id: pedidoId,
           producto_id: it.productoId,
-          color: it.color || null,
-          talle: String(it.talle || '').trim() || null,
+          color: requiereColor(it) ? (String(it.color || '').trim() || null) : null,
+          talle: requiereTalle(it) ? (String(it.talle || '').trim() || null) : null,
           producto_nombre: nombreConDetalle,
           codigo: it.codigo,
           cantidad: Number(it.cant || 0),
@@ -645,8 +637,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
                   {/* Talle, ajuste comercial y cantidad */}
                   <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.35fr) 64px minmax(0,1fr) 52px', gap: '5px', alignItems: 'end', marginBottom: '8px' }}>
-                      <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: `${requiereColor(item) ? 'minmax(0,1.35fr) ' : ''}${requiereTalle(item) ? '64px ' : ''}minmax(0,1fr) 52px`, gap: '5px', alignItems: 'end', marginBottom: '8px' }}>
+                      {requiereColor(item) && (
+                        <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
                         Color
                         <select disabled={item.confirmadoItem !== false} value={item.color || ''} onChange={(e) => actualizarItem(item.id, { color: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 3px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
                           <option value="">Elegir</option>
@@ -656,14 +649,17 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                           <option value="Gris Fresno">Gris Fresno</option>
                         </select>
                       </label>
+                      )}
 
-                      <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
+                      {requiereTalle(item) && (
+                        <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
                         Talle
                         <select disabled={item.confirmadoItem !== false} value={item.talle || ''} onChange={(e) => actualizarItem(item.id, { talle: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 2px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
                           <option value="">--</option>
                           {Array.from({ length: 18 }, (_, i) => 33 + i).map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </label>
+                      )}
 
                       <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
                         Ajuste
