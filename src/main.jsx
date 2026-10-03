@@ -3,6 +3,7 @@ import React, { StrictMode, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App";
+import Simplex from "./Simplex";
 import Supervisor from "./Supervisor";
 import AdminClientes from "./AdminClientes";
 import AdminPromotores from "./AdminPromotores";
@@ -175,6 +176,10 @@ if (ruta.startsWith("/promotores")) {
 
   if (rol === "supervisor") {
     return <Supervisor />;
+  }
+
+  if (rol === "simplex") {
+    return <Simplex sesion={sesion} perfil={perfil} />;
   }
 
   return <App sesion={sesion} perfil={perfil} />;

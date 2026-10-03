@@ -293,6 +293,10 @@ const reactivarComercio = async (comercio) => {
   const [editDiaFicha, setEditDiaFicha] = useState("");
   const [guardandoFicha, setGuardandoFicha] = useState(false);
   const [msgExitoFicha, setMsgExitoFicha] = useState(false);
+  const [mostrarAsignacionClientes, setMostrarAsignacionClientes] = useState(false);
+  const [clientesSeleccionadosAsignacion, setClientesSeleccionadosAsignacion] = useState([]);
+  const [preventistaAsignacion, setPreventistaAsignacion] = useState("");
+  const [guardandoAsignacionMasiva, setGuardandoAsignacionMasiva] = useState(false);
   const [filtroEmpresa, setFiltroEmpresa] = useState("TODAS");
   const [secuenciaPersonalizada, setSecuenciaPersonalizada] = useState([]);
   const [busquedaSupervisor, setBusquedaSupervisor] = useState("");
@@ -1251,6 +1255,49 @@ useEffect(() => {
     }
   };
 
+  const guardarAsignacionMasivaClientes = async () => {
+    if (!perfilSupervisor?.empresa_id) {
+      alert("No se pudo identificar la empresa del Supervisor.");
+      return;
+    }
+    if (!preventistaAsignacion) {
+      alert("Elegí un preventista.");
+      return;
+    }
+    if (clientesSeleccionadosAsignacion.length === 0) {
+      alert("Seleccioná al menos un cliente.");
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `¿Asignar ${clientesSeleccionadosAsignacion.length} cliente${clientesSeleccionadosAsignacion.length === 1 ? "" : "s"} a ${preventistaAsignacion}?`
+    );
+    if (!confirmar) return;
+
+    setGuardandoAsignacionMasiva(true);
+    try {
+      const { error } = await supabase
+        .from("comercios")
+        .update({ preventista: preventistaAsignacion })
+        .in("id", clientesSeleccionadosAsignacion)
+        .eq("empresa_id", perfilSupervisor.empresa_id);
+
+      if (error) throw error;
+
+      const ids = new Set(clientesSeleccionadosAsignacion.map(String));
+      setComercios(prev => (prev || []).map(c =>
+        ids.has(String(c.id)) ? { ...c, preventista: preventistaAsignacion } : c
+      ));
+      setClientesSeleccionadosAsignacion([]);
+      alert(`✅ ${clientesSeleccionadosAsignacion.length} cliente${clientesSeleccionadosAsignacion.length === 1 ? "" : "s"} asignado${clientesSeleccionadosAsignacion.length === 1 ? "" : "s"} a ${preventistaAsignacion}.`);
+    } catch (err) {
+      console.error("Error en asignación masiva de clientes:", err);
+      alert("❌ No se pudo guardar la asignación: " + (err.message || "Verifique conexión"));
+    } finally {
+      setGuardandoAsignacionMasiva(false);
+    }
+  };
+
   const handleToggleAudioFicha = (audioBase64) => {
     if (!audioBase64) return;
     if (reproduciendoAudio && audioActivoObj) {
@@ -2176,6 +2223,20 @@ useEffect(() => {
       alert("⚠️ Primero necesitás un archivo válido, sin filas con problemas.");
       return;
     }
+    // Empresa sin lista previa: todos los artículos válidos pasan como nuevos.
+    if (!listaPreciosSeleccionadaId && listasPreciosEmpresa.length === 0) {
+      const nombrePrimeraLista = descripcionListaPrecios.trim() ||
+        (numeroListaPrecios.trim() ? `Lista ${numeroListaPrecios.trim()}` : "Primera lista de precios");
+      setDecisionAusentesListaPrecios({});
+      setComparacionListaPrecios({
+        esPrimeraLista: true, totalActual: 0, nombreLista: nombrePrimeraLista, codigosActuales: 0,
+        coincidenciasCodigo: 0, coincidenciasGtin: 0,
+        diagnosticoCodigos: { codigosSupabase: [], codigosExcel: [], muestras: [] },
+        sinCambios: [], precioCambiado: [], reactivar: [],
+        nuevos: vistaPreviaListaPrecios.validos, ausentes: [], revisar: []
+      });
+      return;
+    }
     if (!listaPreciosSeleccionadaId) {
       alert("⚠️ Elegí la lista actual que querés comparar.");
       return;
@@ -2341,8 +2402,12 @@ useEffect(() => {
 
   const actualizarListaPreciosReal = async () => {
     if (actualizandoListaPrecios) return;
-    if (!listaPreciosSeleccionadaId || !comparacionListaPrecios) {
-      alert("❌ Falta la lista seleccionada o la comparación.");
+    if (!comparacionListaPrecios) {
+      alert("❌ Falta preparar la lista antes de continuar.");
+      return;
+    }
+    if (!listaPreciosSeleccionadaId && !comparacionListaPrecios.esPrimeraLista) {
+      alert("❌ Falta la lista seleccionada.");
       return;
     }
     if ((comparacionListaPrecios.revisar || []).length > 0) {
@@ -2369,19 +2434,38 @@ useEffect(() => {
       .map(p => ({ lista_producto_id: p.id }));
 
     const confirmar = window.confirm(
-      `⚠️ ACTUALIZACIÓN REAL DE LISTA\n\n` +
-      `Lista: ${comparacionListaPrecios.nombreLista}\n` +
-      `Cambios de precio: ${cambiosPrecio.length}\n` +
-      `Productos nuevos: ${productosNuevos.length}\n` +
-      `Quitar de la lista: ${productosQuitar.length}\n\n` +
-      `Esta operación modificará Supabase. ¿Confirmar?`
+      comparacionListaPrecios.esPrimeraLista
+        ? `⚠️ CREAR PRIMERA LISTA\n\nLista: ${comparacionListaPrecios.nombreLista}\nProductos nuevos: ${productosNuevos.length}\n\nRutaComercio creará la primera lista de precios. ¿Confirmar?`
+        : `⚠️ ACTUALIZACIÓN REAL DE LISTA\n\nLista: ${comparacionListaPrecios.nombreLista}\nCambios de precio: ${cambiosPrecio.length}\nProductos nuevos: ${productosNuevos.length}\nQuitar de la lista: ${productosQuitar.length}\n\nRutaComercio actualizará esta lista de precios. ¿Confirmar?`
     );
     if (!confirmar) return;
 
     setActualizandoListaPrecios(true);
+    let listaCreada = null;
     try {
+      let listaIdDestino = listaPreciosSeleccionadaId;
+
+      if (comparacionListaPrecios.esPrimeraLista) {
+        const empresaId = perfilSupervisor?.empresa_id || sesionSupervisor?.empresa_id || "";
+        const empresaNombre = perfilSupervisor?.empresa || sesionSupervisor?.empresa || "";
+        if (!empresaId) throw new Error("No se pudo identificar la empresa para crear la primera lista.");
+
+        const nombreNuevaLista = descripcionListaPrecios.trim() ||
+          (numeroListaPrecios.trim() ? `Lista ${numeroListaPrecios.trim()}` : "Primera lista de precios");
+        const codigoNuevaLista = numeroListaPrecios.trim() || `INICIAL-${vigenciaListaPrecios || new Date().toISOString().slice(0, 10)}`;
+        const descripcionNuevaLista = [descripcionListaPrecios.trim(), vigenciaListaPrecios ? `Vigente desde ${vigenciaListaPrecios}` : ""].filter(Boolean).join(" · ") || null;
+
+        const { data: nuevaLista, error: errorCrearLista } = await supabase.from("listas_precios").insert({
+          nombre: nombreNuevaLista, codigo: codigoNuevaLista, descripcion: descripcionNuevaLista,
+          activo: true, predeterminada: true, empresa_id: empresaId, empresa: empresaNombre || null
+        }).select("*").single();
+        if (errorCrearLista) throw errorCrearLista;
+        listaCreada = nuevaLista;
+        listaIdDestino = nuevaLista.id;
+      }
+
       const { data, error } = await supabase.rpc("actualizar_lista_precios", {
-        p_lista_id: listaPreciosSeleccionadaId,
+        p_lista_id: listaIdDestino,
         p_cambios_precio: cambiosPrecio,
         p_productos_nuevos: productosNuevos,
         p_productos_quitar: productosQuitar
@@ -2403,8 +2487,16 @@ useEffect(() => {
       setDecisionAusentesListaPrecios({});
       setVistaPreviaListaPrecios(null);
       setArchivoListaPreciosNombre("");
+      setNumeroListaPrecios("");
+      setVigenciaListaPrecios("");
+      setDescripcionListaPrecios("");
       if (inputArchivoListaPreciosRef.current) inputArchivoListaPreciosRef.current.value = "";
+      await cargarListasPreciosEmpresa();
     } catch (error) {
+      if (listaCreada?.id) {
+        const empresaId = perfilSupervisor?.empresa_id || sesionSupervisor?.empresa_id || "";
+        await supabase.from("listas_precios").delete().eq("id", listaCreada.id).eq("empresa_id", empresaId);
+      }
       console.error("Error actualizando lista de precios:", error);
       alert(`❌ NO SE ACTUALIZÓ LA LISTA\n\n${error?.message || "Error desconocido"}\n\nLa operación transaccional fue rechazada.`);
     } finally {
@@ -3194,14 +3286,80 @@ useEffect(() => {
                 <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>🏪 Clientes</h2>
                 <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>Padrón de comercios de la empresa e importación masiva.</p>
               </div>
-              <button
-                type="button"
-                onClick={() => { setModalImportacionClientes(true); setVistaPreviaClientes(null); setArchivoClientesNombre(""); setArchivoClientesTieneEncabezados(true); setResultadoGeo(null); }}
-                style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 14px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
-              >
-                📥 IMPORTAR CLIENTES
-              </button>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setMostrarAsignacionClientes(prev => !prev)}
+                  style={{ backgroundColor: "#0f766e", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 14px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
+                >
+                  👤 ASIGNAR CLIENTES
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setModalImportacionClientes(true); setVistaPreviaClientes(null); setArchivoClientesNombre(""); setArchivoClientesTieneEncabezados(true); setResultadoGeo(null); }}
+                  style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 14px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
+                >
+                  📥 IMPORTAR CLIENTES
+                </button>
+              </div>
             </div>
+
+            {mostrarAsignacionClientes && (
+              <div style={{ background: "#f0fdfa", border: "1px solid #99f6e4", borderRadius: "10px", padding: "14px", marginBottom: "14px" }}>
+                <div style={{ fontSize: "15px", fontWeight: "900", color: "#134e4a", marginBottom: "10px" }}>👤 Asignación de clientes</div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: "10px" }}>
+                  <select
+                    value={preventistaAsignacion}
+                    onChange={(e) => setPreventistaAsignacion(e.target.value)}
+                    style={{ minWidth: "220px", padding: "9px", border: "1px solid #94a3b8", borderRadius: "8px", background: "#fff", fontWeight: "700" }}
+                  >
+                    <option value="">Elegir preventista...</option>
+                    {listaPreventistas.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setClientesSeleccionadosAsignacion((comercios || []).map(c => c.id))}
+                    style={{ padding: "9px 12px", border: "1px solid #0f766e", borderRadius: "8px", background: "#fff", color: "#0f766e", fontWeight: "800", cursor: "pointer" }}
+                  >
+                    ☑ Seleccionar todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setClientesSeleccionadosAsignacion([])}
+                    style={{ padding: "9px 12px", border: "1px solid #94a3b8", borderRadius: "8px", background: "#fff", color: "#475569", fontWeight: "800", cursor: "pointer" }}
+                  >
+                    Limpiar
+                  </button>
+                  <strong style={{ fontSize: "12px", color: "#475569" }}>{clientesSeleccionadosAsignacion.length} seleccionado(s)</strong>
+                </div>
+                <div style={{ maxHeight: "310px", overflowY: "auto", background: "#fff", border: "1px solid #ccfbf1", borderRadius: "8px", padding: "6px", marginBottom: "10px" }}>
+                  {(comercios || []).length === 0 ? (
+                    <div style={{ padding: "10px", color: "#64748b", fontSize: "12px" }}>No hay clientes cargados.</div>
+                  ) : (comercios || []).map((c) => {
+                    const marcado = clientesSeleccionadosAsignacion.some(id => String(id) === String(c.id));
+                    return (
+                      <label key={c.id} style={{ display: "flex", alignItems: "center", gap: "9px", padding: "8px", borderBottom: "1px solid #f1f5f9", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={marcado}
+                          onChange={() => setClientesSeleccionadosAsignacion(prev => marcado ? prev.filter(id => String(id) !== String(c.id)) : [...prev, c.id])}
+                        />
+                        <span style={{ flex: 1, fontSize: "12px", fontWeight: "800", color: "#0f172a" }}>{c.nombre || "Cliente sin nombre"}</span>
+                        <span style={{ fontSize: "11px", color: c.preventista ? "#475569" : "#b45309" }}>{c.preventista || "Sin asignar"}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  disabled={guardandoAsignacionMasiva || !preventistaAsignacion || clientesSeleccionadosAsignacion.length === 0}
+                  onClick={guardarAsignacionMasivaClientes}
+                  style={{ width: "100%", padding: "11px", border: "none", borderRadius: "8px", background: (!preventistaAsignacion || clientesSeleccionadosAsignacion.length === 0) ? "#94a3b8" : "#0f766e", color: "#fff", fontWeight: "900", cursor: (!preventistaAsignacion || clientesSeleccionadosAsignacion.length === 0) ? "not-allowed" : "pointer" }}
+                >
+                  {guardandoAsignacionMasiva ? "⏳ ASIGNANDO..." : `👤 ASIGNAR ${clientesSeleccionadosAsignacion.length} CLIENTE${clientesSeleccionadosAsignacion.length === 1 ? "" : "S"}`}
+                </button>
+              </div>
+            )}
 
             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "10px", padding: "14px", marginBottom: "14px" }}>
               <div style={{ fontSize: "14px", fontWeight: "900", color: "#92400e", marginBottom: "8px" }}>🟡 Clientes nuevos pendientes de validación ({clientesPendientesValidacion.length})</div>
@@ -3220,11 +3378,93 @@ useEffect(() => {
             </div>
 
             <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px" }}>
-              <div style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: "800" }}>Clientes cargados actualmente</div>
-              <div style={{ fontSize: "28px", fontWeight: "900", marginTop: "3px" }}>{comercios.length}</div>
-              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "5px" }}>
-                En este primer paso la importación solamente analiza el archivo. Todavía no agrega ni modifica clientes.
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
+                <div>
+                  <div style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: "800" }}>Clientes cargados actualmente</div>
+                  <div style={{ fontSize: "28px", fontWeight: "900", marginTop: "3px" }}>{comercios.length}</div>
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", fontWeight: "700" }}>
+                  Abrí un cliente para cambiar preventista o día de visita.
+                </div>
               </div>
+
+              {(comercios || []).length === 0 ? (
+                <div style={{ padding: "18px", textAlign: "center", color: "#64748b", fontSize: "12px", background: "#f8fafc", borderRadius: "8px" }}>
+                  No hay clientes cargados todavía.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: "8px" }}>
+                  {[...(comercios || [])]
+                    .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"))
+                    .map((c) => (
+                      <div key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const yaAbierto = comercioDetalleModal?.id === c.id;
+                            if (yaAbierto) {
+                              setComercioDetalleModal(null);
+                              return;
+                            }
+                            setComercioFoco(c);
+                            setComercioDetalleModal(c);
+                            setEditPrevFicha(c.preventista || "");
+                            setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : "");
+                            setMsgExitoFicha(false);
+                          }}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            border: comercioDetalleModal?.id === c.id ? "2px solid #2563eb" : "1px solid #e2e8f0",
+                            background: "#f8fafc",
+                            borderRadius: "9px",
+                            padding: "11px 12px",
+                            cursor: "pointer"
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontSize: "13px", fontWeight: "900", color: "#0f172a" }}>🏪 {c.nombre || "Cliente sin nombre"}</div>
+                              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                                👤 {c.preventista || "Sin preventista"} · 🗓️ {c.dia_visita || "Sin día asignado"}
+                              </div>
+                              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>📍 {c.direccion || "Sin dirección"}</div>
+                            </div>
+                            <div style={{ fontSize: "11px", color: "#2563eb", fontWeight: "900", whiteSpace: "nowrap" }}>
+                              {comercioDetalleModal?.id === c.id ? "CERRAR EDICIÓN ▲" : "ABRIR / EDITAR ›"}
+                            </div>
+                          </div>
+                        </button>
+
+                        {comercioDetalleModal?.id === c.id && (
+                          <div style={{ marginTop: "6px", padding: "12px", background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "9px" }}>
+                            <div style={{ fontSize: "12px", fontWeight: "900", color: "#1e3a8a", marginBottom: "9px" }}>✏️ Editar asignación y día de visita</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "9px" }}>
+                              <div>
+                                <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>👤 PREVENTISTA</label>
+                                <select value={editPrevFicha || ""} onChange={(e) => setEditPrevFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff" }}>
+                                  <option value="">Sin preventista</option>
+                                  {listaPreventistas.map(p => <option key={p} value={p}>{p}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>🗓️ DÍA DE VISITA</label>
+                                <select value={editDiaFicha || ""} onChange={(e) => setEditDiaFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff" }}>
+                                  <option value="">Sin día asignado</option>
+                                  {["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"].map(d => <option key={d} value={d}>{d}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <button type="button" onClick={guardarReasignacionComercio} disabled={guardandoFicha} style={{ width: "100%", marginTop: "10px", padding: "9px", border: "none", borderRadius: "7px", background: guardandoFicha ? "#94a3b8" : "#2563eb", color: "#fff", fontWeight: "900", cursor: guardandoFicha ? "not-allowed" : "pointer" }}>
+                              {guardandoFicha ? "GUARDANDO..." : "💾 GUARDAR CAMBIOS"}
+                            </button>
+                            {msgExitoFicha && <div style={{ marginTop: "6px", textAlign: "center", color: "#16a34a", fontSize: "11px", fontWeight: "900" }}>✅ Cambios guardados correctamente</div>}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
           </div>
          ) : seccionActiva === "solicitudes" ? (
@@ -3430,7 +3670,7 @@ useEffect(() => {
                     <button
                       type="button"
                       onClick={compararListaPreciosActual}
-                      disabled={comparandoListaPrecios || !listaPreciosSeleccionadaId}
+                      disabled={comparandoListaPrecios || (!listaPreciosSeleccionadaId && listasPreciosEmpresa.length > 0)}
                       style={{
                         marginTop: "10px", width: "100%", padding: "11px",
                         border: "none", borderRadius: "8px",
@@ -3439,7 +3679,7 @@ useEffect(() => {
                         cursor: comparandoListaPrecios ? "wait" : "pointer"
                       }}
                     >
-                      {comparandoListaPrecios ? "⏳ COMPARANDO..." : "🔎 COMPARAR CON LA LISTA ACTUAL"}
+                      {comparandoListaPrecios ? "⏳ COMPARANDO..." : (listasPreciosEmpresa.length === 0 ? "🚀 PREPARAR PRIMERA LISTA" : "🔎 COMPARAR CON LA LISTA ACTUAL")}
                     </button>
                   )}
 
@@ -3722,7 +3962,7 @@ useEffect(() => {
                           )}
 
                           <div style={{ marginTop: "12px", padding: "11px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "9px", fontSize: "11px", color: "#9a3412", fontWeight: "800", textAlign: "center" }}>
-                            ⚠️ ACTUALIZACIÓN REAL: al confirmar, RutaComercio modificará esta lista en Supabase. La operación se ejecutará de forma transaccional.
+                            ⚠️ Al confirmar, RutaComercio guardará los cambios de esta lista de precios de forma segura.
                           </div>
 
                           <div style={{ marginTop: "14px", display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
@@ -3735,10 +3975,15 @@ useEffect(() => {
                             </button>
                             <button
                               type="button"
-                              disabled={true}
-                              style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: "#e2e8f0", color: "#94a3b8", fontWeight: "900", cursor: "not-allowed" }}
+                              onClick={actualizarListaPreciosReal}
+                              disabled={actualizandoListaPrecios}
+                              style={{ padding: "9px 14px", borderRadius: "8px", border: "none", background: actualizandoListaPrecios ? "#e2e8f0" : "#2563eb", color: actualizandoListaPrecios ? "#94a3b8" : "#fff", fontWeight: "900", cursor: actualizandoListaPrecios ? "not-allowed" : "pointer" }}
                             >
-                              💾 ACTUALIZAR LISTA AHORA — reactivación en prueba
+                              {actualizandoListaPrecios
+                                ? "⏳ GUARDANDO..."
+                                : comparacionListaPrecios?.esPrimeraLista
+                                  ? "💾 CREAR PRIMERA LISTA AHORA"
+                                  : "💾 ACTUALIZAR LISTA AHORA"}
                             </button>
                           </div>
                         </div>
@@ -4255,7 +4500,7 @@ useEffect(() => {
         </div>
 
         {/* MODAL FICHA DE COMERCIO: DATOS FISCALES Y AUDIO */}
-        {comercioDetalleModal && (
+        {comercioDetalleModal && seccionActiva !== "clientes" && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", backdropFilter: "blur(3px)" }}>
             <div style={{ background: "#ffffff", borderRadius: "12px", width: "100%", maxWidth: "520px", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.3)", border: "1px solid #cbd5e1" }}>
               <div style={{ background: "#0f172a", color: "#fff", padding: "12px 16px", borderRadius: "12px 12px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
