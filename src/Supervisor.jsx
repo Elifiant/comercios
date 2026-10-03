@@ -391,6 +391,24 @@ const reactivarComercio = async (comercio) => {
   const [cargandoStockArchivo, setCargandoStockArchivo] = useState(false);
   const inputArchivoStockRef = useRef(null);
 
+  const descargarPlantillaStock = () => {
+    try {
+      const filas = [
+        { codigo: "WELT001", descripcion: "Botín Oxisol", color: "Negro", talle: "40", stock: 5 },
+        { codigo: "WELT001", descripcion: "Botín Oxisol", color: "Negro", talle: "41", stock: 8 },
+        { codigo: "WELT001", descripcion: "Botín Oxisol", color: "Marrón", talle: "40", stock: 3 },
+      ];
+      const hoja = XLSX.utils.json_to_sheet(filas, { header: ["codigo", "descripcion", "color", "talle", "stock"] });
+      hoja["!cols"] = [{ wch: 16 }, { wch: 38 }, { wch: 18 }, { wch: 12 }, { wch: 12 }];
+      const libro = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(libro, hoja, "Stock");
+      XLSX.writeFile(libro, "RutaComercio_Plantilla_Stock.xlsx");
+    } catch (error) {
+      console.error("Error descargando plantilla de stock:", error);
+      alert("❌ No se pudo descargar la plantilla de stock.");
+    }
+  };
+
   const leerArchivoStock = async (event) => {
     const archivo = event.target.files?.[0];
     if (!archivo) return;
@@ -414,11 +432,15 @@ const reactivarComercio = async (comercio) => {
       const aliasCodigo = ["codigo", "cod", "sku", "codigo producto", "codigo articulo", "codigo_articulo"];
       const aliasDescripcion = ["articulo", "producto", "descripcion", "nombre", "detalle"];
       const aliasStock = ["stock", "existencia", "existencias", "cantidad", "disponible", "saldo"];
+      const aliasColor = ["color", "colores", "variante", "tono"];
+      const aliasTalle = ["talle", "talla", "numero", "nro", "medida"];
 
       let encabezadoIndex = -1;
       let colCodigo = -1;
       let colDescripcion = -1;
       let colStock = -1;
+      let colColor = -1;
+      let colTalle = -1;
 
       for (let i = 0; i < Math.min(filasUtiles.length, 20); i += 1) {
         const cols = filasUtiles[i].fila.map(normalizar);
@@ -427,7 +449,13 @@ const reactivarComercio = async (comercio) => {
         const d = buscar(aliasDescripcion);
         const st = buscar(aliasStock);
         if (c >= 0 && d >= 0 && st >= 0) {
-          encabezadoIndex = i; colCodigo = c; colDescripcion = d; colStock = st; break;
+          encabezadoIndex = i;
+          colCodigo = c;
+          colDescripcion = d;
+          colStock = st;
+          colColor = buscar(aliasColor);
+          colTalle = buscar(aliasTalle);
+          break;
         }
       }
 
@@ -443,6 +471,8 @@ const reactivarComercio = async (comercio) => {
       datos.forEach(x => {
         const codigo = String(x.fila[colCodigo] ?? "").trim();
         const descripcion = String(x.fila[colDescripcion] ?? "").trim();
+        const color = colColor >= 0 ? String(x.fila[colColor] ?? "").trim() : "";
+        const talle = colTalle >= 0 ? String(x.fila[colTalle] ?? "").trim() : "";
         let stockTexto = String(x.fila[colStock] ?? "").trim().replace(/\s/g, "");
         if (stockTexto.includes(",") && !stockTexto.includes(".")) stockTexto = stockTexto.replace(",", ".");
         stockTexto = stockTexto.replace(/[^0-9.-]/g, "");
@@ -452,7 +482,7 @@ const reactivarComercio = async (comercio) => {
           invalidos.push({ fila: x.numeroOriginal, codigo, descripcion, stock: x.fila[colStock], motivo: !codigo ? "Código vacío" : "Stock inválido" });
           return;
         }
-        validos.push({ fila: x.numeroOriginal, codigo, descripcion, stock });
+        validos.push({ fila: x.numeroOriginal, codigo, descripcion, color, talle, stock });
       });
 
       setVistaPreviaStock({
@@ -462,6 +492,8 @@ const reactivarComercio = async (comercio) => {
         nombresColumnas: {
           codigo: String(encabezado.fila[colCodigo] ?? "Código"),
           descripcion: String(encabezado.fila[colDescripcion] ?? "Descripción"),
+          color: colColor >= 0 ? String(encabezado.fila[colColor] ?? "Color") : null,
+          talle: colTalle >= 0 ? String(encabezado.fila[colTalle] ?? "Talle") : null,
           stock: String(encabezado.fila[colStock] ?? "Stock"),
         },
         validos, invalidos, totalFilas: validos.length + invalidos.length,
@@ -3229,9 +3261,14 @@ useEffect(() => {
                   Cargá la planilla de stock de la empresa. Esta primera etapa solo lee y muestra una vista previa: todavía no modifica Supabase.
                 </p>
               </div>
-              <button type="button" onClick={() => inputArchivoStockRef.current?.click()} disabled={cargandoStockArchivo} style={{ background: cargandoStockArchivo ? "#94a3b8" : "#2563eb", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 20px", fontSize: "14px", fontWeight: "900", cursor: cargandoStockArchivo ? "wait" : "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.25)" }}>
-                {cargandoStockArchivo ? "LEYENDO..." : "📥 CARGAR EXCEL DE STOCK"}
-              </button>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button type="button" onClick={descargarPlantillaStock} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 20px", fontSize: "14px", fontWeight: "900", cursor: "pointer", boxShadow: "0 4px 12px rgba(22,163,74,0.20)" }}>
+                  📥 DESCARGAR PLANTILLA OFICIAL
+                </button>
+                <button type="button" onClick={() => inputArchivoStockRef.current?.click()} disabled={cargandoStockArchivo} style={{ background: cargandoStockArchivo ? "#94a3b8" : "#2563eb", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 20px", fontSize: "14px", fontWeight: "900", cursor: cargandoStockArchivo ? "wait" : "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.25)" }}>
+                  {cargandoStockArchivo ? "LEYENDO..." : "📤 CARGAR EXCEL DE STOCK"}
+                </button>
+              </div>
               <input ref={inputArchivoStockRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoStock} style={{ display: "none" }} />
             </div>
 
@@ -3243,7 +3280,7 @@ useEffect(() => {
               <div style={{ background: "#fff", border: "1px dashed #cbd5e1", borderRadius: "12px", padding: "40px 18px", textAlign: "center", color: "#64748b" }}>
                 <div style={{ fontSize: "34px", marginBottom: "8px" }}>📄</div>
                 <div style={{ fontWeight: "900", color: "#334155" }}>Todavía no cargaste una planilla</div>
-                <div style={{ marginTop: "5px", fontSize: "12px" }}>RutaComercio intentará detectar Código, Artículo/Descripción y Stock aunque los encabezados no estén en la primera fila.</div>
+                <div style={{ marginTop: "5px", fontSize: "12px" }}>RutaComercio detectará Código, Artículo/Descripción y Stock. Color y Talle son opcionales para empresas que manejan variantes.</div>
               </div>
             ) : (
               <div>
@@ -3255,15 +3292,15 @@ useEffect(() => {
                 </div>
 
                 <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", marginBottom: "12px", fontSize: "12px", color: "#475569" }}>
-                  Detectado: <b>{vistaPreviaStock.nombresColumnas.codigo}</b> → Código · <b>{vistaPreviaStock.nombresColumnas.descripcion}</b> → Descripción · <b>{vistaPreviaStock.nombresColumnas.stock}</b> → Stock
+                  Detectado: <b>{vistaPreviaStock.nombresColumnas.codigo}</b> → Código · <b>{vistaPreviaStock.nombresColumnas.descripcion}</b> → Descripción{vistaPreviaStock.nombresColumnas.color ? <> · <b>{vistaPreviaStock.nombresColumnas.color}</b> → Color</> : null}{vistaPreviaStock.nombresColumnas.talle ? <> · <b>{vistaPreviaStock.nombresColumnas.talle}</b> → Talle</> : null} · <b>{vistaPreviaStock.nombresColumnas.stock}</b> → Stock
                 </div>
 
                 <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "650px" }}>
-                    <thead><tr style={{ background: "#f8fafc", textAlign: "left" }}><th style={{ padding: "10px" }}>Fila</th><th style={{ padding: "10px" }}>Código archivo</th><th style={{ padding: "10px" }}>Artículo / descripción</th><th style={{ padding: "10px", textAlign: "right" }}>Stock informado</th></tr></thead>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "820px" }}>
+                    <thead><tr style={{ background: "#f8fafc", textAlign: "left" }}><th style={{ padding: "10px" }}>Fila</th><th style={{ padding: "10px" }}>Código archivo</th><th style={{ padding: "10px" }}>Artículo / descripción</th><th style={{ padding: "10px" }}>Color</th><th style={{ padding: "10px" }}>Talle</th><th style={{ padding: "10px", textAlign: "right" }}>Stock informado</th></tr></thead>
                     <tbody>
                       {vistaPreviaStock.validos.slice(0, 100).map((item, idx) => (
-                        <tr key={`${item.fila}-${idx}`} style={{ borderTop: "1px solid #f1f5f9" }}><td style={{ padding: "9px", color: "#64748b" }}>{item.fila}</td><td style={{ padding: "9px", fontWeight: "800" }}>{item.codigo}</td><td style={{ padding: "9px" }}>{item.descripcion || "—"}</td><td style={{ padding: "9px", textAlign: "right", fontWeight: "900" }}>{item.stock}</td></tr>
+                        <tr key={`${item.fila}-${idx}`} style={{ borderTop: "1px solid #f1f5f9" }}><td style={{ padding: "9px", color: "#64748b" }}>{item.fila}</td><td style={{ padding: "9px", fontWeight: "800" }}>{item.codigo}</td><td style={{ padding: "9px" }}>{item.descripcion || "—"}</td><td style={{ padding: "9px" }}>{item.color || "—"}</td><td style={{ padding: "9px" }}>{item.talle || "—"}</td><td style={{ padding: "9px", textAlign: "right", fontWeight: "900" }}>{item.stock}</td></tr>
                       ))}
                     </tbody>
                   </table>
