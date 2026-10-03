@@ -10,6 +10,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
   const [errorCatalogo, setErrorCatalogo] = useState('');
   const [medioPago, setMedioPago] = useState('Efectivo');
+  const [diasCuentaCorriente, setDiasCuentaCorriente] = useState('');
   const [observaciones, setObservaciones] = useState(pedidoExistente?.observaciones || '');
   const [enviarWsp, setEnviarWsp] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -187,6 +188,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         nombre: producto.nombre,
         precioLista: producto.precio,
         bonif: 0,
+        ajusteTipo: 'normal',
+        ajustePct: 0,
+        talle: '',
         cant: 1,
         esNuevo: !!pedidoExistente,
         nota: ''
@@ -221,13 +225,19 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     setItemsPedido(itemsPedido.filter(it => it.id !== id));
   };
 
-  const cambiarBonif = (id, bonif) => {
-    setItemsPedido(itemsPedido.map(it => it.id === id ? { ...it, bonif: Number(bonif) } : it));
+  const actualizarItem = (id, cambios) => {
+    setItemsPedido(itemsPedido.map(it => it.id === id ? { ...it, ...cambios } : it));
+  };
+
+  const ajusteFirmado = (it) => {
+    if (it.ajusteTipo === 'recargo') return -Math.abs(Number(it.ajustePct || 0));
+    if (it.ajusteTipo === 'descuento') return Math.abs(Number(it.ajustePct || 0));
+    return Number(it.bonif || 0); // compatibilidad con pedidos anteriores
   };
 
   // Cálculos totales
   const subtotalBruto = itemsPedido.reduce((acc, it) => acc + (it.precioLista * it.cant), 0);
-  const totalDescuentos = itemsPedido.reduce((acc, it) => acc + ((it.precioLista * it.cant) * (it.bonif / 100)), 0);
+  const totalDescuentos = itemsPedido.reduce((acc, it) => acc + ((it.precioLista * it.cant) * (ajusteFirmado(it) / 100)), 0);
   const totalFinal = subtotalBruto - totalDescuentos;
 
   const confirmarPedido = async () => {
@@ -268,8 +278,14 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         ? Number(((totalDescuentos / subtotalBruto) * 100).toFixed(4))
         : 0;
 
+      if (medioPago === 'Cuenta corriente' && (!diasCuentaCorriente || Number(diasCuentaCorriente) <= 0)) {
+        alert('Ingresá los días de la cuenta corriente.');
+        setGuardando(false);
+        return;
+      }
+
       const notasPartes = [];
-      if (medioPago) notasPartes.push(`Medio de pago: ${medioPago}`);
+      if (medioPago) notasPartes.push(`Medio de pago: ${medioPago === 'Cuenta corriente' ? `Cuenta corriente · ${diasCuentaCorriente} días` : medioPago}`);
       if (observaciones?.trim()) notasPartes.push(observaciones.trim());
 
       const pedidoPayload = {
@@ -295,15 +311,19 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
       const itemsPayload = itemsPedido.map(it => {
         const bruto = Number(it.precioLista || 0) * Number(it.cant || 0);
-        const neto = bruto * (1 - Number(it.bonif || 0) / 100);
+        const ajuste = ajusteFirmado(it);
+        const neto = bruto * (1 - ajuste / 100);
+        const detalleAjuste = ajuste < 0 ? `Recargo ${Math.abs(ajuste)}%` : ajuste > 0 ? `Descuento ${ajuste}%` : 'Normal';
+        const detalleTalle = it.talle ? ` · Talle ${it.talle}` : '';
+        const nombreConDetalle = `${it.nombre}${detalleTalle} · ${detalleAjuste}`;
 
         return {
           pedido_id: pedidoId,
           producto_id: it.productoId,
-          producto_nombre: it.nombre,
+          producto_nombre: nombreConDetalle,
           codigo: it.codigo,
           cantidad: Number(it.cant || 0),
-          precio_unitario: Number(it.precioLista || 0),
+          precio_unitario: Number((Number(it.precioLista || 0) * (1 - ajuste / 100)).toFixed(2)),
           subtotal: Number(neto.toFixed(2))
         };
       });
@@ -333,7 +353,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             `Preventista: ${usuario?.nombre || 'Preventista'}\n` +
             `Medio de Pago: ${medioPago}\n` +
             `--------------------------\n` +
-            itemsPedido.map(it => `• ${it.cant}x ${it.nombre} (${it.bonif > 0 ? it.bonif + '% OFF' : 'Neto'}): $${((it.precioLista * it.cant) * (1 - it.bonif / 100)).toLocaleString()}`).join('\n') +
+            itemsPedido.map(it => { const a = ajusteFirmado(it); const txt = a < 0 ? `${Math.abs(a)}% RECARGO` : a > 0 ? `${a}% OFF` : 'Neto'; return `• ${it.cant}x ${it.nombre}${it.talle ? ` · Talle ${it.talle}` : ''} (${txt}): $${((it.precioLista * it.cant) * (1 - a / 100)).toLocaleString()}`; }).join('\n') +
             `\n--------------------------\n` +
             `*TOTAL A COBRAR: $${totalFinal.toLocaleString()} ARS*\n` +
             (observaciones ? `Notas: ${observaciones}\n` : '') +
@@ -529,7 +549,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             </div>
           ) : (
             itemsPedido.map(item => {
-              const subtotalItem = (item.precioLista * item.cant) * (1 - item.bonif / 100);
+              const ajusteItem = ajusteFirmado(item);
+              const subtotalItem = (item.precioLista * item.cant) * (1 - ajusteItem / 100);
               return (
                 <div key={item.id} style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '12px', border: item.esNuevo ? '2px solid #f59e0b' : '1px solid #e2e8f0', marginBottom: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -564,44 +585,42 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                     </button>
                   </div>
 
-                  {/* Cantidad y Descuento */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
-                    {/* Descuento */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: '#64748b' }}>% Desc:</span>
-                      <select
-                        value={[0, 10].includes(Number(item.bonif)) ? Number(item.bonif) : 'otro'}
-                        onChange={(e) => {
-                          if (e.target.value === 'otro') {
-                            const ingresado = window.prompt('Ingresá el porcentaje de descuento:', String(item.bonif || ''));
-                            if (ingresado === null) return;
-                            const porcentaje = Number(String(ingresado).replace(',', '.'));
-                            if (!Number.isFinite(porcentaje) || porcentaje < 0 || porcentaje > 100) {
-                              alert('Ingresá un porcentaje válido entre 0 y 100.');
-                              return;
-                            }
-                            cambiarBonif(item.id, porcentaje);
-                          } else {
-                            cambiarBonif(item.id, e.target.value);
-                          }
-                        }}
-                        style={{ padding: '4px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: '700', outline: 'none' }}
-                      >
-                        <option value={0}>0% Normal</option>
-                        <option value={10}>10% OFF</option>
-                        <option value="otro">{![0, 10].includes(Number(item.bonif)) ? `${item.bonif}%` : 'Otro %'}</option>
-                      </select>
+                  {/* Talle, ajuste comercial y cantidad */}
+                  <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 90px', gap: '8px', alignItems: 'end', marginBottom: '10px' }}>
+                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                        Talle
+                        <select value={item.talle || ''} onChange={(e) => actualizarItem(item.id, { talle: e.target.value })} style={{ width: '100%', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                          <option value="">Elegir</option>
+                          {Array.from({ length: 18 }, (_, i) => 33 + i).map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </label>
+
+                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                        Ajuste
+                        <select value={item.ajusteTipo || 'normal'} onChange={(e) => actualizarItem(item.id, { ajusteTipo: e.target.value, ajustePct: e.target.value === 'normal' ? 0 : Number(item.ajustePct || 0), bonif: 0 })} style={{ width: '100%', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                          <option value="normal">Normal</option>
+                          <option value="descuento">Descuento</option>
+                          <option value="recargo">Recargo</option>
+                        </select>
+                      </label>
+
+                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                        %
+                        <input type="number" min="0" step="1" disabled={(item.ajusteTipo || 'normal') === 'normal'} value={item.ajustePct || ''} onChange={(e) => actualizarItem(item.id, { ajustePct: Math.max(0, Number(e.target.value || 0)) })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                      </label>
                     </div>
 
-                    {/* Controles + / - */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <button onClick={() => modificarCant(item.id, -1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>-</button>
-                      <span style={{ fontSize: '15px', fontWeight: '800', minWidth: '24px', textAlign: 'center' }}>{item.cant}</span>
-                      <button onClick={() => modificarCant(item.id, 1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #2563eb', background: '#2563eb', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>+</button>
-                    </div>
-
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>${subtotalItem.toLocaleString()}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button onClick={() => modificarCant(item.id, -1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>-</button>
+                        <span style={{ fontSize: '15px', fontWeight: '800', minWidth: '24px', textAlign: 'center' }}>{item.cant}</span>
+                        <button onClick={() => modificarCant(item.id, 1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #2563eb', background: '#2563eb', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>+</button>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>${subtotalItem.toLocaleString()}</div>
+                        {ajusteItem !== 0 && <div style={{ fontSize: '10px', color: ajusteItem < 0 ? '#b45309' : '#15803d', fontWeight: '800' }}>{ajusteItem < 0 ? `+${Math.abs(ajusteItem)}% recargo` : `-${ajusteItem}% descuento`}</div>}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -614,7 +633,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '14px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
           <div style={{ fontSize: '13px', fontWeight: '800', marginBottom: '8px' }}>Condiciones & Forma de Pago</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
-            {['Efectivo', 'Transferencia QR', 'Cta. Cte. 7 días', 'BCH / Crypto'].map(m => (
+            {['Efectivo', 'Transferencia QR', 'Cuenta corriente', 'BCH / Crypto'].map(m => (
               <button
                 key={m}
                 type="button"
@@ -636,6 +655,23 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             ))}
           </div>
 
+          {medioPago === 'Cuenta corriente' && (
+            <div style={{ marginBottom: '12px', padding: '10px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '8px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '800', color: '#9a3412' }}>
+                Días de cuenta corriente
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={diasCuentaCorriente}
+                  onChange={(e) => setDiasCuentaCorriente(e.target.value)}
+                  placeholder="Ej.: 7, 15, 30"
+                  style={{ width: '100%', boxSizing: 'border-box', marginTop: '6px', padding: '8px', borderRadius: '7px', border: '1px solid #fdba74' }}
+                />
+              </label>
+            </div>
+          )}
+
           <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#64748b', marginBottom: '4px' }}>
             Observaciones logísticas para reparto:
           </label>
@@ -654,7 +690,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             <span>💬 Enviar comanda por WhatsApp</span>
           </label>
           <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: '800' }}>
-            {comercio?.telefono || '11-4820-9912'}
+            {comercio?.telefono || 'Sin teléfono cargado'}
           </span>
         </div>
       </main>
@@ -664,7 +700,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         <div style={{ maxWidth: '600px', margin: '0 auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
             <div style={{ fontSize: '12px', color: '#64748b' }}>
-              Subtotal: <strong>${subtotalBruto.toLocaleString()}</strong> · Desc: <strong style={{ color: '#ef4444' }}>-${totalDescuentos.toLocaleString()}</strong>
+              Subtotal: <strong>${subtotalBruto.toLocaleString()}</strong> · Ajuste: <strong style={{ color: totalDescuentos < 0 ? '#b45309' : '#ef4444' }}>{totalDescuentos < 0 ? '+' : '-'}${Math.abs(totalDescuentos).toLocaleString()}</strong>
             </div>
             <div style={{ fontSize: '20px', fontWeight: '900', color: '#16a34a' }}>
               ${totalFinal.toLocaleString()} <span style={{ fontSize: '12px', color: '#64748b' }}>ARS</span>

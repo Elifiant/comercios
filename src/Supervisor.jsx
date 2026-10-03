@@ -329,6 +329,12 @@ const reactivarComercio = async (comercio) => {
   const [importandoClientes, setImportandoClientes] = useState(false);
   const inputArchivoClientesRef = useRef(null);
 
+  // 💲 Asignación masiva de listas de precios a clientes
+  const [mostrarAsignacionListaClientes, setMostrarAsignacionListaClientes] = useState(false);
+  const [listaAsignacionClientesId, setListaAsignacionClientesId] = useState("");
+  const [clientesSeleccionadosLista, setClientesSeleccionadosLista] = useState([]);
+  const [guardandoAsignacionLista, setGuardandoAsignacionLista] = useState(false);
+
   // 📦 Pedidos activos del Supervisor
   // Los pedidos que ya pasaron a Depósito/Historial no deben seguir apareciendo acá.
   const cargarPedidosSupabase = async () => {
@@ -1541,6 +1547,7 @@ useEffect(() => {
         const provincia = String(obtenerCampo(fila, ["provincia", "estado", "provincia/estado", "departamento"]) || "").trim();
         const pais = String(obtenerCampo(fila, ["pais", "país", "country"]) || "").trim();
         const emailPreventista = String(obtenerCampo(fila, ["email_preventista", "email preventista", "email del preventista", "correo_preventista", "correo preventista", "preventista_email"]) || "").trim().toLowerCase();
+        const telefono = String(obtenerCampo(fila, ["telefono", "teléfono", "telefono_whatsapp", "teléfono_whatsapp", "whatsapp", "celular", "movil", "móvil"]) || "").trim();
         const latRaw = String(obtenerCampo(fila, ["latitud", "latitude", "lat"]) || "").trim().replace(",", ".");
         const lngRaw = String(obtenerCampo(fila, ["longitud", "longitude", "lng", "lon"]) || "").trim().replace(",", ".");
         const latitud = latRaw === "" ? null : Number(latRaw);
@@ -1576,6 +1583,7 @@ useEffect(() => {
           provincia,
           pais,
           email_preventista: emailPreventista,
+          telefono,
           latitud: tieneCoordenadas ? latitud : null,
           longitud: tieneCoordenadas ? longitud : null,
           estadoUbicacion: tieneCoordenadas ? "Con coordenadas" : "Pendiente de geocodificar"
@@ -1847,6 +1855,54 @@ useEffect(() => {
   const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
   const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
 
+  // 💲 Asignar una lista de precios a varios clientes de la empresa
+  const guardarAsignacionMasivaListaClientes = async () => {
+    if (guardandoAsignacionLista) return;
+    if (!perfilSupervisor?.empresa_id) return alert("❌ No se pudo identificar la empresa.");
+    if (!listaAsignacionClientesId) return alert("⚠️ Elegí una lista de precios.");
+    if (!clientesSeleccionadosLista.length) return alert("⚠️ Seleccioná al menos un cliente.");
+
+    const lista = (listasPreciosEmpresa || []).find(l => String(l.id) === String(listaAsignacionClientesId));
+    if (!lista) return alert("❌ La lista seleccionada no está disponible.");
+
+    const ok = window.confirm(`Asignar “${lista.nombre || lista.codigo || "Lista"}” a ${clientesSeleccionadosLista.length} cliente(s)?`);
+    if (!ok) return;
+
+    setGuardandoAsignacionLista(true);
+    try {
+      const idsEmpresa = new Set((comercios || []).map(c => String(c.id)));
+      const ids = clientesSeleccionadosLista.filter(id => idsEmpresa.has(String(id)));
+      if (!ids.length) throw new Error("No hay clientes válidos para asignar.");
+
+      const { data: existentes, error: errorExistentes } = await supabase
+        .from("comercios_listas")
+        .select("comercio_id, lista_id")
+        .eq("lista_id", listaAsignacionClientesId)
+        .in("comercio_id", ids);
+      if (errorExistentes) throw errorExistentes;
+
+      const ya = new Set((existentes || []).map(x => String(x.comercio_id)));
+      const filas = ids.filter(id => !ya.has(String(id))).map(id => ({
+        comercio_id: id,
+        lista_id: listaAsignacionClientesId
+      }));
+
+      if (filas.length) {
+        const { error } = await supabase.from("comercios_listas").insert(filas);
+        if (error) throw error;
+      }
+
+      alert(`✅ Lista asignada correctamente a ${ids.length} cliente(s).`);
+      setClientesSeleccionadosLista([]);
+      setMostrarAsignacionListaClientes(false);
+    } catch (error) {
+      console.error("Error asignando lista a clientes:", error);
+      alert("❌ No se pudo asignar la lista: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoAsignacionLista(false);
+    }
+  };
+
   // 📥 Plantilla oficial RutaComercio para importación de clientes
   const descargarPlantillaClientes = () => {
     const encabezados = [
@@ -1856,6 +1912,7 @@ useEffect(() => {
       "localidad",
       "provincia_estado",
       "pais",
+      "telefono",
       "email_preventista",
       "latitud",
       "longitud"
@@ -1868,6 +1925,7 @@ useEffect(() => {
       "Quilmes",
       "Buenos Aires",
       "Argentina",
+      "11 1234 5678",
       "vendedor@empresa.com",
       "",
       ""
@@ -1968,10 +2026,6 @@ useEffect(() => {
             p.empresa_id === perfilSupervisor.empresa_id
           );
 
-          if (!perfilPrev) {
-            throw new Error("No se pudo resolver el preventista.");
-          }
-
           const codigo = String(c.codigo_cliente || "").trim();
 
           // Seguridad contra reimportar el mismo código dentro de la misma empresa.
@@ -2004,7 +2058,8 @@ useEffect(() => {
             codigo_cliente: codigo,
             empresa: perfilSupervisor.empresa || "",
             empresa_id: perfilSupervisor.empresa_id,
-            preventista: perfilPrev.nombre || perfilPrev.email,
+            preventista: perfilPrev ? (perfilPrev.nombre || perfilPrev.email) : null,
+            telefono: String(c.telefono || "").trim() || null,
             direccion: String(c.direccion || "").trim(),
             latitud: lat,
             longitud: lng,
@@ -2142,7 +2197,7 @@ useEffect(() => {
   };
 
   useEffect(() => {
-    if (seccionActiva === "listasPrecios") {
+    if (seccionActiva === "listasPrecios" || seccionActiva === "clientes") {
       cargarListasPreciosEmpresa();
     }
   }, [seccionActiva, perfilSupervisor?.empresa_id, perfilSupervisor?.empresa]);
@@ -3289,10 +3344,17 @@ useEffect(() => {
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 <button
                   type="button"
-                  onClick={() => setMostrarAsignacionClientes(prev => !prev)}
+                  onClick={() => { setMostrarAsignacionClientes(prev => !prev); setMostrarAsignacionListaClientes(false); }}
                   style={{ backgroundColor: "#0f766e", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 14px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
                 >
-                  👤 ASIGNAR CLIENTES
+                  👤 ASIGNAR PREVENTISTA
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMostrarAsignacionListaClientes(prev => !prev); setMostrarAsignacionClientes(false); }}
+                  style={{ backgroundColor: "#7c3aed", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 14px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
+                >
+                  💲 ASIGNAR LISTA DE PRECIOS
                 </button>
                 <button
                   type="button"
@@ -3304,9 +3366,37 @@ useEffect(() => {
               </div>
             </div>
 
+            {mostrarAsignacionListaClientes && (
+              <div style={{ background: "#f5f3ff", border: "1px solid #c4b5fd", borderRadius: "10px", padding: "14px", marginBottom: "14px" }}>
+                <div style={{ fontSize: "15px", fontWeight: "900", color: "#5b21b6", marginBottom: "10px" }}>💲 Asignar lista de precios a clientes</div>
+                <div style={{ fontSize: "12px", color: "#6d28d9", marginBottom: "10px", fontWeight: "700" }}>1) Elegí la lista · 2) Seleccioná los clientes · 3) Tocá el botón violeta de abajo.</div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: "10px" }}>
+                  <select value={listaAsignacionClientesId} onChange={(e) => setListaAsignacionClientesId(e.target.value)} style={{ minWidth: "240px", padding: "9px", border: "1px solid #a78bfa", borderRadius: "8px", background: "#fff", fontWeight: "700" }}>
+                    <option value="">Elegir lista de precios...</option>
+                    {(listasPreciosEmpresa || []).filter(l => l.activo !== false).map(l => <option key={l.id} value={l.id}>{l.nombre || l.codigo || "Lista de precios"}{l.predeterminada ? " · Predeterminada" : ""}</option>)}
+                  </select>
+                  <button type="button" onClick={() => setClientesSeleccionadosLista((comercios || []).map(c => c.id))} style={{ padding: "9px 12px", border: "1px solid #7c3aed", borderRadius: "8px", background: "#fff", color: "#6d28d9", fontWeight: "800", cursor: "pointer" }}>☑ Seleccionar todos</button>
+                  <button type="button" onClick={() => setClientesSeleccionadosLista([])} style={{ padding: "9px 12px", border: "1px solid #94a3b8", borderRadius: "8px", background: "#fff", color: "#475569", fontWeight: "800", cursor: "pointer" }}>Limpiar</button>
+                  <strong style={{ fontSize: "12px", color: "#475569" }}>{clientesSeleccionadosLista.length} seleccionado(s)</strong>
+                </div>
+                <div style={{ maxHeight: "280px", overflowY: "auto", background: "#fff", border: "1px solid #ddd6fe", borderRadius: "8px", padding: "6px", marginBottom: "10px" }}>
+                  {(comercios || []).map(c => {
+                    const marcado = clientesSeleccionadosLista.some(id => String(id) === String(c.id));
+                    return <label key={c.id} style={{ display: "flex", alignItems: "center", gap: "9px", padding: "8px", borderBottom: "1px solid #f1f5f9", cursor: "pointer" }}>
+                      <input type="checkbox" checked={marcado} onChange={() => setClientesSeleccionadosLista(prev => marcado ? prev.filter(id => String(id) !== String(c.id)) : [...prev, c.id])} />
+                      <span style={{ flex: 1, fontSize: "12px", fontWeight: "800" }}>{c.nombre || "Cliente sin nombre"}</span>
+                    </label>;
+                  })}
+                </div>
+                <button type="button" disabled={guardandoAsignacionLista || !listaAsignacionClientesId || !clientesSeleccionadosLista.length} onClick={guardarAsignacionMasivaListaClientes} style={{ width: "100%", padding: "11px", border: "none", borderRadius: "8px", background: (!listaAsignacionClientesId || !clientesSeleccionadosLista.length) ? "#94a3b8" : "#7c3aed", color: "#fff", fontWeight: "900", cursor: (!listaAsignacionClientesId || !clientesSeleccionadosLista.length) ? "not-allowed" : "pointer" }}>
+                  {guardandoAsignacionLista ? "⏳ ASIGNANDO..." : `💲 ASIGNAR LISTA A ${clientesSeleccionadosLista.length} CLIENTE${clientesSeleccionadosLista.length === 1 ? "" : "S"}`}
+                </button>
+              </div>
+            )}
+
             {mostrarAsignacionClientes && (
               <div style={{ background: "#f0fdfa", border: "1px solid #99f6e4", borderRadius: "10px", padding: "14px", marginBottom: "14px" }}>
-                <div style={{ fontSize: "15px", fontWeight: "900", color: "#134e4a", marginBottom: "10px" }}>👤 Asignación de clientes</div>
+                <div style={{ fontSize: "15px", fontWeight: "900", color: "#134e4a", marginBottom: "10px" }}>👤 Asignar / reasignar preventista</div>
                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: "10px" }}>
                   <select
                     value={preventistaAsignacion}
