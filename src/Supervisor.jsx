@@ -276,7 +276,11 @@ const reactivarComercio = async (comercio) => {
   const [disponibilidadArticulos, setDisponibilidadArticulos] = useState([]);
   const [cargandoDisponibilidad, setCargandoDisponibilidad] = useState(false);
   const [busquedaDisponibilidad, setBusquedaDisponibilidad] = useState("");
-  const [seccionActiva, setSeccionActiva] = useState("monitoreo");
+  const [seccionActiva, setSeccionActiva] = useState(() => {
+    const seccionUrl = new URLSearchParams(window.location.search).get("seccion");
+    const seccionesValidas = ["monitoreo", "planificador", "stock", "disponibilidad", "clientes", "estadoCuenta", "listasPrecios", "solicitudes"];
+    return seccionesValidas.includes(seccionUrl) ? seccionUrl : "monitoreo";
+  });
   const [cargando, setCargando] = useState(true);
   const [perfiles, setPerfiles] = useState([]);
   const [perfilSupervisor, setPerfilSupervisor] = useState(null);
