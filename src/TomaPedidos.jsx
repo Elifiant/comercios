@@ -375,6 +375,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         return {
           pedido_id: pedidoId,
           producto_id: it.productoId,
+          color: it.color || null,
+          talle: String(it.talle || '').trim() || null,
           producto_nombre: nombreConDetalle,
           codigo: it.codigo,
           cantidad: Number(it.cant || 0),
