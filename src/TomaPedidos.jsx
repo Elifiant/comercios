@@ -176,26 +176,25 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
       if (!seguir) return;
     }
 
-    const yaExiste = itemsPedido.find(it => it.codigo === producto.codigo);
-    if (yaExiste) {
-      setItemsPedido(itemsPedido.map(it => it.codigo === producto.codigo ? { ...it, cant: it.cant + 1 } : it));
-    } else {
-      setItemsPedido([...itemsPedido, {
-        id: Date.now(),
-        productoId: producto.productoId,
-        codigo: producto.codigo,
-        marca: producto.marca,
-        nombre: producto.nombre,
-        precioLista: producto.precio,
-        bonif: 0,
-        ajusteTipo: 'normal',
-        ajustePct: 0,
-        talle: '',
-        cant: 1,
-        esNuevo: !!pedidoExistente,
-        nota: ''
-      }]);
-    }
+    // Cada agregado crea un renglón independiente.
+    // Esto permite pedir el mismo código con distintos talles (ej.: WELT001 talle 40 y talle 41).
+    setItemsPedido(prev => [{
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      productoId: producto.productoId,
+      codigo: producto.codigo,
+      marca: producto.marca,
+      nombre: producto.nombre,
+      precioLista: producto.precio,
+      bonif: 0,
+      ajusteTipo: 'normal',
+      ajustePct: 0,
+      color: '',
+      talle: '',
+      cant: 1,
+      confirmadoItem: false,
+      esNuevo: !!pedidoExistente,
+      nota: ''
+    }, ...prev]);
   };
 
   const modificarCant = (id, delta) => {
@@ -229,6 +228,43 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     setItemsPedido(itemsPedido.map(it => it.id === id ? { ...it, ...cambios } : it));
   };
 
+  const requiereVariante = (item) => {
+    const codigo = String(item?.codigo || '').toUpperCase();
+    const marca = String(item?.marca || '').toUpperCase();
+    return codigo.startsWith('WELT') || marca.includes('WELT');
+  };
+
+  const requiereTalle = requiereVariante;
+  const requiereColor = requiereVariante;
+
+  const _requiereTalleAnterior = (item) => {
+    const codigo = String(item?.codigo || '').toUpperCase();
+    const marca = String(item?.marca || '').toUpperCase();
+    return codigo.startsWith('WELT') || marca.includes('WELT');
+  };
+
+  const confirmarItem = (id) => {
+    const item = itemsPedido.find(it => it.id === id);
+    if (!item) return;
+
+    if (requiereColor(item) && !String(item.color || '').trim()) {
+      alert('Ingresá el color antes de confirmar este ítem.');
+      return;
+    }
+
+    if (requiereTalle(item) && !item.talle) {
+      alert('Elegí el talle antes de confirmar este ítem.');
+      return;
+    }
+
+    actualizarItem(id, { confirmadoItem: true });
+    setBusqueda('');
+  };
+
+  const editarItem = (id) => {
+    actualizarItem(id, { confirmadoItem: false });
+  };
+
   const ajusteFirmado = (it) => {
     if (it.ajusteTipo === 'recargo') return -Math.abs(Number(it.ajustePct || 0));
     if (it.ajusteTipo === 'descuento') return Math.abs(Number(it.ajustePct || 0));
@@ -243,6 +279,24 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   const confirmarPedido = async () => {
     if (itemsPedido.length === 0) {
       alert('Agregá al menos un artículo al pedido');
+      return;
+    }
+
+    const itemsSinConfirmar = itemsPedido.filter(it => it.confirmadoItem === false);
+    if (itemsSinConfirmar.length > 0) {
+      alert('Tenés ítems sin confirmar. Tocá “CONFIRMAR ÍTEM” en cada renglón antes de enviar el pedido.');
+      return;
+    }
+
+    const itemsSinColor = itemsPedido.filter(it => requiereColor(it) && !String(it.color || '').trim());
+    if (itemsSinColor.length > 0) {
+      alert('Hay artículos WELT sin color. Ingresá el color antes de confirmar el pedido.');
+      return;
+    }
+
+    const itemsSinTalle = itemsPedido.filter(it => requiereTalle(it) && !it.talle);
+    if (itemsSinTalle.length > 0) {
+      alert('Hay artículos WELT sin talle. Elegí el talle antes de confirmar el pedido.');
       return;
     }
 
@@ -314,8 +368,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         const ajuste = ajusteFirmado(it);
         const neto = bruto * (1 - ajuste / 100);
         const detalleAjuste = ajuste < 0 ? `Recargo ${Math.abs(ajuste)}%` : ajuste > 0 ? `Descuento ${ajuste}%` : 'Normal';
+        const detalleColor = it.color ? ` · Color ${it.color}` : '';
         const detalleTalle = it.talle ? ` · Talle ${it.talle}` : '';
-        const nombreConDetalle = `${it.nombre}${detalleTalle} · ${detalleAjuste}`;
+        const nombreConDetalle = `${it.nombre}${detalleColor}${detalleTalle} · ${detalleAjuste}`;
 
         return {
           pedido_id: pedidoId,
@@ -558,17 +613,18 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
                         <span style={{ fontSize: '11px', fontWeight: '800', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>{item.codigo}</span>
                         <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>{item.marca}</span>
-                        {item.esNuevo ? (
+                        {item.confirmadoItem === false ? (
                           <span style={{ fontSize: '10px', fontWeight: '800', backgroundColor: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px' }}>
-                            🔔 NUEVO / ANEXO
+                            ✏️ COMPLETAR ÍTEM
                           </span>
                         ) : (
                           <span style={{ fontSize: '10px', fontWeight: '800', backgroundColor: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '4px' }}>
-                            ✓ Confirmado
+                            ✓ ÍTEM CONFIRMADO
                           </span>
                         )}
                       </div>
                       <div style={{ fontSize: '14px', fontWeight: '800', margin: '4px 0' }}>{item.nombre}</div>
+                      {(item.color || item.talle) && <div style={{ fontSize: '12px', fontWeight: '800', color: '#2563eb' }}>{item.color ? `Color ${item.color}` : ''}{item.color && item.talle ? ' · ' : ''}{item.talle ? `Talle ${item.talle}` : ''}</div>}
                       {estadoProducto(item.productoId) === 'critico' && (
                         <div style={{ fontSize: '11px', fontWeight: '900', color: '#b45309', marginTop: '3px' }}>
                           🟠 STOCK CRÍTICO
@@ -587,40 +643,71 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
                   {/* Talle, ajuste comercial y cantidad */}
                   <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 90px', gap: '8px', alignItems: 'end', marginBottom: '10px' }}>
-                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
-                        Talle
-                        <select value={item.talle || ''} onChange={(e) => actualizarItem(item.id, { talle: e.target.value })} style={{ width: '100%', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.35fr) 64px minmax(0,1fr) 52px', gap: '5px', alignItems: 'end', marginBottom: '8px' }}>
+                      <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
+                        Color
+                        <select disabled={item.confirmadoItem !== false} value={item.color || ''} onChange={(e) => actualizarItem(item.id, { color: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 3px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
                           <option value="">Elegir</option>
+                          <option value="Negro">Negro</option>
+                          <option value="Marrón">Marrón</option>
+                          <option value="Blanco">Blanco</option>
+                          <option value="Gris Fresno">Gris Fresno</option>
+                        </select>
+                      </label>
+
+                      <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
+                        Talle
+                        <select disabled={item.confirmadoItem !== false} value={item.talle || ''} onChange={(e) => actualizarItem(item.id, { talle: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 2px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
+                          <option value="">--</option>
                           {Array.from({ length: 18 }, (_, i) => 33 + i).map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </label>
 
-                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                      <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
                         Ajuste
-                        <select value={item.ajusteTipo || 'normal'} onChange={(e) => actualizarItem(item.id, { ajusteTipo: e.target.value, ajustePct: e.target.value === 'normal' ? 0 : Number(item.ajustePct || 0), bonif: 0 })} style={{ width: '100%', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                        <select disabled={item.confirmadoItem !== false} value={item.ajusteTipo || 'normal'} onChange={(e) => actualizarItem(item.id, { ajusteTipo: e.target.value, ajustePct: e.target.value === 'normal' ? 0 : Number(item.ajustePct || 0), bonif: 0 })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 2px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
                           <option value="normal">Normal</option>
-                          <option value="descuento">Descuento</option>
+                          <option value="descuento">Desc.</option>
                           <option value="recargo">Recargo</option>
                         </select>
                       </label>
 
-                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                      <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
                         %
-                        <input type="number" min="0" step="1" disabled={(item.ajusteTipo || 'normal') === 'normal'} value={item.ajustePct || ''} onChange={(e) => actualizarItem(item.id, { ajustePct: Math.max(0, Number(e.target.value || 0)) })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                        <input type="number" min="0" step="1" disabled={item.confirmadoItem !== false || (item.ajusteTipo || 'normal') === 'normal'} value={item.ajustePct || ''} onChange={(e) => actualizarItem(item.id, { ajustePct: Math.max(0, Number(e.target.value || 0)) })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 3px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }} />
                       </label>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <button onClick={() => modificarCant(item.id, -1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>-</button>
+                        <button disabled={item.confirmadoItem !== false} onClick={() => modificarCant(item.id, -1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>-</button>
                         <span style={{ fontSize: '15px', fontWeight: '800', minWidth: '24px', textAlign: 'center' }}>{item.cant}</span>
-                        <button onClick={() => modificarCant(item.id, 1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #2563eb', background: '#2563eb', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>+</button>
+                        <button disabled={item.confirmadoItem !== false} onClick={() => modificarCant(item.id, 1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #2563eb', background: '#2563eb', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>+</button>
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>${subtotalItem.toLocaleString()}</div>
                         {ajusteItem !== 0 && <div style={{ fontSize: '10px', color: ajusteItem < 0 ? '#b45309' : '#15803d', fontWeight: '800' }}>{ajusteItem < 0 ? `+${Math.abs(ajusteItem)}% recargo` : `-${ajusteItem}% descuento`}</div>}
                       </div>
+                    </div>
+
+                    <div style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
+                      {item.confirmadoItem === false ? (
+                        <button
+                          type="button"
+                          onClick={() => confirmarItem(item.id)}
+                          style={{ flex: 1, padding: '10px 12px', borderRadius: '9px', border: 'none', background: '#16a34a', color: '#fff', fontSize: '12px', fontWeight: '900', cursor: 'pointer' }}
+                        >
+                          ✅ CONFIRMAR ÍTEM
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => editarItem(item.id)}
+                          style={{ flex: 1, padding: '9px 12px', borderRadius: '9px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#334155', fontSize: '12px', fontWeight: '800', cursor: 'pointer' }}
+                        >
+                          ✏️ Editar ítem
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -132,6 +132,7 @@ export default function MonitorPedidos() {
           return {
             id: p.id || ("PED-" + String(p.created_at || Date.now()).slice(-4)),
             empresa_id: p.empresa_id || perfil.empresa_id,
+            comercio_id: p.comercio_id || null,
             numeroVisible: String(p.numero_pedido || "").padStart(6, "0"),
             fechaCreacion: p.created_at || null,
             fechaCorta: p.created_at ? new Date(p.created_at).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" }) : "--/--",
@@ -270,6 +271,13 @@ export default function MonitorPedidos() {
   const [vistaPedidos, setVistaPedidos] = useState("Activos");
   const [busquedaHistorialCliente, setBusquedaHistorialCliente] = useState("");
   const [procesandoDeposito, setProcesandoDeposito] = useState(false);
+  const [eliminandoPedido, setEliminandoPedido] = useState(false);
+  const [editandoNvi, setEditandoNvi] = useState(false);
+  const [itemsEdicion, setItemsEdicion] = useState([]);
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  const [catalogoEdicion, setCatalogoEdicion] = useState([]);
+  const [busquedaEdicion, setBusquedaEdicion] = useState("");
+
   const [opcionesEnvio, setOpcionesEnvio] = useState({
     cliente: true,
     direccion: true,
@@ -1003,6 +1011,288 @@ export default function MonitorPedidos() {
     }
   };
 
+  const desarmarNombreItem = (item) => {
+    const original = String(item?.nombre || "");
+    const color = (original.match(/· Color ([^·]+)/i)?.[1] || "").trim();
+    const talle = (original.match(/· Talle ([^·]+)/i)?.[1] || "").trim();
+    const ajusteTxt = (original.match(/· (Normal|Recargo [\d.,]+%|Descuento [\d.,]+%)/i)?.[1] || "Normal").trim();
+    const base = original
+      .replace(/\s*· Color [^·]+/i, "")
+      .replace(/\s*· Talle [^·]+/i, "")
+      .replace(/\s*· (Normal|Recargo [\d.,]+%|Descuento [\d.,]+%)/i, "")
+      .trim();
+
+    let ajusteTipo = "normal";
+    let ajustePct = 0;
+    if (/^Recargo/i.test(ajusteTxt)) {
+      ajusteTipo = "recargo";
+      ajustePct = Number((ajusteTxt.match(/[\d.,]+/)?.[0] || "0").replace(",", "."));
+    } else if (/^Descuento/i.test(ajusteTxt)) {
+      ajusteTipo = "descuento";
+      ajustePct = Number((ajusteTxt.match(/[\d.,]+/)?.[0] || "0").replace(",", "."));
+    }
+
+    const neto = Number(item?.p_unit || 0);
+    const factor = ajusteTipo === "recargo"
+      ? (1 + ajustePct / 100)
+      : ajusteTipo === "descuento"
+        ? (1 - ajustePct / 100)
+        : 1;
+    const precioLista = factor > 0 ? neto / factor : neto;
+
+    return {
+      ...item,
+      nombreBase: base || original,
+      color,
+      talle,
+      ajusteTipo,
+      ajustePct,
+      precioLista: Number(precioLista || 0)
+    };
+  };
+
+  const cargarCatalogoParaEdicion = async (pedido) => {
+    if (!pedido?.comercio_id) {
+      setCatalogoEdicion([]);
+      return;
+    }
+
+    try {
+      const { data: asignaciones, error: e1 } = await supabase
+        .from("comercios_listas")
+        .select("lista_id")
+        .eq("comercio_id", pedido.comercio_id)
+        .eq("activo", true);
+      if (e1) throw e1;
+
+      const listaIds = [...new Set((asignaciones || []).map(x => x.lista_id).filter(Boolean))];
+      if (!listaIds.length) {
+        setCatalogoEdicion([]);
+        return;
+      }
+
+      const { data: renglones, error: e2 } = await supabase
+        .from("lista_productos")
+        .select("producto_id, codigo_lista, detalle_en_lista, precio")
+        .in("lista_id", listaIds)
+        .eq("activo", true);
+      if (e2) throw e2;
+
+      const productoIds = [...new Set((renglones || []).map(x => x.producto_id).filter(Boolean))];
+      const { data: productos, error: e3 } = await supabase
+        .from("productos")
+        .select("id, codigo_cge, nombre, marca, activo")
+        .in("id", productoIds);
+      if (e3) throw e3;
+
+      const porId = new Map((productos || []).map(p => [String(p.id), p]));
+      const normalizados = (renglones || []).map(r => {
+        const p = porId.get(String(r.producto_id));
+        if (!p || p.activo === false) return null;
+        return {
+          producto_id: r.producto_id,
+          codigo: r.codigo_lista || p.codigo_cge || "",
+          nombreBase: r.detalle_en_lista || p.nombre || "Artículo",
+          marca: p.marca || "",
+          precioLista: Number(r.precio || 0)
+        };
+      }).filter(Boolean);
+
+      setCatalogoEdicion(normalizados);
+    } catch (e) {
+      console.error("Error cargando catálogo para editar NVI:", e);
+      setCatalogoEdicion([]);
+    }
+  };
+
+  const iniciarEdicionNvi = async (pedido) => {
+    setItemsEdicion((pedido.items || []).map((it, idx) => ({
+      ...desarmarNombreItem(it),
+      _key: `${it.producto_id || it.codigo || "item"}-${idx}-${Date.now()}`
+    })));
+    setBusquedaEdicion("");
+    setEditandoNvi(true);
+    await cargarCatalogoParaEdicion(pedido);
+  };
+
+  const actualizarItemEdicion = (key, cambios) => {
+    setItemsEdicion(prev => prev.map(it => it._key === key ? { ...it, ...cambios } : it));
+  };
+
+  const quitarItemEdicion = (key) => {
+    setItemsEdicion(prev => prev.filter(it => it._key !== key));
+  };
+
+  const agregarProductoEdicion = (prod) => {
+    setItemsEdicion(prev => [{
+      _key: `nuevo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      producto_id: prod.producto_id,
+      codigo: prod.codigo,
+      nombreBase: prod.nombreBase,
+      marca: prod.marca,
+      cant: 1,
+      precioLista: Number(prod.precioLista || 0),
+      ajusteTipo: "normal",
+      ajustePct: 0,
+      color: "",
+      talle: ""
+    }, ...prev]);
+    setBusquedaEdicion("");
+  };
+
+  const calcularItemEdicion = (it) => {
+    const pct = Math.max(0, Number(it.ajustePct || 0));
+    const factor = it.ajusteTipo === "recargo"
+      ? 1 + pct / 100
+      : it.ajusteTipo === "descuento"
+        ? 1 - pct / 100
+        : 1;
+    const unitario = Number(it.precioLista || 0) * factor;
+    return {
+      unitario,
+      subtotal: unitario * Math.max(1, Number(it.cant || 1))
+    };
+  };
+
+  const guardarEdicionNvi = async () => {
+    if (!pedidoActivo?.id || guardandoEdicion) return;
+    if (!itemsEdicion.length) {
+      alert("La NVI debe conservar al menos un ítem. Si querés borrar todo el pedido, usá ELIMINAR NVI.");
+      return;
+    }
+
+    const weltIncompletos = itemsEdicion.filter(it => {
+      const esWelt = String(it.codigo || "").toUpperCase().startsWith("WELT") || String(it.marca || "").toUpperCase().includes("WELT");
+      return esWelt && (!String(it.color || "").trim() || !String(it.talle || "").trim());
+    });
+    if (weltIncompletos.length) {
+      alert("Hay artículos WELT sin color o talle.");
+      return;
+    }
+
+    try {
+      setGuardandoEdicion(true);
+
+      const payloadItems = itemsEdicion.map(it => {
+        const calc = calcularItemEdicion(it);
+        const pct = Math.max(0, Number(it.ajustePct || 0));
+        const ajusteTxt = it.ajusteTipo === "recargo"
+          ? `Recargo ${pct}%`
+          : it.ajusteTipo === "descuento"
+            ? `Descuento ${pct}%`
+            : "Normal";
+        const nombre = `${it.nombreBase}${it.color ? ` · Color ${it.color}` : ""}${it.talle ? ` · Talle ${it.talle}` : ""} · ${ajusteTxt}`;
+
+        return {
+          pedido_id: pedidoActivo.id,
+          producto_id: it.producto_id,
+          producto_nombre: nombre,
+          codigo: it.codigo || "",
+          cantidad: Math.max(1, Number(it.cant || 1)),
+          precio_unitario: Number(calc.unitario.toFixed(2)),
+          subtotal: Number(calc.subtotal.toFixed(2))
+        };
+      });
+
+      const totalNuevo = payloadItems.reduce((acc, it) => acc + Number(it.subtotal || 0), 0);
+      const subtotalBruto = itemsEdicion.reduce((acc, it) => acc + Number(it.precioLista || 0) * Math.max(1, Number(it.cant || 1)), 0);
+      const descuentoPorcentaje = subtotalBruto > 0
+        ? Number((((subtotalBruto - totalNuevo) / subtotalBruto) * 100).toFixed(4))
+        : 0;
+
+      const { error: borrarError } = await supabase
+        .from("pedido_items")
+        .delete()
+        .eq("pedido_id", pedidoActivo.id);
+      if (borrarError) throw borrarError;
+
+      const { error: insertarError } = await supabase
+        .from("pedido_items")
+        .insert(payloadItems);
+      if (insertarError) throw insertarError;
+
+      const { error: cabeceraError } = await supabase
+        .from("pedidos")
+        .update({
+          subtotal: Number(subtotalBruto.toFixed(2)),
+          descuento_porcentaje: descuentoPorcentaje,
+          total: Number(totalNuevo.toFixed(2))
+        })
+        .eq("id", pedidoActivo.id)
+        .eq("empresa_id", pedidoActivo.empresa_id || empresaIdActual);
+      if (cabeceraError) throw cabeceraError;
+
+      setEditandoNvi(false);
+      setItemsEdicion([]);
+      setBusquedaEdicion("");
+      setPedidoActivo(null);
+      await cargarPedidosReales();
+      alert(`✓ NVI #${pedidoActivo.numeroVisible} actualizada correctamente.`);
+    } catch (e) {
+      console.error("Error editando NVI:", e);
+      alert("❌ No se pudo guardar la edición completa. Recargá la pantalla antes de volver a intentar.");
+      await cargarPedidosReales();
+    } finally {
+      setGuardandoEdicion(false);
+    }
+  };
+
+  const eliminarNvi = async (pedido) => {
+    if (!pedido?.id || eliminandoPedido) return;
+
+    const confirmar = window.confirm(
+      `⚠️ ¿Eliminar definitivamente la NVI #${pedido.numeroVisible} de ${pedido.cliente}?\n\n` +
+      `Importe: $${Number(pedido.total || 0).toLocaleString("es-AR")}\n\n` +
+      `La NVI y sus renglones se eliminarán. Esta acción no se puede deshacer.`
+    );
+    if (!confirmar) return;
+
+    try {
+      setEliminandoPedido(true);
+
+      // IMPORTANTE:
+      // MonitorPedidos no modifica stock físico al crear una NVI. El stock físico
+      // se carga mediante confirmar_importacion_stock. Por eso NO sumamos stock
+      // aquí: hacerlo sin una operación de descuento registrada duplicaría existencias.
+      // Cuando el descuento automático de stock esté conectado a las ventas,
+      // la reversión debe hacerse en una única función SQL/transacción junto al borrado.
+
+      const { error: errorItems } = await supabase
+        .from("pedido_items")
+        .delete()
+        .eq("pedido_id", pedido.id);
+      if (errorItems) throw errorItems;
+
+      const { error: errorPedido } = await supabase
+        .from("pedidos")
+        .delete()
+        .eq("id", pedido.id)
+        .eq("empresa_id", pedido.empresa_id || empresaIdActual);
+      if (errorPedido) throw errorPedido;
+
+      try {
+        const pedidosLocales = JSON.parse(localStorage.getItem("pedidos_local") || "[]");
+        const restantes = pedidosLocales.filter(loc => String(loc.id) !== String(pedido.id));
+        localStorage.setItem("pedidos_local", JSON.stringify(restantes));
+      } catch (errorLocal) {
+        console.warn("No se pudo limpiar el respaldo local del pedido eliminado:", errorLocal);
+      }
+
+      setPedidos(prev => prev.filter(p => String(p.id) !== String(pedido.id)));
+      setPedidoActivo(null);
+      setMostrarExportacion(false);
+
+      alert(`🗑️ NVI #${pedido.numeroVisible} eliminada correctamente.`);
+    } catch (e) {
+      console.error("Error eliminando NVI:", e);
+      alert("❌ No se pudo eliminar la NVI. No se modificó el stock físico.");
+      // Recargamos desde Supabase para no dejar la pantalla mostrando un estado parcial.
+      await cargarPedidosReales();
+    } finally {
+      setEliminandoPedido(false);
+    }
+  };
+
   const estadoAbono = (() => {
     const nombreEmpresa = String(datosCabecera?.empresa || "").trim().toUpperCase();
     if (nombreEmpresa === "DEMO S.A." || nombreEmpresa === "DEMO SA") return { texto: "Cuenta DEMO", color: "#2563eb", icono: "🧪" };
@@ -1582,6 +1872,119 @@ export default function MonitorPedidos() {
                   </div>
                 </div>
 
+                {!editandoNvi ? (
+                  <button
+                    type="button"
+                    onClick={() => iniciarEdicionNvi(pedidoActivo)}
+                    style={{ width: "100%", marginBottom: "8px", background: "#fff7ed", color: "#9a3412", border: "1px solid #fdba74", padding: "10px", borderRadius: "6px", fontSize: "12px", fontWeight: "900", cursor: "pointer" }}
+                  >
+                    ✏️ EDITAR NVI
+                  </button>
+                ) : (
+                  <div style={{ marginBottom: "10px", padding: "10px", border: "2px solid #fdba74", borderRadius: "8px", background: "#fff7ed" }}>
+                    <div style={{ fontSize: "12px", fontWeight: "900", color: "#9a3412", marginBottom: "8px" }}>
+                      ✏️ Editando NVI #{pedidoActivo.numeroVisible}
+                    </div>
+
+                    <input
+                      value={busquedaEdicion}
+                      onChange={(e) => setBusquedaEdicion(e.target.value)}
+                      placeholder="Agregar artículo por código o nombre..."
+                      style={{ width: "100%", boxSizing: "border-box", padding: "8px", border: "1px solid #fdba74", borderRadius: "6px", marginBottom: "6px" }}
+                    />
+
+                    {busquedaEdicion.trim() && (
+                      <div style={{ maxHeight: "150px", overflowY: "auto", background: "#fff", border: "1px solid #fed7aa", borderRadius: "6px", marginBottom: "8px" }}>
+                        {catalogoEdicion
+                          .filter(p => `${p.codigo} ${p.nombreBase} ${p.marca}`.toLowerCase().includes(busquedaEdicion.toLowerCase()))
+                          .slice(0, 12)
+                          .map((p, idx) => (
+                            <button
+                              key={`${p.producto_id}-${idx}`}
+                              type="button"
+                              onClick={() => agregarProductoEdicion(p)}
+                              style={{ width: "100%", textAlign: "left", padding: "7px", border: "none", borderBottom: "1px solid #f1f5f9", background: "#fff", cursor: "pointer", fontSize: "11px" }}
+                            >
+                              <strong>{p.codigo}</strong> · {p.nombreBase} · ${Number(p.precioLista || 0).toLocaleString("es-AR")}
+                            </button>
+                          ))}
+                      </div>
+                    )}
+
+                    {itemsEdicion.map((it) => {
+                      const esWelt = String(it.codigo || "").toUpperCase().startsWith("WELT") || String(it.marca || "").toUpperCase().includes("WELT");
+                      const calc = calcularItemEdicion(it);
+                      return (
+                        <div key={it._key} style={{ background: "#fff", border: "1px solid #fed7aa", borderRadius: "7px", padding: "7px", marginBottom: "6px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "6px", alignItems: "center" }}>
+                            <div style={{ minWidth: 0, fontSize: "11px", fontWeight: "800" }}>
+                              {it.codigo ? `${it.codigo} · ` : ""}{it.nombreBase}
+                            </div>
+                            <button type="button" onClick={() => quitarItemEdicion(it._key)} style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontSize: "16px" }}>🗑️</button>
+                          </div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: esWelt ? "62px 1fr 64px 78px 52px" : "62px 1fr 78px 52px", gap: "4px", alignItems: "end", marginTop: "6px" }}>
+                            <label style={{ fontSize: "9px", color: "#64748b" }}>
+                              Cant.
+                              <input type="number" min="1" value={it.cant} onChange={(e) => actualizarItemEdicion(it._key, { cant: Math.max(1, Number(e.target.value || 1)) })} style={{ width: "100%", boxSizing: "border-box", padding: "5px 3px" }} />
+                            </label>
+
+                            {esWelt && (
+                              <label style={{ fontSize: "9px", color: "#64748b" }}>
+                                Color
+                                <select value={it.color || ""} onChange={(e) => actualizarItemEdicion(it._key, { color: e.target.value })} style={{ width: "100%", boxSizing: "border-box", padding: "5px 2px" }}>
+                                  <option value="">Elegir</option>
+                                  <option value="Negro">Negro</option>
+                                  <option value="Marrón">Marrón</option>
+                                  <option value="Blanco">Blanco</option>
+                                  <option value="Gris Fresno">Gris Fresno</option>
+                                </select>
+                              </label>
+                            )}
+
+                            {esWelt && (
+                              <label style={{ fontSize: "9px", color: "#64748b" }}>
+                                Talle
+                                <select value={it.talle || ""} onChange={(e) => actualizarItemEdicion(it._key, { talle: e.target.value })} style={{ width: "100%", boxSizing: "border-box", padding: "5px 2px" }}>
+                                  <option value="">--</option>
+                                  {Array.from({ length: 18 }, (_, i) => 33 + i).map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </label>
+                            )}
+
+                            <label style={{ fontSize: "9px", color: "#64748b" }}>
+                              Ajuste
+                              <select value={it.ajusteTipo || "normal"} onChange={(e) => actualizarItemEdicion(it._key, { ajusteTipo: e.target.value, ajustePct: e.target.value === "normal" ? 0 : it.ajustePct })} style={{ width: "100%", boxSizing: "border-box", padding: "5px 2px" }}>
+                                <option value="normal">Normal</option>
+                                <option value="descuento">Desc.</option>
+                                <option value="recargo">Recargo</option>
+                              </select>
+                            </label>
+
+                            <label style={{ fontSize: "9px", color: "#64748b" }}>
+                              %
+                              <input type="number" min="0" disabled={(it.ajusteTipo || "normal") === "normal"} value={it.ajustePct || ""} onChange={(e) => actualizarItemEdicion(it._key, { ajustePct: Math.max(0, Number(e.target.value || 0)) })} style={{ width: "100%", boxSizing: "border-box", padding: "5px 2px" }} />
+                            </label>
+                          </div>
+
+                          <div style={{ marginTop: "5px", textAlign: "right", fontSize: "11px", fontWeight: "900" }}>
+                            ${Number(calc.subtotal || 0).toLocaleString("es-AR")}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginTop: "8px" }}>
+                      <button type="button" onClick={() => { setEditandoNvi(false); setItemsEdicion([]); setBusquedaEdicion(""); }} disabled={guardandoEdicion} style={{ padding: "9px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: "800", cursor: "pointer" }}>
+                        CANCELAR
+                      </button>
+                      <button type="button" onClick={guardarEdicionNvi} disabled={guardandoEdicion} style={{ padding: "9px", borderRadius: "6px", border: "none", background: "#d97706", color: "#fff", fontWeight: "900", cursor: guardandoEdicion ? "wait" : "pointer" }}>
+                        {guardandoEdicion ? "Guardando..." : "💾 GUARDAR CAMBIOS"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <button
                   onClick={() => setMostrarExportacion(v => !v)}
                   style={{ width: "100%", background: "#2563eb", color: "#fff", border: "none", padding: "10px", borderRadius: "6px", fontSize: "12px", fontWeight: "800", cursor: "pointer" }}
@@ -1647,6 +2050,26 @@ export default function MonitorPedidos() {
                     📚 Pedido archivado como pasado a depósito. Podés volver a imprimirlo o reenviarlo por cualquiera de las vías disponibles.
                   </div>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => eliminarNvi(pedidoActivo)}
+                  disabled={eliminandoPedido || procesandoDeposito}
+                  style={{
+                    width: "100%",
+                    marginTop: "10px",
+                    background: "#fff",
+                    color: "#dc2626",
+                    border: "1px solid #fca5a5",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "900",
+                    cursor: (eliminandoPedido || procesandoDeposito) ? "wait" : "pointer"
+                  }}
+                >
+                  {eliminandoPedido ? "Eliminando..." : "🗑️ ELIMINAR NVI"}
+                </button>
               </div>
             )}
           </div>

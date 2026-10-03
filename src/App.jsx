@@ -652,6 +652,48 @@ useEffect(() => {
 
 
    const [perfil, setPerfil] = useState(null);
+   const [ventasHoy, setVentasHoy] = useState(0);
+
+   // 📊 MÉTRICAS REALES DEL PREVENTISTA
+   // Venta hoy se calcula por la fecha real de la NVI, sin importar el día de visita del cliente.
+   const cargarVentasHoy = async (perfilOverride = null) => {
+     try {
+       const pActivo = perfilOverride || perfil || perfilProp || null;
+       if (!pActivo?.nombre) {
+         setVentasHoy(0);
+         return;
+       }
+
+       const ahora = new Date();
+       const inicioHoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+       const inicioManana = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 1);
+
+       let query = supabase
+         .from("pedidos")
+         .select("total, fecha")
+         .gte("fecha", inicioHoy.toISOString())
+         .lt("fecha", inicioManana.toISOString())
+         .eq("preventista", pActivo.nombre);
+
+       if (pActivo.empresa_id) {
+         query = query.eq("empresa_id", pActivo.empresa_id);
+       } else if (pActivo.empresa) {
+         query = query.ilike("empresa", pActivo.empresa.trim());
+       }
+
+       const { data, error } = await query;
+       if (error) throw error;
+
+       const totalHoy = (data || []).reduce(
+         (acum, pedido) => acum + Number(pedido.total || 0),
+         0
+       );
+       setVentasHoy(totalHoy);
+     } catch (error) {
+       console.error("Error cargando ventas de hoy:", error);
+       setVentasHoy(0);
+     }
+   };
   const cargarComercios = async (perfilOverride) => {
     try {
       setCargando(true);
@@ -687,6 +729,22 @@ useEffect(() => {
       cargarComercios(perfilProp);
     }
   }, [sesionProp, perfilProp]);
+
+  useEffect(() => {
+    const pActivo = perfil || perfilProp || null;
+    if (!pActivo?.nombre) return;
+
+    cargarVentasHoy(pActivo);
+
+    const refrescarMetricas = () => cargarVentasHoy(pActivo);
+    window.addEventListener("focus", refrescarMetricas);
+    document.addEventListener("visibilitychange", refrescarMetricas);
+
+    return () => {
+      window.removeEventListener("focus", refrescarMetricas);
+      document.removeEventListener("visibilitychange", refrescarMetricas);
+    };
+  }, [perfil, perfilProp]);
 
 
   const cargarPerfil = async (session) => {
@@ -1137,6 +1195,33 @@ obtenerUbicacionFresca()
 
   const visitasRealizadasHoy = idsVisitadosHoy.size;
   const visitasProgramadasHoy = comerciosProgramadosHoy.length;
+
+  // Efectividad real: comercios visitados hoy que terminaron en Venta/Pedido
+  // dividido por los comercios efectivamente visitados hoy.
+  const visitasRealesHoy = (visitasMapa || []).filter(
+    (v) =>
+      v?.fecha &&
+      new Date(v.fecha) >= inicioHoyMetricas &&
+      v?.comercio_id
+  );
+  const comerciosVisitadosRealesHoy = new Set(
+    visitasRealesHoy.map((v) => String(v.comercio_id))
+  );
+  const comerciosConVentaHoy = new Set(
+    visitasRealesHoy
+      .filter((v) => {
+        const resultado = String(v?.resultado || "").toLowerCase();
+        return resultado.includes("venta") || resultado.includes("pedido");
+      })
+      .map((v) => String(v.comercio_id))
+  );
+  const efectividadHoy = comerciosVisitadosRealesHoy.size > 0
+    ? Math.round((comerciosConVentaHoy.size / comerciosVisitadosRealesHoy.size) * 100)
+    : 0;
+
+  const ventaHoyTexto = `$ ${Number(ventasHoy || 0).toLocaleString("es-AR", {
+    maximumFractionDigits: 0,
+  })}`;
 
   // 🧭 PRÓXIMO DESTINO SEGÚN LA HOJA DE RUTA DEL SUPERVISOR
   // El listado general sigue ordenado por cercanía. Esta tarjeta usa orden_visita.
@@ -1941,6 +2026,7 @@ useEffect(() => {
             : "🚀 Pedido enviado correctamente.\n\nNo requiere aprobación del supervisor."
         );
         await registrarVisitaCheckIn(comercioSeleccionado, "Venta");
+        await cargarVentasHoy(perfil || perfilProp || null);
       }}
     />
   );
@@ -3096,14 +3182,14 @@ onChange={(e) =>
           <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Venta Hoy</div>
             <div style={{ fontSize: "19px", lineHeight: 1.05, fontWeight: "900", color: "#4ade80", marginTop: "1px" }}>
-              {jornadaActiva ? "$ 148.5K" : "$ 0"}
+              {ventaHoyTexto}
             </div>
           </div>
 
           <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Efectividad</div>
             <div style={{ fontSize: "20px", lineHeight: 1.05, fontWeight: "900", color: "#facc15", marginTop: "1px" }}>
-              {jornadaActiva ? "44%" : "0%"}
+              {`${efectividadHoy}%`}
             </div>
           </div>
         </div>
