@@ -12,6 +12,10 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const [tomandoPedido, setTomandoPedido] = useState(false);
   const [viendoHistorial, setViendoHistorial] = useState(false);
   const [vista, setVista] = useState("inicio");
+  const [ventas, setVentas] = useState([]);
+  const [cargandoVentas, setCargandoVentas] = useState(false);
+  const [busquedaVentas, setBusquedaVentas] = useState("");
+  const [nuevaVentaDesdeVentas, setNuevaVentaDesdeVentas] = useState(false);
   const [guardandoCliente, setGuardandoCliente] = useState(false);
   const [listasCliente, setListasCliente] = useState([]);
   const [listaParaAsignar, setListaParaAsignar] = useState("");
@@ -281,8 +285,33 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     } finally { setCargandoListas(false); }
   };
 
+  const cargarVentas = async () => {
+    if (!perfil?.empresa_id) return;
+    setCargandoVentas(true);
+    try {
+      const { data, error } = await supabase
+        .from("pedidos")
+        .select("*")
+        .eq("empresa_id", perfil.empresa_id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setVentas(data || []);
+    } catch (error) {
+      console.error("Simplex - error cargando ventas:", error);
+      setVentas([]);
+    } finally {
+      setCargandoVentas(false);
+    }
+  };
+
   const abrirModulo = (modulo) => {
     if (modulo === "clientes") return setVista("clientes");
+    if (modulo === "ventas") {
+      setVista("ventas");
+      cargarVentas();
+      return;
+    }
     if (modulo === "productos") {
       setVista("productos");
       cargarListasPrecios();
@@ -528,16 +557,142 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       <TomaPedidos
         comercio={comercioSeleccionado}
         usuario={perfil}
-        onVolver={() => setTomandoPedido(false)}
+        onVolver={() => {
+          setTomandoPedido(false);
+          if (nuevaVentaDesdeVentas) {
+            setNuevaVentaDesdeVentas(false);
+            setComercioSeleccionado(null);
+            setVista("ventas");
+            cargarVentas();
+          }
+        }}
         onPedidoGuardado={() => {
           setTomandoPedido(false);
           alert("🚀 Pedido enviado correctamente.");
+
+          if (nuevaVentaDesdeVentas) {
+            setNuevaVentaDesdeVentas(false);
+            setComercioSeleccionado(null);
+            setVista("ventas");
+            cargarVentas();
+            return;
+          }
+
           // Fuerza recarga del resumen sin registrar una visita:
           const actual = comercioSeleccionado;
           setComercioSeleccionado(null);
           setTimeout(() => setComercioSeleccionado(actual), 0);
         }}
       />
+    );
+  }
+
+  if (vista === "ventas") {
+    const q = busquedaVentas.trim().toLowerCase();
+    const ventasFiltradas = ventas.filter((p) => {
+      if (!q) return true;
+      return [
+        p.numero_pedido,
+        p.cliente,
+        p.comercio_nombre,
+        p.preventista,
+        p.vendedor,
+        p.estado,
+      ].some(v => String(v || "").toLowerCase().includes(q));
+    });
+
+    const totalVentas = ventasFiltradas.reduce((acc, p) => acc + Number(p.total || p.total_pedido || 0), 0);
+
+    return (
+      <div style={estilos.pagina}>
+        <header style={estilos.header}>
+          <button type="button" onClick={() => setVista("inicio")} style={estilos.botonVolver}>← Inicio</button>
+          <div style={estilos.marcaChica}>RutaComercio Simplex · V1.2</div>
+        </header>
+
+        <main style={estilos.contenedorFicha}>
+          <h2 style={{ marginTop: 0, marginBottom: "6px" }}>🧾 Ventas</h2>
+          <div style={{ color: "#94a3b8", fontSize: "12px", marginBottom: "14px" }}>
+            NVI e historial general de tu empresa.
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setNuevaVentaDesdeVentas(true);
+              setComercioSeleccionado(null);
+              setBusqueda("");
+              setVista("clientes");
+            }}
+            style={{ ...estilos.botonGrande, backgroundColor: "#16a34a", marginBottom: "10px" }}
+          >
+            ➕ NUEVA VENTA
+          </button>
+
+          <input
+            type="text"
+            value={busquedaVentas}
+            onChange={(e) => setBusquedaVentas(e.target.value)}
+            placeholder="🔎 Buscar por NVI, cliente, vendedor o estado..."
+            style={estilos.buscador}
+          />
+
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "8px",
+            marginBottom: "12px"
+          }}>
+            <div style={estilos.panelSeccion}>
+              <div style={{ fontSize: "11px", color: "#94a3b8" }}>NVI</div>
+              <div style={{ fontSize: "22px", fontWeight: 950 }}>{ventasFiltradas.length}</div>
+            </div>
+            <div style={estilos.panelSeccion}>
+              <div style={{ fontSize: "11px", color: "#94a3b8" }}>TOTAL</div>
+              <div style={{ fontSize: "22px", fontWeight: 950 }}>
+                ${totalVentas.toLocaleString("es-AR")}
+              </div>
+            </div>
+          </div>
+
+          {cargandoVentas ? (
+            <div style={estilos.mensaje}>⏳ Cargando ventas...</div>
+          ) : ventasFiltradas.length === 0 ? (
+            <div style={estilos.mensaje}>Todavía no hay NVI para mostrar.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {ventasFiltradas.map((p) => {
+                const numero = String(p.numero_pedido || "").padStart(6, "0");
+                const fecha = p.created_at
+                  ? new Date(p.created_at).toLocaleString("es-AR", {
+                      day: "2-digit", month: "2-digit", year: "2-digit",
+                      hour: "2-digit", minute: "2-digit"
+                    })
+                  : "Sin fecha";
+                const cliente = p.cliente || p.comercio_nombre || `Comercio #${p.comercio_id || ""}`;
+                const total = Number(p.total || p.total_pedido || 0);
+                return (
+                  <div key={p.id} style={estilos.panelSeccion}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontSize: "14px", fontWeight: 950 }}>
+                          NVI #{numero || "—"} · {cliente}
+                        </div>
+                        <div style={{ marginTop: "4px", fontSize: "11px", color: "#94a3b8" }}>
+                          {fecha} · {p.estado || "Ingresado"}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: "16px", fontWeight: 950, whiteSpace: "nowrap" }}>
+                        ${total.toLocaleString("es-AR")}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      </div>
     );
   }
 
@@ -855,15 +1010,63 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
         ) : (
           <>
             <div style={estilos.barraModulo}>
-              <button type="button" onClick={() => setVista("inicio")} style={estilos.botonVolver}>← Inicio</button>
-              <strong>🏪 Clientes</strong>
+              <button
+                type="button"
+                onClick={() => {
+                  if (nuevaVentaDesdeVentas) {
+                    setNuevaVentaDesdeVentas(false);
+                    setVista("ventas");
+                  } else {
+                    setVista("inicio");
+                  }
+                }}
+                style={estilos.botonVolver}
+              >
+                {nuevaVentaDesdeVentas ? "← Ventas" : "← Inicio"}
+              </button>
+              <strong>{nuevaVentaDesdeVentas ? "🧾 Elegir cliente para la venta" : "🏪 Clientes"}</strong>
             </div>
-            <button type="button" onClick={() => setVista("nuevoCliente")}
-              style={{...estilos.botonGrande, backgroundColor:"#16a34a"}}>
-              ➕ NUEVO CLIENTE
+            {nuevaVentaDesdeVentas && (
+              <div style={{
+                backgroundColor:"#eff6ff",
+                border:"2px solid #2563eb",
+                borderRadius:"14px",
+                padding:"12px",
+                marginBottom:"10px"
+              }}>
+                <div style={{fontSize:"12px",fontWeight:900,color:"#1d4ed8",marginBottom:"7px"}}>
+                  🔎 ¿A quién le vas a vender?
+                </div>
+                <input
+                  autoFocus
+                  type="text"
+                  value={busqueda}
+                  onChange={(e)=>setBusqueda(e.target.value)}
+                  placeholder="Buscar cliente por nombre, dirección o teléfono..."
+                  style={{...estilos.buscador, margin:0, backgroundColor:"#fff", border:"2px solid #93c5fd", fontSize:"15px"}}
+                />
+              </div>
+            )}
+            {!nuevaVentaDesdeVentas && (
+              <input type="text" value={busqueda} onChange={(e)=>setBusqueda(e.target.value)}
+                placeholder="🔎 Buscar cliente por nombre, dirección, teléfono o ID..." style={estilos.buscador}/>
+            )}
+            <button
+              type="button"
+              onClick={() => setVista("nuevoCliente")}
+              style={{
+                ...estilos.botonGrande,
+                backgroundColor:"#f8fafc",
+                color:"#475569",
+                border:"1px solid #cbd5e1",
+                boxShadow:"none",
+                padding:"9px 12px",
+                fontSize:"12px",
+                marginBottom:"10px"
+              }}
+            >
+              ➕ Nuevo cliente
             </button>
-            <input type="text" value={busqueda} onChange={(e)=>setBusqueda(e.target.value)}
-              placeholder="🔎 Buscar cliente por nombre, dirección, teléfono o ID..." style={estilos.buscador}/>
             <div style={estilos.contador}>
               {cargando ? "Cargando clientes..." : `${clientesFiltrados.length} cliente${clientesFiltrados.length === 1 ? "" : "s"}`}
             </div>
@@ -876,7 +1079,15 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             ) : (
               <div style={estilos.lista}>
                 {clientesFiltrados.map(c => (
-                  <button key={c.id} type="button" onClick={()=>setComercioSeleccionado(c)} style={estilos.cliente}>
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setComercioSeleccionado(c);
+                      if (nuevaVentaDesdeVentas) setTomandoPedido(true);
+                    }}
+                    style={estilos.cliente}
+                  >
                     <div style={{fontWeight:900,fontSize:"15px",color:"#fff"}}>🏪 {c.nombre || `Comercio #${c.id}`}</div>
                     <div style={{color:"#94a3b8",fontSize:"12px",marginTop:"4px"}}>
                       {c.direccion || "Sin dirección"}{c.rubro ? ` · ${c.rubro}` : ""}

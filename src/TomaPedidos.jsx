@@ -16,13 +16,15 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   const [guardando, setGuardando] = useState(false);
   const [exitoGuardado, setExitoGuardado] = useState(false);
 
-  // Catálogo real: toma las listas activas asignadas al comercio y trae sus productos/precios desde Supabase.
+  // Catálogo real: UNA lista base por empresa, igual para todos los clientes.
+  // Ya no depende de asignaciones comercio -> lista.
   useEffect(() => {
     let cancelado = false;
 
     const cargarCatalogo = async () => {
+      const empresaId = usuario?.empresa_id || comercio?.empresa_id || null;
 
-      if (!comercio?.id) {
+      if (!empresaId) {
         setCatalogo([]);
         setCargandoCatalogo(false);
         return;
@@ -32,37 +34,44 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
       setErrorCatalogo('');
 
       try {
-        const { data: asignaciones, error: errAsignaciones } = await supabase
-          .from('comercios_listas')
-          .select('lista_id')
-          .eq('comercio_id', comercio.id)
-          .eq('activo', true);
+        // Tomamos la lista activa de la empresa. Si existe una predeterminada,
+        // queda primera; si no, usamos la primera lista activa disponible.
+        const { data: listas, error: errListas } = await supabase
+          .from('listas_precios')
+          .select('id, nombre, codigo, predeterminada, activo')
+          .eq('empresa_id', empresaId)
+          .eq('activo', true)
+          .order('predeterminada', { ascending: false })
+          .order('created_at', { ascending: true })
+          .limit(1);
 
-        if (errAsignaciones) throw errAsignaciones;
+        if (errListas) throw errListas;
 
-        const listaIds = [...new Set((asignaciones || []).map(x => x.lista_id).filter(Boolean))];
-        if (listaIds.length === 0) {
-          if (!cancelado) setCatalogo([]);
+        const listaBase = (listas || [])[0];
+
+        if (!listaBase?.id) {
+          if (!cancelado) {
+            setCatalogo([]);
+            setErrorCatalogo('La empresa todavía no tiene una lista de precios activa.');
+          }
           return;
         }
 
-        // Primero traemos los renglones/precios de las listas asignadas.
         const { data: renglones, error: errRenglones } = await supabase
           .from('lista_productos')
           .select('id, producto_id, lista_id, codigo_lista, detalle_en_lista, precio')
-          .in('lista_id', listaIds)
+          .eq('lista_id', listaBase.id)
           .eq('activo', true);
 
         if (errRenglones) throw errRenglones;
 
         const productoIds = [...new Set((renglones || []).map(r => r.producto_id).filter(Boolean))];
+
         if (productoIds.length === 0) {
           if (!cancelado) setCatalogo([]);
           return;
         }
 
-        // Después traemos los datos de los productos en una consulta separada.
-        // Así no dependemos de que Supabase resuelva automáticamente la relación anidada.
         const { data: productos, error: errProductos } = await supabase
           .from('productos')
           .select('id, codigo_cge, nombre, marca, descripcion, activo, usa_color, usa_talle')
@@ -89,14 +98,12 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
           }))
           .sort((a, b) => a.codigo.localeCompare(b.codigo, 'es', { numeric: true }));
 
-        if (!cancelado) {
-          setCatalogo(normalizados);
-        }
+        if (!cancelado) setCatalogo(normalizados);
       } catch (err) {
-        console.error('Error cargando catálogo del comercio:', err);
+        console.error('Error cargando catálogo de la empresa:', err);
         if (!cancelado) {
           setCatalogo([]);
-          setErrorCatalogo(err.message || 'No se pudo cargar la lista de precios');
+          setErrorCatalogo(err.message || 'No se pudo cargar la lista de precios de la empresa');
         }
       } finally {
         if (!cancelado) setCargandoCatalogo(false);
@@ -105,7 +112,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
     cargarCatalogo();
     return () => { cancelado = true; };
-  }, [comercio?.id]);
+  }, [usuario?.empresa_id, comercio?.empresa_id]);
 
   // Disponibilidad operativa definida por el Supervisor para esta empresa.
   useEffect(() => {
@@ -180,25 +187,25 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
     // Cada agregado crea un renglón independiente.
     // Esto permite pedir el mismo código con distintos talles (ej.: WELT001 talle 40 y talle 41).
-    setItemsPedido(prev => [{
+    setItemsPedido(prev => [...prev, {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       productoId: producto.productoId,
       codigo: producto.codigo,
       marca: producto.marca,
       nombre: producto.nombre,
       precioLista: producto.precio,
+      usaColor: producto.usaColor === true,
+      usaTalle: producto.usaTalle === true,
       bonif: 0,
       ajusteTipo: 'normal',
       ajustePct: 0,
       color: '',
       talle: '',
-      usaColor: producto.usaColor === true,
-      usaTalle: producto.usaTalle === true,
       cant: 1,
       confirmadoItem: false,
       esNuevo: !!pedidoExistente,
       nota: ''
-    }, ...prev]);
+    }]);
   };
 
   const modificarCant = (id, delta) => {
@@ -232,6 +239,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     setItemsPedido(itemsPedido.map(it => it.id === id ? { ...it, ...cambios } : it));
   };
 
+  // Las variantes dependen del producto, no de la marca ni del código.
   const requiereColor = (item) => item?.usaColor === true;
   const requiereTalle = (item) => item?.usaTalle === true;
 
@@ -282,13 +290,13 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
     const itemsSinColor = itemsPedido.filter(it => requiereColor(it) && !String(it.color || '').trim());
     if (itemsSinColor.length > 0) {
-      alert('Hay artículos que requieren color y todavía no lo tienen.');
+      alert('Hay artículos que requieren color y todavía no fue elegido. Ingresá el color antes de confirmar el pedido.');
       return;
     }
 
     const itemsSinTalle = itemsPedido.filter(it => requiereTalle(it) && !it.talle);
     if (itemsSinTalle.length > 0) {
-      alert('Hay artículos que requieren talle y todavía no lo tienen.');
+      alert('Hay artículos que requieren talle y todavía no fue elegido. Elegí el talle antes de confirmar el pedido.');
       return;
     }
 
@@ -367,8 +375,6 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         return {
           pedido_id: pedidoId,
           producto_id: it.productoId,
-          color: requiereColor(it) ? (String(it.color || '').trim() || null) : null,
-          talle: requiereTalle(it) ? (String(it.talle || '').trim() || null) : null,
           producto_nombre: nombreConDetalle,
           codigo: it.codigo,
           cantidad: Number(it.cant || 0),
@@ -514,13 +520,13 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             ))}
           </div>
           {cargandoCatalogo && (
-            <div style={{ marginTop: '8px', fontSize: '12px', color: '#64748b' }}>⏳ Cargando lista de precios del cliente...</div>
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#64748b' }}>⏳ Cargando lista de precios de la empresa...</div>
           )}
           {!cargandoCatalogo && errorCatalogo && (
             <div style={{ marginTop: '8px', fontSize: '12px', color: '#dc2626', fontWeight: '700' }}>❌ {errorCatalogo}</div>
           )}
           {!cargandoCatalogo && !errorCatalogo && catalogo.length === 0 && (
-            <div style={{ marginTop: '8px', fontSize: '12px', color: '#d97706', fontWeight: '700' }}>⚠️ Este cliente no tiene una lista de precios activa asignada.</div>
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#d97706', fontWeight: '700' }}>⚠️ La empresa todavía no tiene artículos con precio cargados.</div>
           )}
           {!cargandoCatalogo && catalogo.length > 0 && (
             <div style={{ marginTop: '8px', fontSize: '12px', color: '#16a34a', fontWeight: '700' }}>✅ {catalogo.length} artículos disponibles</div>
@@ -637,42 +643,45 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
                   {/* Talle, ajuste comercial y cantidad */}
                   <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: `${requiereColor(item) ? 'minmax(0,1.35fr) ' : ''}${requiereTalle(item) ? '64px ' : ''}minmax(0,1fr) 52px`, gap: '5px', alignItems: 'end', marginBottom: '8px' }}>
-                      {requiereColor(item) && (
-                        <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
-                        Color
-                        <select disabled={item.confirmadoItem !== false} value={item.color || ''} onChange={(e) => actualizarItem(item.id, { color: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 3px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
-                          <option value="">Elegir</option>
-                          <option value="Negro">Negro</option>
-                          <option value="Marrón">Marrón</option>
-                          <option value="Blanco">Blanco</option>
-                          <option value="Gris Fresno">Gris Fresno</option>
-                        </select>
-                      </label>
-                      )}
+                    {(requiereColor(item) || requiereTalle(item)) && (
+                      <div style={{ display: 'grid', gridTemplateColumns: requiereColor(item) && requiereTalle(item) ? '1fr 110px' : '1fr', gap: '8px', alignItems: 'end', marginBottom: '8px' }}>
+                        {requiereColor(item) && (
+                          <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                            Color
+                            <select disabled={item.confirmadoItem !== false} value={item.color || ''} onChange={(e) => actualizarItem(item.id, { color: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '3px', padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}>
+                              <option value="">Elegir</option>
+                              <option value="Negro">Negro</option>
+                              <option value="Marrón">Marrón</option>
+                              <option value="Blanco">Blanco</option>
+                              <option value="Gris Fresno">Gris Fresno</option>
+                            </select>
+                          </label>
+                        )}
+                        {requiereTalle(item) && (
+                          <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                            Talle
+                            <select disabled={item.confirmadoItem !== false} value={item.talle || ''} onChange={(e) => actualizarItem(item.id, { talle: e.target.value })} style={{ width: '100%', marginTop: '3px', padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}>
+                              <option value="">Elegir</option>
+                              {Array.from({ length: 18 }, (_, i) => 33 + i).map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </label>
+                        )}
+                      </div>
+                    )}
 
-                      {requiereTalle(item) && (
-                        <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
-                        Talle
-                        <select disabled={item.confirmadoItem !== false} value={item.talle || ''} onChange={(e) => actualizarItem(item.id, { talle: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 2px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
-                          <option value="">--</option>
-                          {Array.from({ length: 18 }, (_, i) => 33 + i).map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </label>
-                      )}
-
-                      <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: '8px', alignItems: 'end', marginBottom: '10px' }}>
+                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
                         Ajuste
-                        <select disabled={item.confirmadoItem !== false} value={item.ajusteTipo || 'normal'} onChange={(e) => actualizarItem(item.id, { ajusteTipo: e.target.value, ajustePct: e.target.value === 'normal' ? 0 : Number(item.ajustePct || 0), bonif: 0 })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 2px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }}>
+                        <select disabled={item.confirmadoItem !== false} value={item.ajusteTipo || 'normal'} onChange={(e) => actualizarItem(item.id, { ajusteTipo: e.target.value, ajustePct: e.target.value === 'normal' ? 0 : Number(item.ajustePct || 0), bonif: 0 })} style={{ width: '100%', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                           <option value="normal">Normal</option>
-                          <option value="descuento">Desc.</option>
+                          <option value="descuento">Descuento</option>
                           <option value="recargo">Recargo</option>
                         </select>
                       </label>
 
-                      <label style={{ minWidth: 0, fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
+                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
                         %
-                        <input type="number" min="0" step="1" disabled={item.confirmadoItem !== false || (item.ajusteTipo || 'normal') === 'normal'} value={item.ajustePct || ''} onChange={(e) => actualizarItem(item.id, { ajustePct: Math.max(0, Number(e.target.value || 0)) })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', marginTop: '2px', padding: '5px 3px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '11px' }} />
+                        <input type="number" min="0" step="1" disabled={item.confirmadoItem !== false || (item.ajusteTipo || 'normal') === 'normal'} value={item.ajustePct || ''} onChange={(e) => actualizarItem(item.id, { ajustePct: Math.max(0, Number(e.target.value || 0)) })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
                       </label>
                     </div>
 
