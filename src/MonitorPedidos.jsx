@@ -1052,21 +1052,26 @@ export default function MonitorPedidos() {
   };
 
   const cargarCatalogoParaEdicion = async (pedido) => {
-    if (!pedido?.comercio_id) {
+    const empresaId = pedido?.empresa_id || empresaIdActual;
+    if (!empresaId) {
       setCatalogoEdicion([]);
       return;
     }
 
     try {
-      const { data: asignaciones, error: e1 } = await supabase
-        .from("comercios_listas")
-        .select("lista_id")
-        .eq("comercio_id", pedido.comercio_id)
-        .eq("activo", true);
+      // Una sola referencia de precios por empresa.
+      // La edición de una NVI ya NO depende de listas asignadas al comercio.
+      const { data: listas, error: e1 } = await supabase
+        .from("listas_precios")
+        .select("id, predeterminada")
+        .eq("empresa_id", empresaId)
+        .eq("activo", true)
+        .order("predeterminada", { ascending: false });
+
       if (e1) throw e1;
 
-      const listaIds = [...new Set((asignaciones || []).map(x => x.lista_id).filter(Boolean))];
-      if (!listaIds.length) {
+      const listaBase = (listas || []).find(l => l.predeterminada) || (listas || [])[0];
+      if (!listaBase?.id) {
         setCatalogoEdicion([]);
         return;
       }
@@ -1074,15 +1079,22 @@ export default function MonitorPedidos() {
       const { data: renglones, error: e2 } = await supabase
         .from("lista_productos")
         .select("producto_id, codigo_lista, detalle_en_lista, precio")
-        .in("lista_id", listaIds)
+        .eq("lista_id", listaBase.id)
         .eq("activo", true);
+
       if (e2) throw e2;
 
       const productoIds = [...new Set((renglones || []).map(x => x.producto_id).filter(Boolean))];
+      if (!productoIds.length) {
+        setCatalogoEdicion([]);
+        return;
+      }
+
       const { data: productos, error: e3 } = await supabase
         .from("productos")
         .select("id, codigo_cge, nombre, marca, activo")
         .in("id", productoIds);
+
       if (e3) throw e3;
 
       const porId = new Map((productos || []).map(p => [String(p.id), p]));
