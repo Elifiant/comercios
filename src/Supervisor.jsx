@@ -382,11 +382,23 @@ const reactivarComercio = async (comercio) => {
   const [vistaPreviaListaPrecios, setVistaPreviaListaPrecios] = useState(null);
   const inputArchivoListaPreciosRef = useRef(null);
 
-  // 📦 Stock — importación Excel del supervisor (primera etapa: lectura y vista previa)
+  // 📦 Stock físico — importación real con equivalencias, variantes y confirmación
   const [archivoStockNombre, setArchivoStockNombre] = useState("");
-  const [vistaPreviaStock, setVistaPreviaStock] = useState(null);
+  const [stockVistaPrevia, setStockVistaPrevia] = useState([]);
+  const [stockColumnas, setStockColumnas] = useState({ codigo: "", descripcion: "", color: "", talle: "", stock: "" });
+  const [stockEncabezadoFila, setStockEncabezadoFila] = useState(null);
+  const [stockMensaje, setStockMensaje] = useState("");
   const [cargandoStockArchivo, setCargandoStockArchivo] = useState(false);
-  const inputArchivoStockRef = useRef(null);
+  const [stockReconocidos, setStockReconocidos] = useState([]);
+  const [stockNoReconocidos, setStockNoReconocidos] = useState([]);
+  const [analizandoStock, setAnalizandoStock] = useState(false);
+  const [productosStockCatalogo, setProductosStockCatalogo] = useState([]);
+  const [productosNuevosPropuestos, setProductosNuevosPropuestos] = useState([]);
+  const [confirmandoImportacionStock, setConfirmandoImportacionStock] = useState(false);
+  const [stockActualEmpresa, setStockActualEmpresa] = useState([]);
+  const [cargandoStockActual, setCargandoStockActual] = useState(false);
+  const [busquedaStockActual, setBusquedaStockActual] = useState("");
+
 
   const descargarPlantillaStock = () => {
     try {
@@ -406,105 +418,475 @@ const reactivarComercio = async (comercio) => {
     }
   };
 
-  const leerArchivoStock = async (event) => {
+  const normalizarTextoStock = (valor) =>
+    String(valor ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+  const elegirColumnaStock = (encabezados, candidatos) => {
+    const normalizados = encabezados.map(h => ({ original: h, normal: normalizarTextoStock(h) }));
+    for (const candidato of candidatos) {
+      const exacta = normalizados.find(h => h.normal === candidato);
+      if (exacta) return exacta.original;
+    }
+    for (const candidato of candidatos) {
+      const parcial = normalizados.find(h => h.normal.includes(candidato));
+      if (parcial) return parcial.original;
+    }
+    return "";
+  };
+
+  const cargarCatalogoProductosStock = async () => {
+    if (!perfilSupervisor?.empresa_id) return;
+
+    try {
+      // Para Stock físico combinamos dos fuentes de ESTA empresa:
+      // 1) productos presentes en sus listas activas;
+      // 2) productos que ya tienen stock/equivalencias importadas.
+      // Así un producto recién creado por una importación aparece aunque todavía
+      // no haya sido incorporado a una lista de precios.
+      const { data: listasEmpresa, error: errorListas } = await supabase
+        .from("listas_precios")
+        .select("id")
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .eq("activo", true);
+
+      if (errorListas) throw errorListas;
+
+      const idsListas = (listasEmpresa || []).map(l => l.id).filter(Boolean);
+      let filasLista = [];
+
+      if (idsListas.length > 0) {
+        const { data, error } = await supabase
+          .from("lista_productos")
+          .select("producto_id, codigo_lista")
+          .in("lista_id", idsListas)
+          .eq("activo", true);
+
+        if (error) throw error;
+        filasLista = data || [];
+      }
+
+      // stock_informado sí está aislado por empresa_id y contiene los productos
+      // creados/reconocidos por las importaciones de stock.
+      const { data: filasStockEmpresa, error: errorStockEmpresa } = await supabase
+        .from("stock_informado")
+        .select("producto_id")
+        .eq("empresa_id", perfilSupervisor.empresa_id);
+
+      if (errorStockEmpresa) throw errorStockEmpresa;
+
+      const idsProductos = [...new Set([
+        ...(filasLista || []).map(x => x.producto_id),
+        ...(filasStockEmpresa || []).map(x => x.producto_id),
+      ].filter(Boolean))];
+
+      if (idsProductos.length === 0) {
+        setProductosStockCatalogo([]);
+        return;
+      }
+
+      const { data: productosEmpresa, error: errorProductos } = await supabase
+        .from("productos")
+        .select("id, codigo_cge, nombre, marca, presentacion, descripcion, activo, usa_color, usa_talle")
+        .in("id", idsProductos)
+        .eq("activo", true)
+        .order("nombre", { ascending: true });
+
+      if (errorProductos) throw errorProductos;
+
+      const codigosListaPorProducto = {};
+      (filasLista || []).forEach(f => {
+        const pid = String(f.producto_id || "");
+        const codigo = String(f.codigo_lista || "").trim();
+        if (pid && codigo && !codigosListaPorProducto[pid]) {
+          codigosListaPorProducto[pid] = codigo;
+        }
+      });
+
+      setProductosStockCatalogo(
+        (productosEmpresa || []).map(p => ({
+          ...p,
+          codigo_lista: codigosListaPorProducto[String(p.id)] || "",
+        }))
+      );
+    } catch (error) {
+      console.error("Error cargando catálogo de stock de la empresa:", error);
+      setProductosStockCatalogo([]);
+    }
+  };
+
+  const cargarStockActualEmpresa = async () => {
+    if (!perfilSupervisor?.empresa_id) return;
+    try {
+      setCargandoStockActual(true);
+      const { data, error } = await supabase
+        .from("stock_informado")
+        .select("id,empresa_id,importacion_id,producto_id,codigo_archivo,descripcion_archivo,stock_informado,fecha_actualizacion,color,talle")
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .order("fecha_actualizacion", { ascending: false })
+        .order("id", { ascending: false });
+      if (error) throw error;
+
+      // stock_informado conserva historial. Para mostrar el inventario actual,
+      // dejamos solo la fila más reciente de cada producto + color + talle.
+      const ultimos = new Map();
+      (data || []).forEach((fila) => {
+        const clave = [
+          String(fila.producto_id || ""),
+          String(fila.color || "").trim().toLowerCase(),
+          String(fila.talle || "").trim().toLowerCase(),
+        ].join("|");
+        if (!ultimos.has(clave)) ultimos.set(clave, fila);
+      });
+
+      const filasActuales = [...ultimos.values()];
+
+      // Enriquecer cada fila de stock con su producto real. De esta manera la
+      // visualización NO depende de que el producto esté o no en una lista de precios.
+      const idsConStock = [...new Set(filasActuales.map(f => f.producto_id).filter(Boolean))];
+      let productosPorId = new Map();
+      if (idsConStock.length > 0) {
+        const { data: productosStock, error: errorProductosStock } = await supabase
+          .from("productos")
+          .select("id,codigo_cge,nombre,descripcion,marca,presentacion,activo,usa_color,usa_talle")
+          .in("id", idsConStock);
+        if (errorProductosStock) throw errorProductosStock;
+        productosPorId = new Map((productosStock || []).map(p => [String(p.id), p]));
+      }
+
+      setStockActualEmpresa(
+        filasActuales.map(fila => ({
+          ...fila,
+          __producto: productosPorId.get(String(fila.producto_id || "")) || null,
+        }))
+      );
+    } catch (error) {
+      console.error("Error cargando stock actual de la empresa:", error);
+      setStockActualEmpresa([]);
+    } finally {
+      setCargandoStockActual(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!perfilSupervisor?.empresa_id) return;
+    cargarCatalogoProductosStock();
+    cargarStockActualEmpresa();
+    const timerStockActual = setInterval(cargarStockActualEmpresa, 5000);
+    return () => clearInterval(timerStockActual);
+  }, [perfilSupervisor?.empresa_id]);
+
+  const textoProductoStock = (p) => {
+    if (!p) return "";
+    const codigo = p.codigo_cge || p.cge || p.codigo || "";
+    const nombre = p.nombre || p.descripcion || p.producto || "Producto";
+    const marca = p.marca || "";
+    const presentacion = p.presentacion || "";
+    return [codigo, nombre, marca, presentacion].filter(Boolean).join(" · ");
+  };
+
+  const analizarProductosStock = async (filas, columnas) => {
+    if (!perfilSupervisor?.empresa_id) throw new Error("No se pudo identificar la empresa del Supervisor.");
+
+    setAnalizandoStock(true);
+    setStockReconocidos([]);
+    setStockNoReconocidos([]);
+
+    try {
+      const { data: equivalencias, error: errorEquivalencias } = await supabase
+        .from("stock_equivalencias")
+        .select("codigo_archivo, producto_id, descripcion_archivo")
+        .eq("empresa_id", perfilSupervisor?.empresa_id);
+
+      if (errorEquivalencias) throw errorEquivalencias;
+
+      const idsProductos = [...new Set((equivalencias || []).map(e => e.producto_id).filter(Boolean))];
+      let productosPorId = {};
+
+      if (idsProductos.length > 0) {
+        const { data: productos, error: errorProductos } = await supabase
+          .from("productos")
+          .select("id, codigo_cge, nombre, marca, presentacion")
+          .in("id", idsProductos);
+
+        if (errorProductos) throw errorProductos;
+        (productos || []).forEach(p => {
+          productosPorId[String(p.id)] = p;
+        });
+      }
+
+      const equivalenciaPorCodigo = {};
+      (equivalencias || []).forEach(e => {
+        equivalenciaPorCodigo[String(e.codigo_archivo ?? "").trim()] = e;
+      });
+
+      const reconocidos = [];
+      const noReconocidos = [];
+
+      filas.forEach(fila => {
+        const codigoArchivo = columnas.codigo ? String(fila[columnas.codigo] ?? "").trim() : "";
+        const descripcionArchivo = columnas.descripcion ? String(fila[columnas.descripcion] ?? "").trim() : "";
+        const color = columnas.color ? String(fila[columnas.color] ?? "").trim() : "";
+        const talle = columnas.talle ? String(fila[columnas.talle] ?? "").trim() : "";
+        const stockOriginal = columnas.stock ? fila[columnas.stock] : "";
+        const stockTexto = String(stockOriginal ?? "").trim();
+        const stockLimpio = stockTexto
+          .replace(/\s/g, "")
+          .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+          .replace(",", ".");
+        const stockNumero = stockTexto === "" ? NaN : Number(stockLimpio);
+
+        const base = {
+          fila: fila.__fila,
+          codigoArchivo,
+          descripcionArchivo,
+          color,
+          talle,
+          stock: Number.isFinite(stockNumero) ? stockNumero : null,
+        };
+
+        const equivalencia = equivalenciaPorCodigo[codigoArchivo];
+        const idsPermitidosEmpresa = new Set(productosStockCatalogo.map(p => String(p.id)));
+
+        let producto = equivalencia ? productosPorId[String(equivalencia.producto_id)] : null;
+
+        // Si nunca fue importado por Stock, también reconocer el código usado
+        // en las listas de precios de ESTA empresa (ej. WELT001).
+        if (!producto) {
+          const codigoBuscado = codigoArchivo.toUpperCase();
+          producto = productosStockCatalogo.find(p =>
+            String(p.codigo_lista || "").trim().toUpperCase() === codigoBuscado ||
+            String(p.codigo_cge || "").trim().toUpperCase() === codigoBuscado
+          ) || null;
+        }
+
+        const productoPermitido = producto && idsPermitidosEmpresa.has(String(producto.id));
+
+        if (productoPermitido) {
+          reconocidos.push({
+            ...base,
+            producto_id: producto.id,
+            codigo_cge: producto.codigo_cge || "",
+            producto_nombre: producto.nombre || "",
+            marca: producto.marca || "",
+            presentacion: producto.presentacion || "",
+          });
+        } else {
+          noReconocidos.push(base);
+        }
+      });
+
+      setStockReconocidos(reconocidos);
+      setStockNoReconocidos(noReconocidos);
+
+      // Los no reconocidos se muestran como PROPUESTAS de producto nuevo.
+      // No se crea nada todavía y NO se consume ningún CGE.
+      setProductosNuevosPropuestos(
+        noReconocidos.map(item => ({
+          codigo_archivo: item.codigoArchivo,
+          nombre: item.descripcionArchivo,
+          color: item.color || "",
+          talle: item.talle || "",
+          stock: item.stock,
+          crear: true,
+        }))
+      );
+
+      return { reconocidos, noReconocidos };
+    } finally {
+      setAnalizandoStock(false);
+    }
+  };
+
+  const cargarArchivoStock = async (event) => {
     const archivo = event.target.files?.[0];
+    event.target.value = "";
     if (!archivo) return;
+
     setCargandoStockArchivo(true);
+    setStockMensaje("");
+    setStockVistaPrevia([]);
+    setStockReconocidos([]);
+    setStockNoReconocidos([]);
+    setProductosNuevosPropuestos([]);
     setArchivoStockNombre(archivo.name);
-    setVistaPreviaStock(null);
 
     try {
       const buffer = await archivo.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
-      const hoja = workbook.Sheets[workbook.SheetNames[0]];
-      const matriz = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: "", raw: false });
-      const filasUtiles = matriz
-        .map((fila, indice) => ({ fila, numeroOriginal: indice + 1 }))
-        .filter(x => Array.isArray(x.fila) && x.fila.some(c => String(c ?? "").trim() !== ""));
+      // IMPORTANTE: raw:true toma el valor REAL guardado en la celda.
+      // Así ignoramos formatos visuales de Excel (moneda, región, "$", etc.)
+      // que pueden hacer que un stock numérico termine leído como texto.
+      const libro = XLSX.read(buffer, { type: "array", cellNF: false, cellText: false });
+      const hoja = libro.Sheets[libro.SheetNames[0]];
+      const matriz = XLSX.utils.sheet_to_json(hoja, {
+        header: 1,
+        defval: "",
+        raw: true,
+      });
 
-      if (!filasUtiles.length) throw new Error("La planilla está vacía.");
+      const filasNoVacias = matriz
+        .map((fila, indice) => ({ fila, indice }))
+        .filter(x => (x.fila || []).some(celda => String(celda ?? "").trim() !== ""));
 
-      const normalizar = v => String(v ?? "").trim().toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const aliasCodigo = ["codigo", "cod", "sku", "codigo producto", "codigo articulo", "codigo_articulo"];
-      const aliasDescripcion = ["articulo", "producto", "descripcion", "nombre", "detalle"];
-      const aliasStock = ["stock", "existencia", "existencias", "cantidad", "disponible", "saldo"];
-      const aliasColor = ["color", "colores", "variante", "tono"];
-      const aliasTalle = ["talle", "talla", "numero", "nro", "medida"];
+      if (filasNoVacias.length === 0) throw new Error("La planilla está vacía.");
 
-      let encabezadoIndex = -1;
-      let colCodigo = -1;
-      let colDescripcion = -1;
-      let colStock = -1;
-      let colColor = -1;
-      let colTalle = -1;
+      const palabrasClave = ["codigo", "código", "articulo", "artículo", "descripcion", "descripción", "stock", "existencia", "cantidad"];
+      let encabezado = filasNoVacias[0];
 
-      for (let i = 0; i < Math.min(filasUtiles.length, 20); i += 1) {
-        const cols = filasUtiles[i].fila.map(normalizar);
-        const buscar = aliases => cols.findIndex(c => aliases.includes(c));
-        const c = buscar(aliasCodigo);
-        const d = buscar(aliasDescripcion);
-        const st = buscar(aliasStock);
-        if (c >= 0 && d >= 0 && st >= 0) {
-          encabezadoIndex = i;
-          colCodigo = c;
-          colDescripcion = d;
-          colStock = st;
-          colColor = buscar(aliasColor);
-          colTalle = buscar(aliasTalle);
+      for (const candidata of filasNoVacias.slice(0, 20)) {
+        const textoFila = (candidata.fila || []).map(normalizarTextoStock);
+        const coincidencias = palabrasClave.filter(p => textoFila.some(c => c.includes(normalizarTextoStock(p)))).length;
+        if (coincidencias >= 2) {
+          encabezado = candidata;
           break;
         }
       }
 
-      if (encabezadoIndex < 0) {
-        throw new Error("No pude detectar automáticamente las columnas Código, Artículo/Descripción y Stock.");
+      const encabezados = (encabezado.fila || []).map((v, i) => String(v ?? "").trim() || `Columna ${i + 1}`);
+      const codigo =
+        elegirColumnaStock(encabezados, ["codigo producto", "código producto"]) ||
+        elegirColumnaStock(encabezados, ["codigo", "cod", "sku", "id"]);
+      const descripcion = elegirColumnaStock(encabezados, ["articulo", "producto", "descripcion", "nombre"]);
+      const color = elegirColumnaStock(encabezados, ["color", "colour"]);
+      const talle = elegirColumnaStock(encabezados, ["talle", "talla", "size"]);
+      const stock = elegirColumnaStock(encabezados, ["stock fisico", "stock físico", "stock", "existencia", "existencias", "cantidad", "saldo"]);
+
+      setStockColumnas({ codigo, descripcion, color, talle, stock });
+      setStockEncabezadoFila(encabezado.indice + 1);
+
+      const datos = matriz.slice(encabezado.indice + 1)
+        .filter(fila => (fila || []).some(celda => String(celda ?? "").trim() !== ""))
+        .map((fila, idx) => {
+          const obj = {};
+          encabezados.forEach((h, colIdx) => { obj[h] = fila?.[colIdx] ?? ""; });
+          return { __fila: encabezado.indice + 2 + idx, ...obj };
+        });
+
+      const datosConStock = stock
+        ? datos.filter(fila => String(fila[stock] ?? "").trim() !== "")
+        : datos;
+
+      setStockVistaPrevia(datosConStock);
+
+      if (!codigo || !stock) {
+        setStockMensaje("⚠️ La planilla se leyó, pero no pude detectar automáticamente Código y Stock. Todavía NO se modificó el stock.");
+      } else {
+        const resultado = await analizarProductosStock(datosConStock, { codigo, descripcion, color, talle, stock });
+        setStockMensaje(
+          `✓ Planilla leída. ${resultado.reconocidos.length} reconocidos · ${resultado.noReconocidos.length} sin reconocer. Todavía NO se modificó el stock.`
+        );
       }
-
-      const encabezado = filasUtiles[encabezadoIndex];
-      const datos = filasUtiles.slice(encabezadoIndex + 1);
-      const validos = [];
-      const invalidos = [];
-
-      datos.forEach(x => {
-        const codigo = String(x.fila[colCodigo] ?? "").trim();
-        const descripcion = String(x.fila[colDescripcion] ?? "").trim();
-        const color = colColor >= 0 ? String(x.fila[colColor] ?? "").trim() : "";
-        const talle = colTalle >= 0 ? String(x.fila[colTalle] ?? "").trim() : "";
-        let stockTexto = String(x.fila[colStock] ?? "").trim().replace(/\s/g, "");
-        if (stockTexto.includes(",") && !stockTexto.includes(".")) stockTexto = stockTexto.replace(",", ".");
-        stockTexto = stockTexto.replace(/[^0-9.-]/g, "");
-        const stock = Number(stockTexto);
-        if (!codigo && !descripcion) return;
-        if (!codigo || !Number.isFinite(stock) || stock < 0) {
-          invalidos.push({ fila: x.numeroOriginal, codigo, descripcion, stock: x.fila[colStock], motivo: !codigo ? "Código vacío" : "Stock inválido" });
-          return;
-        }
-        validos.push({ fila: x.numeroOriginal, codigo, descripcion, color, talle, stock });
-      });
-
-      setVistaPreviaStock({
-        hoja: workbook.SheetNames[0],
-        filaEncabezado: encabezado.numeroOriginal,
-        encabezados: encabezado.fila,
-        nombresColumnas: {
-          codigo: String(encabezado.fila[colCodigo] ?? "Código"),
-          descripcion: String(encabezado.fila[colDescripcion] ?? "Descripción"),
-          color: colColor >= 0 ? String(encabezado.fila[colColor] ?? "Color") : null,
-          talle: colTalle >= 0 ? String(encabezado.fila[colTalle] ?? "Talle") : null,
-          stock: String(encabezado.fila[colStock] ?? "Stock"),
-        },
-        validos, invalidos, totalFilas: validos.length + invalidos.length,
-      });
     } catch (error) {
-      console.error("Error leyendo archivo de stock:", error);
-      alert("❌ No se pudo leer la planilla de stock: " + (error.message || "Formato inválido"));
-      setArchivoStockNombre("");
-      setVistaPreviaStock(null);
+      console.error("Error leyendo planilla de stock:", error);
+      setStockMensaje("❌ No se pudo leer la planilla: " + (error.message || "Error desconocido"));
     } finally {
       setCargandoStockArchivo(false);
-      event.target.value = "";
     }
   };
+
+
+  const confirmarImportacionStock = async () => {
+    if (!archivoStockNombre || confirmandoImportacionStock) return;
+
+    const nuevosSeleccionados = productosNuevosPropuestos.filter(p => p.crear);
+    const totalAProcesar = stockReconocidos.length + nuevosSeleccionados.length;
+
+    if (totalAProcesar === 0) {
+      alert("No hay productos seleccionados para importar.");
+      return;
+    }
+
+    const invalidos = [
+      ...stockReconocidos.map(p => ({ codigo: p.codigoArchivo, stock: p.stock })),
+      ...nuevosSeleccionados.map(p => ({ codigo: p.codigo_archivo, stock: p.stock })),
+    ].filter(p => p.stock === null || !Number.isFinite(Number(p.stock)) || Number(p.stock) < 0);
+
+    if (invalidos.length > 0) {
+      alert(`Hay ${invalidos.length} producto(s) con stock inválido. Corregí la planilla antes de confirmar.`);
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `¿Confirmás la importación de stock?\n\n` +
+      `Archivo: ${archivoStockNombre}\n` +
+      `Productos ya reconocidos: ${stockReconocidos.length}\n` +
+      `Productos nuevos a crear: ${nuevosSeleccionados.length}\n` +
+      `Total a procesar: ${totalAProcesar}\n\n` +
+      `Los productos nuevos recibirán un CGE y el stock físico quedará actualizado con las cantidades de esta planilla.`
+    );
+    if (!confirmar) return;
+
+    const productosParaImportar = [
+      ...stockReconocidos.map(item => ({
+        codigo_archivo: item.codigoArchivo,
+        producto_id: item.producto_id || null,
+        descripcion: item.descripcionArchivo || item.producto_nombre || "",
+        color: item.color || null,
+        talle: item.talle || null,
+        stock: Number(item.stock),
+        crear: false,
+      })),
+      ...nuevosSeleccionados.map(item => ({
+        codigo_archivo: item.codigo_archivo,
+        descripcion: item.nombre || "",
+        color: item.color || null,
+        talle: item.talle || null,
+        stock: Number(item.stock),
+        crear: true,
+      })),
+    ];
+
+    try {
+      setConfirmandoImportacionStock(true);
+      setStockMensaje("⏳ Confirmando importación y guardando stock...");
+
+      const { data, error } = await supabase.rpc("confirmar_importacion_stock", {
+        p_nombre_archivo: archivoStockNombre,
+        p_productos: productosParaImportar,
+      });
+
+      if (error) throw error;
+      if (!data?.ok) throw new Error("El sistema no confirmó la importación.");
+
+      setStockMensaje(
+        `✅ Importación confirmada. ${Number(data.total_procesado || 0)} productos procesados · ` +
+        `${Number(data.productos_creados || 0)} nuevos creados · stock actualizado correctamente.`
+      );
+
+      setStockVistaPrevia([]);
+      setStockReconocidos([]);
+      setStockNoReconocidos([]);
+      setProductosNuevosPropuestos([]);
+      setStockColumnas({ codigo: "", descripcion: "", color: "", talle: "", stock: "" });
+      setStockEncabezadoFila(null);
+      setArchivoStockNombre("");
+
+      await cargarCatalogoProductosStock();
+      await cargarStockActualEmpresa();
+
+      alert(
+        `✅ IMPORTACIÓN COMPLETADA\n\n` +
+        `Productos procesados: ${Number(data.total_procesado || 0)}\n` +
+        `Productos nuevos creados: ${Number(data.productos_creados || 0)}\n` +
+        `Stock actualizado: ${Number(data.stock_actualizado || 0)}`
+      );
+    } catch (error) {
+      console.error("Error confirmando importación de stock:", error);
+      setStockMensaje("❌ No se pudo confirmar la importación: " + (error.message || "Error desconocido"));
+      alert("❌ No se guardó la importación. " + (error.message || "Error desconocido"));
+    } finally {
+      setConfirmandoImportacionStock(false);
+    }
+  };
+
+
+  useEffect(() => {
+    if (perfilSupervisor?.empresa_id) cargarCatalogoProductosStock();
+  }, [perfilSupervisor?.empresa_id]);
+
   const [listasPreciosEmpresa, setListasPreciosEmpresa] = useState([]);
   const [listaPreciosSeleccionadaId, setListaPreciosSeleccionadaId] = useState("");
   const [cargandoListasPrecios, setCargandoListasPrecios] = useState(false);
@@ -3214,65 +3596,332 @@ useEffect(() => {
             perfiles={perfiles}
           />
                   ) : seccionActiva === "stock" ? (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#0f172a" }}>📊 Stock</h2>
-                <p style={{ margin: "3px 0 0", fontSize: "12px", color: "#64748b" }}>
-                  Cargá la planilla de stock de la empresa. Esta primera etapa solo lee y muestra una vista previa: todavía no modifica Supabase.
-                </p>
-              </div>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                <button type="button" onClick={descargarPlantillaStock} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 20px", fontSize: "14px", fontWeight: "900", cursor: "pointer", boxShadow: "0 4px 12px rgba(22,163,74,0.20)" }}>
-                  📥 DESCARGAR PLANTILLA OFICIAL
-                </button>
-                <button type="button" onClick={() => inputArchivoStockRef.current?.click()} disabled={cargandoStockArchivo} style={{ background: cargandoStockArchivo ? "#94a3b8" : "#2563eb", color: "#fff", border: "none", borderRadius: "10px", padding: "14px 20px", fontSize: "14px", fontWeight: "900", cursor: cargandoStockArchivo ? "wait" : "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.25)" }}>
-                  {cargandoStockArchivo ? "LEYENDO..." : "📤 CARGAR EXCEL DE STOCK"}
-                </button>
-              </div>
-              <input ref={inputArchivoStockRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoStock} style={{ display: "none" }} />
-            </div>
+            <div>
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
+                  <div>
+                    <div style={{ fontSize: "17px", fontWeight: "900", color: "#0f172a" }}>📊 Stock físico</div>
+                    <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                      El Supervisor carga la planilla de existencias de su empresa. Primero revisá la vista previa. El stock se modifica únicamente cuando confirmás la importación.
+                    </div>
+                  </div>
 
-            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "10px", padding: "12px", marginBottom: "14px", fontSize: "12px", color: "#1e3a8a" }}>
-              🔒 La carga queda asociada a la empresa del supervisor conectado. El stock de otras empresas no se mezcla.
-            </div>
-
-            {!vistaPreviaStock ? (
-              <div style={{ background: "#fff", border: "1px dashed #cbd5e1", borderRadius: "12px", padding: "40px 18px", textAlign: "center", color: "#64748b" }}>
-                <div style={{ fontSize: "34px", marginBottom: "8px" }}>📄</div>
-                <div style={{ fontWeight: "900", color: "#334155" }}>Todavía no cargaste una planilla</div>
-                <div style={{ marginTop: "5px", fontSize: "12px" }}>RutaComercio detectará Código, Artículo/Descripción y Stock. Color y Talle son opcionales para empresas que manejan variantes.</div>
-              </div>
-            ) : (
-              <div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "9px", marginBottom: "14px" }}>
-                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>ARCHIVO</div><div style={{ fontSize: "13px", fontWeight: "900", marginTop: "4px", overflowWrap: "anywhere" }}>{archivoStockNombre}</div></div>
-                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>ENCABEZADO DETECTADO</div><div style={{ fontSize: "20px", fontWeight: "900" }}>Fila {vistaPreviaStock.filaEncabezado}</div></div>
-                  <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: "#166534", fontWeight: "800" }}>FILAS VÁLIDAS</div><div style={{ fontSize: "22px", fontWeight: "900", color: "#15803d" }}>{vistaPreviaStock.validos.length}</div></div>
-                  <div style={{ background: vistaPreviaStock.invalidos.length ? "#fef2f2" : "#fff", border: `1px solid ${vistaPreviaStock.invalidos.length ? "#fecaca" : "#e2e8f0"}`, borderRadius: "10px", padding: "12px" }}><div style={{ fontSize: "10px", color: vistaPreviaStock.invalidos.length ? "#991b1b" : "#64748b", fontWeight: "800" }}>A REVISAR</div><div style={{ fontSize: "22px", fontWeight: "900", color: vistaPreviaStock.invalidos.length ? "#dc2626" : "#0f172a" }}>{vistaPreviaStock.invalidos.length}</div></div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button type="button" onClick={descargarPlantillaStock} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: "9px", padding: "12px 18px", fontSize: "13px", fontWeight: "900", cursor: "pointer" }}>📥 DESCARGAR PLANTILLA OFICIAL</button>
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      background: cargandoStockArchivo ? "#94a3b8" : "#2563eb",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "9px",
+                      padding: "12px 18px",
+                      fontSize: "13px",
+                      fontWeight: "900",
+                      cursor: cargandoStockArchivo ? "wait" : "pointer",
+                      boxShadow: "0 4px 10px rgba(37,99,235,0.20)"
+                    }}
+                  >
+                    {cargandoStockArchivo ? "Leyendo planilla..." : "📥 CARGAR EXCEL DE STOCK"}
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={cargarArchivoStock}
+                      disabled={cargandoStockArchivo}
+                      style={{ display: "none" }}
+                    />
+                  </label>
+                  </div>
                 </div>
 
-                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px", marginBottom: "12px", fontSize: "12px", color: "#475569" }}>
-                  Detectado: <b>{vistaPreviaStock.nombresColumnas.codigo}</b> → Código · <b>{vistaPreviaStock.nombresColumnas.descripcion}</b> → Descripción{vistaPreviaStock.nombresColumnas.color ? <> · <b>{vistaPreviaStock.nombresColumnas.color}</b> → Color</> : null}{vistaPreviaStock.nombresColumnas.talle ? <> · <b>{vistaPreviaStock.nombresColumnas.talle}</b> → Talle</> : null} · <b>{vistaPreviaStock.nombresColumnas.stock}</b> → Stock
+                <div style={{ padding: "10px 12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", color: "#1e3a8a", fontSize: "11px", lineHeight: 1.5, marginBottom: "12px" }}>
+                  <strong>Importante:</strong> el stock bajo generará alertas, pero RutaComercio nunca bloqueará automáticamente un artículo. El bloqueo seguirá siendo una decisión manual del Supervisor.
                 </div>
 
-                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "820px" }}>
-                    <thead><tr style={{ background: "#f8fafc", textAlign: "left" }}><th style={{ padding: "10px" }}>Fila</th><th style={{ padding: "10px" }}>Código archivo</th><th style={{ padding: "10px" }}>Artículo / descripción</th><th style={{ padding: "10px" }}>Color</th><th style={{ padding: "10px" }}>Talle</th><th style={{ padding: "10px", textAlign: "right" }}>Stock informado</th></tr></thead>
-                    <tbody>
-                      {vistaPreviaStock.validos.slice(0, 100).map((item, idx) => (
-                        <tr key={`${item.fila}-${idx}`} style={{ borderTop: "1px solid #f1f5f9" }}><td style={{ padding: "9px", color: "#64748b" }}>{item.fila}</td><td style={{ padding: "9px", fontWeight: "800" }}>{item.codigo}</td><td style={{ padding: "9px" }}>{item.descripcion || "—"}</td><td style={{ padding: "9px" }}>{item.color || "—"}</td><td style={{ padding: "9px" }}>{item.talle || "—"}</td><td style={{ padding: "9px", textAlign: "right", fontWeight: "900" }}>{item.stock}</td></tr>
+                {archivoStockNombre && (
+                  <div style={{ fontSize: "12px", color: "#334155", marginBottom: "8px" }}>
+                    <strong>Archivo:</strong> {archivoStockNombre}
+                    {stockEncabezadoFila ? ` · Encabezados detectados en fila ${stockEncabezadoFila}` : ""}
+                  </div>
+                )}
+
+                {stockMensaje && (
+                  <div style={{ padding: "9px 10px", borderRadius: "7px", background: stockMensaje.startsWith("❌") ? "#fef2f2" : "#f0fdf4", border: stockMensaje.startsWith("❌") ? "1px solid #fecaca" : "1px solid #bbf7d0", color: stockMensaje.startsWith("❌") ? "#991b1b" : "#166534", fontSize: "11px", fontWeight: "700", marginBottom: "12px" }}>
+                    {stockMensaje}
+                  </div>
+                )}
+
+                {(() => {
+                  // Fuente principal: stock_informado. Cada fila ya viene enriquecida
+                  // con el producto real en cargarStockActualEmpresa().
+                  const filasConStock = (stockActualEmpresa || []).map((fila) => ({
+                    producto: fila.__producto || {
+                      id: fila.producto_id,
+                      codigo_cge: fila.codigo_archivo || "",
+                      nombre: fila.descripcion_archivo || "Artículo",
+                    },
+                    fila,
+                  }));
+
+                  // Después agregamos los productos del catálogo que nunca tuvieron
+                  // stock informado, para que sigan figurando como “No informado”.
+                  const idsYaMostrados = new Set(
+                    filasConStock.map(({ fila }) => String(fila.producto_id || "")).filter(Boolean)
+                  );
+                  const filasSinInformar = (productosStockCatalogo || [])
+                    .filter(producto => !idsYaMostrados.has(String(producto.id)))
+                    .map(producto => ({ producto, fila: null }));
+
+                  const filasStock = [...filasConStock, ...filasSinInformar];
+
+                  const q = busquedaStockActual.trim().toLowerCase();
+                  const filtradas = filasStock.filter(({ producto, fila }) => {
+                    if (!q) return true;
+                    return [
+                      producto?.codigo_lista,
+                      producto?.codigo_cge,
+                      fila?.codigo_archivo,
+                      producto?.nombre,
+                      producto?.descripcion,
+                      fila?.descripcion_archivo,
+                      producto?.marca,
+                      fila?.color,
+                      fila?.talle,
+                    ].some(v => String(v || "").toLowerCase().includes(q));
+                  });
+
+                  const conStock = filasStock.filter(({ fila }) => fila && Number(fila.stock_informado ?? 0) > 0).length;
+                  const sinStock = filasStock.filter(({ fila }) => fila && Number(fila.stock_informado ?? 0) <= 0).length;
+                  const noInformado = filasStock.filter(({ fila }) => !fila).length;
+
+                  return (
+                    <div style={{ marginTop: "16px", border: "1px solid #cbd5e1", borderRadius: "10px", overflow: "hidden" }}>
+                      <div style={{ padding: "12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontSize: "14px", fontWeight: "900", color: "#0f172a" }}>📦 Stock actual de artículos</div>
+                            <div style={{ fontSize: "10px", color: "#64748b", marginTop: "2px" }}>Inventario de esta empresa. Se actualiza automáticamente mientras entran pedidos.</div>
+                          </div>
+                          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                            <input value={busquedaStockActual} onChange={e => setBusquedaStockActual(e.target.value)} placeholder="Buscar código, artículo, color o talle..." style={{ width: "280px", maxWidth: "70vw", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "7px", fontSize: "11px" }} />
+                            <button type="button" onClick={cargarStockActualEmpresa} style={{ padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "7px", background: "#fff", fontWeight: "800", cursor: "pointer" }}>↻ Actualizar</button>
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginTop: "10px" }}>
+                          <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "8px 10px" }}><div style={{ fontSize: "9px", color: "#166534", fontWeight: "900" }}>CON STOCK</div><div style={{ fontSize: "19px", color: "#15803d", fontWeight: "900" }}>{conStock}</div></div>
+                          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "8px 10px" }}><div style={{ fontSize: "9px", color: "#991b1b", fontWeight: "900" }}>SIN STOCK</div><div style={{ fontSize: "19px", color: "#dc2626", fontWeight: "900" }}>{sinStock}</div></div>
+                          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "8px 10px" }}><div style={{ fontSize: "9px", color: "#475569", fontWeight: "900" }}>NO INFORMADO</div><div style={{ fontSize: "19px", color: "#475569", fontWeight: "900" }}>{noInformado}</div></div>
+                        </div>
+                      </div>
+                      <div style={{ maxHeight: "380px", overflow: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", minWidth: "720px" }}>
+                          <thead style={{ position: "sticky", top: 0, background: "#eef2ff", zIndex: 1 }}>
+                            <tr>{["Código", "Artículo", "Color", "Talle", "Stock", "Actualizado"].map(h => <th key={h} style={{ textAlign: h === "Stock" ? "right" : "left", padding: "8px", borderBottom: "1px solid #cbd5e1" }}>{h}</th>)}</tr>
+                          </thead>
+                          <tbody>
+                            {cargandoStockActual && filtradas.length === 0 ? (
+                              <tr><td colSpan="6" style={{ padding: "14px", textAlign: "center", color: "#64748b" }}>Cargando stock...</td></tr>
+                            ) : filtradas.length === 0 ? (
+                              <tr><td colSpan="6" style={{ padding: "14px", textAlign: "center", color: "#64748b" }}>No hay artículos para mostrar.</td></tr>
+                            ) : filtradas.map(({ producto, fila }, idx) => {
+                              const cantidad = fila ? Number(fila.stock_informado ?? 0) : null;
+                              const fecha = fila?.fecha_actualizacion;
+                              const codigo = producto?.codigo_lista || producto?.codigo_cge || fila?.codigo_archivo || "—";
+                              const nombre = producto?.nombre || producto?.descripcion || fila?.descripcion_archivo || "Artículo";
+                              return (
+                                <tr key={`${fila?.id || producto?.id || "fila"}-${idx}`} style={{ background: idx % 2 ? "#fff" : "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
+                                  <td style={{ padding: "8px", fontWeight: "800", whiteSpace: "nowrap" }}>{codigo}</td>
+                                  <td style={{ padding: "8px" }}>{nombre}</td>
+                                  <td style={{ padding: "8px" }}>{fila?.color || "—"}</td>
+                                  <td style={{ padding: "8px" }}>{fila?.talle || "—"}</td>
+                                  <td style={{ padding: "8px", textAlign: "right", fontWeight: "900", color: cantidad === null ? "#94a3b8" : cantidad <= 0 ? "#dc2626" : cantidad <= 5 ? "#d97706" : "#15803d" }}>{cantidad === null ? "No informado" : cantidad.toLocaleString("es-AR")}</td>
+                                  <td style={{ padding: "8px", color: "#64748b", whiteSpace: "nowrap" }}>{fecha ? new Date(fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {stockVistaPrevia.length > 0 && (
+                  <>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px", marginBottom: "12px" }}>
+                      {[
+                        ["Código", stockColumnas.codigo],
+                        ["Artículo / descripción", stockColumnas.descripcion],
+                        ["Stock", stockColumnas.stock],
+                      ].map(([etiqueta, valor]) => (
+                        <div key={etiqueta} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "9px 10px" }}>
+                          <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>{etiqueta.toUpperCase()}</div>
+                          <div style={{ fontSize: "12px", color: valor ? "#0f172a" : "#dc2626", fontWeight: "800", marginTop: "2px" }}>
+                            {valor || "No detectada"}
+                          </div>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-                {vistaPreviaStock.validos.length > 100 && <div style={{ marginTop: "8px", fontSize: "11px", color: "#64748b" }}>Mostrando las primeras 100 filas de {vistaPreviaStock.validos.length}.</div>}
-                <div style={{ marginTop: "14px", padding: "12px", borderRadius: "9px", background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: "12px", fontWeight: "700" }}>
-                  ⚠️ Vista previa solamente. Todavía no se actualizó ningún stock. El próximo paso será relacionar los códigos del archivo con los productos de RutaComercio antes de confirmar.
-                </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "8px", marginBottom: "12px" }}>
+                      <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "11px" }}>
+                        <div style={{ fontSize: "10px", color: "#166534", fontWeight: "900" }}>✅ RECONOCIDOS AUTOMÁTICAMENTE</div>
+                        <div style={{ fontSize: "24px", color: "#15803d", fontWeight: "900", marginTop: "2px" }}>{stockReconocidos.length}</div>
+                        <div style={{ fontSize: "10px", color: "#166534" }}>Ya tienen equivalencia guardada para esta empresa.</div>
+                      </div>
+                      <div style={{ background: stockNoReconocidos.length ? "#fff7ed" : "#f8fafc", border: stockNoReconocidos.length ? "1px solid #fed7aa" : "1px solid #e2e8f0", borderRadius: "8px", padding: "11px" }}>
+                        <div style={{ fontSize: "10px", color: stockNoReconocidos.length ? "#9a3412" : "#475569", fontWeight: "900" }}>⚠️ SIN RECONOCER</div>
+                        <div style={{ fontSize: "24px", color: stockNoReconocidos.length ? "#c2410c" : "#475569", fontWeight: "900", marginTop: "2px" }}>{stockNoReconocidos.length}</div>
+                        <div style={{ fontSize: "10px", color: stockNoReconocidos.length ? "#9a3412" : "#64748b" }}>Todavía no tienen equivalencia para esta empresa.</div>
+                      </div>
+                    </div>
+
+                    {analizandoStock && (
+                      <div style={{ marginBottom: "10px", fontSize: "11px", color: "#2563eb", fontWeight: "800" }}>Buscando equivalencias de esta empresa...</div>
+                    )}
+
+                    {stockReconocidos.length > 0 && (
+                      <div style={{ marginBottom: "12px", overflowX: "auto", border: "1px solid #bbf7d0", borderRadius: "8px" }}>
+                        <div style={{ padding: "8px 10px", background: "#f0fdf4", color: "#166534", fontSize: "11px", fontWeight: "900" }}>Productos reconocidos</div>
+                        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "700px", fontSize: "11px" }}>
+                          <thead><tr style={{ background: "#f8fafc" }}>
+                            <th style={{ textAlign: "left", padding: "8px" }}>Código Excel</th>
+                            <th style={{ textAlign: "left", padding: "8px" }}>CGE</th>
+                            <th style={{ textAlign: "left", padding: "8px" }}>Producto RutaComercio</th>
+                            <th style={{ textAlign: "left", padding: "8px" }}>Color</th>
+                            <th style={{ textAlign: "left", padding: "8px" }}>Talle</th>
+                            <th style={{ textAlign: "right", padding: "8px" }}>Stock informado</th>
+                          </tr></thead>
+                          <tbody>
+                            {stockReconocidos.slice(0, 30).map((item, idx) => (
+                              <tr key={idx} style={{ borderTop: "1px solid #dcfce7" }}>
+                                <td style={{ padding: "8px", fontWeight: "800" }}>{item.codigoArchivo || "—"}</td>
+                                <td style={{ padding: "8px" }}>{item.codigo_cge || "—"}</td>
+                                <td style={{ padding: "8px" }}>{item.producto_nombre || "—"}{item.marca ? ` · ${item.marca}` : ""}</td>
+                                <td style={{ padding: "8px", fontWeight: "800" }}>{item.color || "—"}</td>
+                                <td style={{ padding: "8px", fontWeight: "800" }}>{item.talle || "—"}</td>
+                                <td style={{ padding: "8px", textAlign: "right", fontWeight: "900" }}>{item.stock ?? "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {stockNoReconocidos.length > 0 && (
+                      <div style={{ marginBottom: "12px", border: "1px solid #fed7aa", borderRadius: "8px", overflow: "hidden" }}>
+                        <div style={{ padding: "9px 10px", background: "#fff7ed", color: "#9a3412", fontSize: "11px", fontWeight: "900" }}>
+                          ⚠️ Productos no encontrados en el catálogo de esta empresa
+                        </div>
+                        <div style={{ padding: "10px", background: "#fff", display: "flex", flexDirection: "column", gap: "7px" }}>
+                          {stockNoReconocidos.slice(0, 50).map((item, idx) => (
+                            <div key={`${item.codigoArchivo}-${idx}`} style={{ display: "grid", gridTemplateColumns: "minmax(100px, 0.5fr) minmax(220px, 2fr) minmax(80px, 0.5fr)", gap: "8px", alignItems: "center", padding: "9px 10px", border: "1px solid #e2e8f0", borderRadius: "7px", background: "#f8fafc" }}>
+                              <div>
+                                <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>CÓDIGO EXCEL</div>
+                                <div style={{ fontSize: "12px", fontWeight: "900" }}>{item.codigoArchivo || "—"}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>ARTÍCULO</div>
+                                <div style={{ fontSize: "12px", fontWeight: "700" }}>{item.descripcionArchivo || "—"}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: "9px", color: "#64748b", fontWeight: "800" }}>STOCK</div>
+                                <div style={{ fontSize: "13px", fontWeight: "900", color: item.stock === null ? "#dc2626" : "#0f172a" }}>{item.stock ?? "No válido"}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ padding: "10px", background: "#fffbeb", borderTop: "1px solid #fed7aa" }}>
+                          <div style={{ fontSize: "11px", fontWeight: "900", color: "#92400e", marginBottom: "6px" }}>
+                            Revisión antes de incorporar productos nuevos
+                          </div>
+                          <div style={{ fontSize: "10px", color: "#92400e", lineHeight: 1.5, marginBottom: "9px" }}>
+                            Estos artículos no existen actualmente en el catálogo de esta empresa. RutaComercio puede prepararlos como productos nuevos, pero todavía no crea nada, no genera CGE y no modifica stock.
+                          </div>
+
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            {productosNuevosPropuestos.map((p, idx) => (
+                              <label key={`${p.codigo_archivo}-${idx}`} style={{ display: "grid", gridTemplateColumns: "28px 90px minmax(220px,1fr) 80px", gap: "7px", alignItems: "center", padding: "7px 8px", background: "#fff", border: "1px solid #fde68a", borderRadius: "7px" }}>
+                                <input
+                                  type="checkbox"
+                                  checked={p.crear}
+                                  onChange={e => setProductosNuevosPropuestos(prev => prev.map((x, i) => i === idx ? { ...x, crear: e.target.checked } : x))}
+                                />
+                                <span style={{ fontSize: "10px", fontWeight: "900" }}>{p.codigo_archivo || "—"}</span>
+                                <span style={{ fontSize: "10px", fontWeight: "700" }}>{p.nombre || "Sin descripción"}</span>
+                                <span style={{ fontSize: "10px", textAlign: "right", fontWeight: "900" }}>{p.stock ?? "—"} u.</span>
+                              </label>
+                            ))}
+                          </div>
+
+                          <div style={{ marginTop: "9px", padding: "8px 9px", borderRadius: "7px", background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e40af", fontSize: "10px", lineHeight: 1.45 }}>
+                            Seleccionados para una futura incorporación: <strong>{productosNuevosPropuestos.filter(p => p.crear).length}</strong>. El Supervisor puede desmarcar cualquier fila que no quiera incorporar. El CGE se generará recién al confirmar la importación.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ marginBottom: "12px", padding: "10px 12px", borderRadius: "8px", background: "#f8fafc", border: "1px solid #cbd5e1" }}>
+                      <div style={{ fontSize: "11px", fontWeight: "900", color: "#0f172a" }}>Estado de esta importación</div>
+                      <div style={{ marginTop: "4px", fontSize: "10px", color: "#475569", lineHeight: 1.5 }}>
+                        ✅ Reconocidos: <strong>{stockReconocidos.length}</strong> ·
+                        🆕 Nuevos propuestos: <strong>{productosNuevosPropuestos.filter(p => p.crear).length}</strong> ·
+                        ⛔ Excluidos por el Supervisor: <strong>{productosNuevosPropuestos.filter(p => !p.crear).length}</strong>
+                      </div>
+                      <div style={{ marginTop: "5px", fontSize: "10px", color: "#b45309", fontWeight: "800" }}>
+                        Modo revisión: todavía NO se crean productos, NO se generan CGE y NO se actualiza stock.
+                      </div>
+                    </div>
+
+                    <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "650px", fontSize: "11px" }}>
+                        <thead>
+                          <tr style={{ background: "#f8fafc" }}>
+                            <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Fila</th>
+                            <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Código</th>
+                            <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Artículo</th>
+                            <th style={{ textAlign: "right", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Stock</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stockVistaPrevia.slice(0, 30).map((fila, idx) => (
+                            <tr key={idx}>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", color: "#64748b" }}>{fila.__fila}</td>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", fontWeight: "700" }}>{stockColumnas.codigo ? String(fila[stockColumnas.codigo] ?? "") : "—"}</td>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9" }}>{stockColumnas.descripcion ? String(fila[stockColumnas.descripcion] ?? "") : "—"}</td>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", textAlign: "right", fontWeight: "800" }}>{stockColumnas.stock ? String(fila[stockColumnas.stock] ?? "") : "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ marginTop: "14px", padding: "14px", border: "1px solid #bbf7d0", borderRadius: "9px", background: "#f0fdf4" }}>
+                      <div style={{ fontSize: "11px", color: "#166534", fontWeight: "900", marginBottom: "8px" }}>
+                        Todo listo para confirmar
+                      </div>
+                      <div style={{ fontSize: "10px", color: "#166534", lineHeight: 1.5, marginBottom: "10px" }}>
+                        Se procesarán <strong>{stockReconocidos.length + productosNuevosPropuestos.filter(p => p.crear).length}</strong> productos. Los nuevos seleccionados recibirán su CGE al confirmar.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={confirmarImportacionStock}
+                        disabled={confirmandoImportacionStock || (stockReconocidos.length + productosNuevosPropuestos.filter(p => p.crear).length === 0)}
+                        style={{ width: "100%", padding: "13px 16px", border: "none", borderRadius: "8px", background: confirmandoImportacionStock ? "#94a3b8" : "#16a34a", color: "#fff", fontSize: "13px", fontWeight: "900", cursor: confirmandoImportacionStock ? "wait" : "pointer", boxShadow: "0 4px 10px rgba(22,163,74,0.20)" }}
+                      >
+                        {confirmandoImportacionStock ? "⏳ GUARDANDO IMPORTACIÓN..." : "✅ CONFIRMAR IMPORTACIÓN"}
+                      </button>
+                    </div>
+
+                    <div style={{ marginTop: "10px", fontSize: "10px", color: "#64748b" }}>
+                      Vista previa de hasta 30 filas en pantalla. El stock solo se modifica después de confirmar.
+                    </div>
+                  </>
+                )}
               </div>
-            )}
-          </div>
+            </div>
                   ) : seccionActiva === "disponibilidad" ? (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
