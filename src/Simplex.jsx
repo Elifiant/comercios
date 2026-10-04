@@ -20,11 +20,10 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const [itemsVentaDetalle, setItemsVentaDetalle] = useState([]);
   const [cargandoDetalleVenta, setCargandoDetalleVenta] = useState(false);
   const [pedidoEditando, setPedidoEditando] = useState(null);
+  const [busquedaPrecio, setBusquedaPrecio] = useState("");
+  const [productosPrecio, setProductosPrecio] = useState([]);
+  const [cargandoPrecios, setCargandoPrecios] = useState(false);
   const [guardandoCliente, setGuardandoCliente] = useState(false);
-  const [listasCliente, setListasCliente] = useState([]);
-  const [listaParaAsignar, setListaParaAsignar] = useState("");
-  const [cargandoListasCliente, setCargandoListasCliente] = useState(false);
-  const [guardandoAsignacionLista, setGuardandoAsignacionLista] = useState(false);
   const [listasPrecios, setListasPrecios] = useState([]);
   const [cargandoListas, setCargandoListas] = useState(false);
   const [archivoListaNombre, setArchivoListaNombre] = useState("");
@@ -153,104 +152,8 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     };
   }, [comercioSeleccionado?.id, perfil?.empresa_id]);
 
-  useEffect(() => {
-    let cancelado = false;
 
-    const cargarListasDelCliente = async () => {
-      if (!comercioSeleccionado?.id || !perfil?.empresa_id) {
-        setListasCliente([]);
-        setListaParaAsignar("");
-        return;
-      }
 
-      setCargandoListasCliente(true);
-      try {
-        const [asignadasRes, listasRes] = await Promise.all([
-          supabase
-            .from("comercios_listas")
-            .select("id,comercio_id,lista_id,activo,fecha_asignacion,listas_precios(id,nombre,codigo,predeterminada,empresa_id)")
-            .eq("comercio_id", comercioSeleccionado.id)
-            .eq("activo", true),
-          supabase
-            .from("listas_precios")
-            .select("id,nombre,codigo,predeterminada,empresa_id")
-            .eq("empresa_id", perfil.empresa_id)
-            .eq("activo", true)
-            .order("predeterminada", { ascending:false })
-            .order("nombre", { ascending:true })
-        ]);
-
-        if (asignadasRes.error) throw asignadasRes.error;
-        if (listasRes.error) throw listasRes.error;
-        if (cancelado) return;
-
-        const asignadas = (asignadasRes.data || []).filter(
-          x => x.listas_precios?.empresa_id === perfil.empresa_id
-        );
-        const disponibles = listasRes.data || [];
-
-        setListasCliente(asignadas);
-        setListasPrecios(disponibles);
-
-        const yaAsignadas = new Set(asignadas.map(x => x.lista_id));
-        const sugerida =
-          disponibles.find(x => x.predeterminada && !yaAsignadas.has(x.id)) ||
-          disponibles.find(x => !yaAsignadas.has(x.id));
-
-        setListaParaAsignar(sugerida?.id || "");
-      } catch (error) {
-        console.error("Simplex - error cargando listas del cliente:", error);
-        if (!cancelado) {
-          setListasCliente([]);
-          setListaParaAsignar("");
-        }
-      } finally {
-        if (!cancelado) setCargandoListasCliente(false);
-      }
-    };
-
-    cargarListasDelCliente();
-    return () => { cancelado = true; };
-  }, [comercioSeleccionado?.id, perfil?.empresa_id]);
-
-  const asignarListaAlCliente = async () => {
-    if (!comercioSeleccionado?.id) return;
-    if (!listaParaAsignar) return alert("⚠️ Elegí una productos y precios.");
-
-    const lista = listasPrecios.find(x => x.id === listaParaAsignar);
-    if (!lista) return alert("⚠️ No pude identificar la lista.");
-
-    if (!window.confirm(
-      `💲 ASIGNAR LISTA\n\nCliente: ${comercioSeleccionado.nombre}\nLista: ${lista.nombre}\n\n¿Confirmar?`
-    )) return;
-
-    setGuardandoAsignacionLista(true);
-    try {
-      const { data, error } = await supabase
-        .from("comercios_listas")
-        .insert({
-          comercio_id: comercioSeleccionado.id,
-          lista_id: lista.id,
-          activo: true
-        })
-        .select("id,comercio_id,lista_id,activo,fecha_asignacion")
-        .single();
-
-      if (error) throw error;
-
-      setListasCliente(prev => [
-        ...prev,
-        { ...data, listas_precios: lista }
-      ]);
-      setListaParaAsignar("");
-      alert(`✅ LISTA ASIGNADA\n\n${lista.nombre}\n${comercioSeleccionado.nombre}`);
-    } catch (error) {
-      console.error("Simplex - error asignando lista:", error);
-      alert(`❌ No se pudo asignar la lista.\n\n${error?.message || "Error desconocido"}`);
-    } finally {
-      setGuardandoAsignacionLista(false);
-    }
-  };
 
   const clientesFiltrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -287,6 +190,73 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       console.error("Simplex - error cargando listas:", error);
       setListasPrecios([]);
     } finally { setCargandoListas(false); }
+  };
+
+  const cargarProductosParaConsulta = async () => {
+    if (!perfil?.empresa_id) return;
+    setCargandoPrecios(true);
+    try {
+      const { data: listas, error: errorListas } = await supabase
+        .from("listas_precios").select("id,predeterminada")
+        .eq("empresa_id", perfil.empresa_id).eq("activo", true)
+        .order("predeterminada", { ascending:false });
+      if (errorListas) throw errorListas;
+
+      const listaBase = (listas || []).find(l => l.predeterminada) || (listas || [])[0];
+      if (!listaBase?.id) { setProductosPrecio([]); return; }
+
+      const { data, error } = await supabase
+        .from("lista_productos")
+        .select("id,producto_id,codigo_lista,detalle_en_lista,precio,productos(id,codigo_cge,nombre,descripcion,marca,gtin)")
+        .eq("lista_id", listaBase.id).eq("activo", true);
+      if (error) throw error;
+
+      const productosBase = (data || []).map(x => ({
+        id:x.producto_id || x.id,
+        codigo:x.codigo_lista || x.productos?.codigo_cge || "",
+        cge:x.productos?.codigo_cge || "",
+        nombre:x.productos?.nombre || x.detalle_en_lista || "Producto",
+        descripcion:x.productos?.descripcion || "",
+        marca:x.productos?.marca || "",
+        gtin:x.productos?.gtin || "",
+        precio:Number(x.precio || 0),
+        stock:null
+      }));
+
+      const productoIds = [...new Set(productosBase.map(p => p.id).filter(Boolean))];
+
+      if (productoIds.length > 0) {
+        const { data: stockData, error: errorStock } = await supabase
+          .from("stock_informado")
+          .select("producto_id,stock_informado,fecha_actualizacion")
+          .eq("empresa_id", perfil.empresa_id)
+          .in("producto_id", productoIds)
+          .order("fecha_actualizacion", { ascending:false });
+
+        if (errorStock) throw errorStock;
+
+        const stockPorProducto = new Map();
+        (stockData || []).forEach(s => {
+          const clave = String(s.producto_id);
+          if (!stockPorProducto.has(clave)) {
+            stockPorProducto.set(clave, s.stock_informado);
+          }
+        });
+
+        productosBase.forEach(p => {
+          const clave = String(p.id);
+          if (stockPorProducto.has(clave)) {
+            p.stock = Number(stockPorProducto.get(clave));
+          }
+        });
+      }
+
+      setProductosPrecio(productosBase);
+    } catch(error) {
+      console.error("Simplex - error consultando precios:",error);
+      setProductosPrecio([]);
+      alert(`❌ No pude cargar los precios. ${error?.message || ""}`.trim());
+    } finally { setCargandoPrecios(false); }
   };
 
   const cargarVentas = async () => {
@@ -436,6 +406,12 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   };
 
   const abrirModulo = (modulo) => {
+    if (modulo === "consultarPrecios") {
+      setBusquedaPrecio("");
+      setVista("consultarPrecios");
+      cargarProductosParaConsulta();
+      return;
+    }
     if (modulo === "clientes") return setVista("clientes");
     if (modulo === "ventas") {
       setVista("ventas");
@@ -500,10 +476,10 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
 
   const crearListaInicial = async () => {
     if(!perfil?.empresa_id) return alert("⚠️ No pude identificar la empresa.");
-    if(!nombreLista.trim()||!codigoLista.trim()) return alert("⚠️ Completá nombre y código de la lista.");
+    if(!nombreLista.trim()||!codigoLista.trim()) return alert("⚠️ Completá nombre y código de referencia.");
     if(!vistaPreviaLista?.validos?.length) return alert("⚠️ Primero elegí una planilla.");
     if(vistaPreviaLista.conProblemas.length) return alert("⚠️ Corregí las filas con problemas.");
-    if(!window.confirm(`⚠️ CREAR LISTA\n\n${nombreLista.trim()}\nProductos: ${vistaPreviaLista.validos.length}\n\n¿Confirmar?`)) return;
+    if(!window.confirm(`⚠️ CARGAR PRODUCTOS Y PRECIOS\n\n${nombreLista.trim()}\nProductos: ${vistaPreviaLista.validos.length}\n\n¿Confirmar?`)) return;
 
     setGuardandoLista(true);
     let listaCreada=null;
@@ -524,12 +500,12 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       if(errorRpc) throw errorRpc;
       if(!res?.ok) throw new Error("Supabase no confirmó la carga de productos.");
 
-      alert(`✅ LISTA CREADA\n\n${nombreLista.trim()}\nProductos: ${res.productos_creados ?? productosNuevos.length}`);
+      alert(`✅ PRODUCTOS Y PRECIOS CARGADOS\n\n${nombreLista.trim()}\nProductos: ${res.productos_creados ?? productosNuevos.length}`);
       setNombreLista(""); setCodigoLista(""); setArchivoListaNombre(""); setVistaPreviaLista(null);
       await cargarListasPrecios();
     } catch(error) {
       if(listaCreada?.id) await supabase.from("listas_precios").delete().eq("id",listaCreada.id).eq("empresa_id",perfil.empresa_id);
-      console.error(error); alert(`❌ No se pudo crear la lista.\n\n${error?.message||"Error desconocido"}`);
+      console.error(error); alert(`❌ No se pudieron cargar los productos y precios.\n\n${error?.message||"Error desconocido"}`);
     } finally { setGuardandoLista(false); }
   };
 
@@ -605,7 +581,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     if(!listaActualizando?.id||!vistaPreviaActualizacion) return;
     const c=vistaPreviaActualizacion;
     if(c.conProblemas?.length) return alert("⚠️ Corregí primero las filas con problemas.");
-    if(!window.confirm(`🔄 ACTUALIZAR PRECIOS\n\n${listaActualizando.nombre}\nCambios de precio: ${c.cambiosPrecio.length}\nProductos nuevos: ${c.productosNuevos.length}\nProductos que ya no vienen: ${c.productosQuitar.length}\n\n¿Confirmar actualización?`)) return;
+    if(!window.confirm(`🔄 ACTUALIZAR PRODUCTOS Y PRECIOS\nCambios de precio: ${c.cambiosPrecio.length}\nProductos nuevos: ${c.productosNuevos.length}\nProductos que ya no vienen: ${c.productosQuitar.length}\n\n¿Confirmar actualización?`)) return;
     setGuardandoActualizacion(true);
     try{
       const {data:res,error}=await supabase.rpc("actualizar_lista_precios",{
@@ -614,12 +590,12 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       });
       if(error) throw error;
       if(!res?.ok) throw new Error("Supabase no confirmó la actualización.");
-      alert(`✅ LISTA ACTUALIZADA\n\n${listaActualizando.nombre}`);
+      alert(`✅ PRODUCTOS Y PRECIOS ACTUALIZADOS`);
       setListaActualizando(null); setArchivoActualizacionNombre(""); setVistaPreviaActualizacion(null);
       await cargarListasPrecios();
     }catch(error){
       console.error("Simplex - error actualizando lista:",error);
-      alert(`❌ No se pudo actualizar la lista.\n\n${error?.message||"Error desconocido"}`);
+      alert(`❌ No se pudieron actualizar los productos y precios.\n\n${error?.message||"Error desconocido"}`);
     }finally{setGuardandoActualizacion(false);}
   };
 
@@ -933,6 +909,61 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     );
   }
 
+  if (vista === "consultarPrecios") {
+    const q=busquedaPrecio.trim().toLowerCase();
+    const resultados=q ? productosPrecio.filter(p =>
+      [p.codigo,p.cge,p.nombre,p.descripcion,p.marca,p.gtin]
+        .some(v=>String(v||"").toLowerCase().includes(q))
+    ) : [];
+
+    return (
+      <div style={estilos.pagina}>
+        <header style={estilos.header}>
+          <button type="button" onClick={()=>setVista("inicio")} style={estilos.botonVolver}>← Inicio</button>
+          <div style={estilos.marcaChica}>RutaComercio Simplex · V1.2</div>
+        </header>
+        <main style={estilos.contenedorFicha}>
+          <h2 style={{marginTop:0,marginBottom:"5px"}}>🔎 Consultar precios</h2>
+          <div style={{color:"#94a3b8",fontSize:"12px",marginBottom:"12px"}}>
+            Buscá un producto sin iniciar una venta.
+          </div>
+          <input autoFocus type="text" value={busquedaPrecio}
+            onChange={e=>setBusquedaPrecio(e.target.value)}
+            placeholder="🔎 Código, producto o marca..."
+            style={{...estilos.buscador,border:"2px solid #38bdf8",fontSize:"16px"}}/>
+          {cargandoPrecios ? <div style={estilos.mensaje}>⏳ Cargando productos y precios...</div>
+          : !q ? <div style={estilos.mensaje}>Escribí algo para consultar el precio.</div>
+          : resultados.length===0 ? <div style={estilos.mensaje}>No encontré productos con esa búsqueda.</div>
+          : <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+              {resultados.slice(0,100).map(p=>(
+                <div key={p.id} style={estilos.panelSeccion}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:"12px",alignItems:"center"}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontWeight:950,fontSize:"14px"}}>{p.nombre}</div>
+                      <div style={{fontSize:"11px",color:"#94a3b8",marginTop:"4px"}}>
+                        {[p.codigo,p.marca].filter(Boolean).join(" · ")}
+                      </div>
+                      <div style={{
+                        fontSize:"12px",
+                        marginTop:"6px",
+                        fontWeight:900,
+                        color:p.stock === null ? "#94a3b8" : (p.stock === 0 ? "#fca5a5" : "#cbd5e1")
+                      }}>
+                        Stock: {p.stock === null ? "No informado" : p.stock.toLocaleString("es-AR")}
+                      </div>
+                    </div>
+                    <div style={{fontSize:"21px",fontWeight:950,whiteSpace:"nowrap",color:"#86efac"}}>
+                      ${p.precio.toLocaleString("es-AR")}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>}
+        </main>
+      </div>
+    );
+  }
+
   if (vista === "productos") {
     return (
       <div style={estilos.pagina}>
@@ -943,20 +974,35 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
         <main style={estilos.contenedorFicha}>
           <h2 style={{marginTop:0}}>📦 Productos y precios</h2>
           <div style={estilos.ayudaAlta}>Cargá y actualizá los productos y precios de tu empresa.</div>
+          <button type="button" onClick={()=>abrirModulo("consultarPrecios")}
+            style={{...estilos.botonGrande,backgroundColor:"#0369a1",marginBottom:"14px",fontSize:"15px"}}>
+            🔎 CONSULTAR PRECIOS
+          </button>
           <div style={estilos.panelSeccion}>
             <div style={{fontWeight:900,marginBottom:"8px"}}>Tus productos y precios</div>
-            {cargandoListas ? <div>⏳ Cargando...</div> : listasPrecios.length ? listasPrecios.map(l=>(
-              <div key={l.id} style={{...estilos.filaLista,alignItems:"stretch",flexDirection:"column"}}>
+            {cargandoListas ? <div>⏳ Cargando...</div> : listasPrecios.length ? (
+              <div style={{...estilos.filaLista,alignItems:"stretch",flexDirection:"column"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px"}}>
-                  <div><strong>{l.nombre}</strong><div style={{fontSize:"11px",color:"#94a3b8"}}>{l.codigo||"Sin código"}</div></div>
-                  {l.predeterminada&&<span style={estilos.badge}>Predeterminada</span>}
+                  <div>
+                    <strong>Precio vigente</strong>
+                    <div style={{fontSize:"11px",color:"#94a3b8",marginTop:"3px"}}>
+                      Un único precio base para todos los clientes
+                    </div>
+                  </div>
+                  <span style={estilos.badge}>Activo</span>
                 </div>
-                <button type="button" onClick={()=>iniciarActualizacionLista(l)} style={{...estilos.botonChico,backgroundColor:"#0f766e"}}>🔄 ACTUALIZAR PRECIOS</button>
+                <button
+                  type="button"
+                  onClick={()=>iniciarActualizacionLista(listasPrecios.find(l=>l.predeterminada) || listasPrecios[0])}
+                  style={{...estilos.botonChico,backgroundColor:"#0f766e"}}
+                >
+                  🔄 ACTUALIZAR PRODUCTOS Y PRECIOS
+                </button>
               </div>
-            )):<div style={{color:"#94a3b8",fontSize:"13px"}}>Todavía no tenés productos y precios cargados.</div>}
+            ) : <div style={{color:"#94a3b8",fontSize:"13px"}}>Todavía no tenés productos y precios cargados.</div>}
             <input ref={inputActualizarListaRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoActualizacion} style={{display:"none"}}/>
             {listaActualizando&&<div style={{...estilos.vistaPrevia,marginTop:"14px"}}>
-              <div style={{fontWeight:900}}>🔄 Actualizando: {listaActualizando.nombre}</div>
+              <div style={{fontWeight:900}}>🔄 Actualizando productos y precios</div>
               {archivoActualizacionNombre&&<div style={{fontSize:"12px",color:"#cbd5e1",marginTop:"6px"}}>📄 {archivoActualizacionNombre}</div>}
               {vistaPreviaActualizacion&&<>
                 {vistaPreviaActualizacion.conProblemas?.length>0
@@ -978,11 +1024,11 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             </div>}
           </div>
           <div style={estilos.panelSeccion}>
-            <div style={{fontWeight:900,fontSize:"16px",marginBottom:"12px"}}>➕ Crear lista desde Excel / CSV</div>
-            <label style={estilos.label}>Nombre de la lista *</label>
-            <input style={estilos.input} value={nombreLista} onChange={e=>setNombreLista(e.target.value)} placeholder="Ej.: Lista General Octubre"/>
-            <label style={estilos.label}>Código de la lista *</label>
-            <input style={estilos.input} value={codigoLista} onChange={e=>setCodigoLista(e.target.value)} placeholder="Ej.: GENERAL"/>
+            <div style={{fontWeight:900,fontSize:"16px",marginBottom:"12px"}}>➕ Cargar productos y precios desde Excel / CSV</div>
+            <label style={estilos.label}>Nombre de referencia *</label>
+            <input style={estilos.input} value={nombreLista} onChange={e=>setNombreLista(e.target.value)} placeholder="Ej.: Precios Octubre"/>
+            <label style={estilos.label}>Código de referencia *</label>
+            <input style={estilos.input} value={codigoLista} onChange={e=>setCodigoLista(e.target.value)} placeholder="Ej.: PRECIOS"/>
             <button type="button" onClick={descargarPlantillaListaPrecios} style={{...estilos.botonGrande,backgroundColor:"#166534"}}>📥 DESCARGAR PLANTILLA OFICIAL</button>
             <input ref={inputListaRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoLista} style={{display:"none"}}/>
             <button type="button" onClick={()=>inputListaRef.current?.click()} style={{...estilos.botonGrande,backgroundColor:"#2563eb"}}>1️⃣ ELEGIR ARCHIVO EXCEL / CSV</button>
@@ -997,7 +1043,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
               {vistaPreviaLista.conProblemas.length>0&&<div style={{marginTop:"10px",color:"#fca5a5",fontSize:"12px"}}>⚠️ Corregí las filas con problemas antes de importar.</div>}
               <button type="button" onClick={crearListaInicial} disabled={guardandoLista||vistaPreviaLista.conProblemas.length>0}
                 style={{...estilos.botonGrande,marginTop:"12px",backgroundColor:"#16a34a",opacity:(guardandoLista||vistaPreviaLista.conProblemas.length)?0.55:1}}>
-                {guardandoLista?"⏳ CARGANDO...":"3️⃣ CREAR LISTA EN RUTACOMERCIO"}
+                {guardandoLista?"⏳ CARGANDO...":"3️⃣ CARGAR PRODUCTOS Y PRECIOS"}
               </button>
             </div>}
           </div>
@@ -1090,67 +1136,6 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
               : "🔵 SIN DEUDA"}
           </div>
 
-          <div style={estilos.panelSeccion}>
-            <div style={{fontWeight:900,marginBottom:"8px"}}>💲 Listas de precios</div>
-
-            {cargandoListasCliente ? (
-              <div style={{color:"#94a3b8",fontSize:"13px"}}>⏳ Cargando listas...</div>
-            ) : listasCliente.length > 0 ? (
-              <div style={{display:"grid",gap:"7px",marginBottom:"12px"}}>
-                {listasCliente.map(a => (
-                  <div key={a.id} style={{padding:"9px 10px",border:"1px solid #334155",borderRadius:"8px",backgroundColor:"#0f172a"}}>
-                    <strong>{a.listas_precios?.nombre || "Lista"}</strong>
-                    <div style={{fontSize:"11px",color:"#94a3b8",marginTop:"3px"}}>
-                      {a.listas_precios?.codigo || "Sin código"}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div style={{color:"#fbbf24",fontSize:"13px",fontWeight:800,marginBottom:"12px"}}>
-                Sin listas asignadas
-              </div>
-            )}
-
-            {listasPrecios.filter(l => !listasCliente.some(a => a.lista_id === l.id)).length > 0 ? (
-              <>
-                <select
-                  value={listaParaAsignar}
-                  onChange={e => setListaParaAsignar(e.target.value)}
-                  style={{...estilos.input,marginBottom:"9px"}}
-                >
-                  <option value="">Elegir lista...</option>
-                  {listasPrecios
-                    .filter(l => !listasCliente.some(a => a.lista_id === l.id))
-                    .map(l => (
-                      <option key={l.id} value={l.id}>
-                        {l.nombre}{l.predeterminada ? " · Predeterminada" : ""}
-                      </option>
-                    ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={asignarListaAlCliente}
-                  disabled={guardandoAsignacionLista || !listaParaAsignar}
-                  style={{
-                    ...estilos.botonGrande,
-                    backgroundColor:"#7c3aed",
-                    opacity:(guardandoAsignacionLista || !listaParaAsignar) ? 0.55 : 1
-                  }}
-                >
-                  {guardandoAsignacionLista ? "⏳ ASIGNANDO..." : "💲 ASIGNAR LISTA"}
-                </button>
-              </>
-            ) : listasPrecios.length === 0 ? (
-              <div style={{color:"#94a3b8",fontSize:"12px"}}>
-                Primero creá una lista desde “Productos y listas”.
-              </div>
-            ) : (
-              <div style={{color:"#86efac",fontSize:"12px",fontWeight:800}}>
-                ✅ Todas tus listas disponibles ya están asignadas a este cliente.
-              </div>
-            )}
-          </div>
 
           <div style={estilos.resumen}>
             {resumen.cargando ? (
@@ -1229,6 +1214,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             </div>
             <div style={estilos.modulos}>
               {[
+                ["consultarPrecios","🔎","Consultar precios","Buscá rápidamente código, producto o marca"],
                 ["clientes","🏪","Clientes","Alta, búsqueda, pedidos e historial"],
                 ["ventas","🧾","Ventas","NVI e historial general"],
                 ["productos","📦","Productos y precios","Catálogo y precios"],
