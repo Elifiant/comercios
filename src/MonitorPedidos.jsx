@@ -18,7 +18,7 @@ export default function MonitorPedidos() {
   const [guardandoDisponibilidad, setGuardandoDisponibilidad] = useState(null);
   const [archivoStockNombre, setArchivoStockNombre] = useState("");
   const [stockVistaPrevia, setStockVistaPrevia] = useState([]);
-  const [stockColumnas, setStockColumnas] = useState({ codigo: "", descripcion: "", stock: "" });
+  const [stockColumnas, setStockColumnas] = useState({ codigo: "", descripcion: "", color: "", talle: "", stock: "" });
   const [stockEncabezadoFila, setStockEncabezadoFila] = useState(null);
   const [stockMensaje, setStockMensaje] = useState("");
   const [cargandoStockArchivo, setCargandoStockArchivo] = useState(false);
@@ -28,6 +28,9 @@ export default function MonitorPedidos() {
   const [productosStockCatalogo, setProductosStockCatalogo] = useState([]);
   const [productosNuevosPropuestos, setProductosNuevosPropuestos] = useState([]);
   const [confirmandoImportacionStock, setConfirmandoImportacionStock] = useState(false);
+  const [stockActualEmpresa, setStockActualEmpresa] = useState([]);
+  const [cargandoStockActual, setCargandoStockActual] = useState(false);
+  const [busquedaStockActual, setBusquedaStockActual] = useState("");
 
   const cargarPedidosReales = async () => {
     try {
@@ -84,7 +87,7 @@ export default function MonitorPedidos() {
         if (idsPedidos.length > 0) {
           const { data: itemsData, error: errorItems } = await supabase
             .from("pedido_items")
-            .select("pedido_id, producto_id, producto_nombre, codigo, cantidad, precio_unitario, subtotal")
+            .select("pedido_id, producto_id, producto_nombre, codigo, color, talle, cantidad, precio_unitario, subtotal")
             .in("pedido_id", idsPedidos);
 
           if (errorItems) {
@@ -97,6 +100,8 @@ export default function MonitorPedidos() {
                 producto_id: it.producto_id,
                 nombre: it.producto_nombre || it.codigo || "Producto",
                 codigo: it.codigo || "",
+                color: it.color || "",
+                talle: it.talle || "",
                 cant: Number(it.cantidad || 0),
                 p_unit: Number(it.precio_unitario || 0),
                 subtotal: Number(it.subtotal || 0)
@@ -375,6 +380,17 @@ export default function MonitorPedidos() {
       })
     : "0,0";
 
+  // Abrir directamente una sección enviada desde el Supervisor.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const seccionSolicitada = params.get("seccion");
+
+    if (seccionSolicitada === "stock") {
+      setVistaPedidos("StockFisico");
+      setPedidoActivo(null);
+    }
+  }, []);
+
   // Abrir directamente una NVI enviada desde el Supervisor.
   useEffect(() => {
     if (!pedidos.length) return;
@@ -584,6 +600,53 @@ export default function MonitorPedidos() {
     }
   };
 
+  const cargarStockActualEmpresa = async () => {
+    if (!empresaIdActual) return;
+    try {
+      setCargandoStockActual(true);
+      const { data, error } = await supabase
+        .from("stock_informado")
+        .select("id,empresa_id,importacion_id,producto_id,codigo_archivo,descripcion_archivo,stock_informado,fecha_actualizacion,color,talle")
+        .eq("empresa_id", empresaIdActual)
+        .order("fecha_actualizacion", { ascending: false })
+        .order("id", { ascending: false });
+
+      if (error) throw error;
+
+      console.log("🧪 EMPRESA STOCK:", empresaIdActual);
+      console.log("🧪 STOCK RECIBIDO:", data);
+
+      // La tabla conserva historial de importaciones. Para el inventario actual
+      // tomamos solamente el registro más reciente de cada producto + color + talle.
+      const ultimos = new Map();
+      (data || []).forEach((fila) => {
+        const clave = [
+          String(fila.producto_id || ""),
+          String(fila.color || "").trim().toLowerCase(),
+          String(fila.talle || "").trim().toLowerCase(),
+        ].join("|");
+        if (!ultimos.has(clave)) ultimos.set(clave, fila);
+      });
+
+      setStockActualEmpresa([...ultimos.values()]);
+    } catch (error) {
+      console.error("Error cargando stock actual de la empresa:", error);
+      setStockActualEmpresa([]);
+    } finally {
+      setCargandoStockActual(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!empresaIdActual) return;
+    cargarCatalogoProductosStock();
+    cargarStockActualEmpresa();
+
+    // Mantiene visible el stock actualizado mientras el Supervisor trabaja.
+    const timerStockActual = setInterval(cargarStockActualEmpresa, 5000);
+    return () => clearInterval(timerStockActual);
+  }, [empresaIdActual]);
+
   const textoProductoStock = (p) => {
     if (!p) return "";
     const codigo = p.codigo_cge || p.cge || p.codigo || "";
@@ -646,6 +709,8 @@ export default function MonitorPedidos() {
           fila: fila.__fila,
           codigoArchivo,
           descripcionArchivo,
+          color: columnas.color ? String(fila[columnas.color] ?? "").trim() : "",
+          talle: columnas.talle ? String(fila[columnas.talle] ?? "").trim() : "",
           stock: Number.isFinite(stockNumero) ? stockNumero : null,
         };
 
@@ -677,6 +742,8 @@ export default function MonitorPedidos() {
         noReconocidos.map(item => ({
           codigo_archivo: item.codigoArchivo,
           nombre: item.descripcionArchivo,
+          color: item.color || null,
+          talle: item.talle || null,
           stock: item.stock,
           crear: true,
         }))
@@ -735,9 +802,11 @@ export default function MonitorPedidos() {
       const encabezados = (encabezado.fila || []).map((v, i) => String(v ?? "").trim() || `Columna ${i + 1}`);
       const codigo = elegirColumnaStock(encabezados, ["codigo", "cod", "sku", "id"]);
       const descripcion = elegirColumnaStock(encabezados, ["articulo", "producto", "descripcion", "nombre"]);
+      const color = elegirColumnaStock(encabezados, ["color", "colour", "tono"]);
+      const talle = elegirColumnaStock(encabezados, ["talle", "talla", "size", "medida"]);
       const stock = elegirColumnaStock(encabezados, ["stock", "existencia", "existencias", "cantidad", "saldo"]);
 
-      setStockColumnas({ codigo, descripcion, stock });
+      setStockColumnas({ codigo, descripcion, color, talle, stock });
       setStockEncabezadoFila(encabezado.indice + 1);
 
       const datos = matriz.slice(encabezado.indice + 1)
@@ -754,7 +823,7 @@ export default function MonitorPedidos() {
       if (!codigo || !stock) {
         setStockMensaje("⚠️ La planilla se leyó, pero no pude detectar automáticamente Código y Stock. Todavía NO se modificó nada.");
       } else {
-        const resultado = await analizarProductosStock(datos, { codigo, descripcion, stock });
+        const resultado = await analizarProductosStock(datos, { codigo, descripcion, color, talle, stock });
         setStockMensaje(
           `✓ Planilla leída. ${resultado.reconocidos.length} reconocidos · ${resultado.noReconocidos.length} sin reconocer. Todavía NO se modificó el stock.`
         );
@@ -803,12 +872,16 @@ export default function MonitorPedidos() {
       ...stockReconocidos.map(item => ({
         codigo_archivo: item.codigoArchivo,
         descripcion: item.descripcionArchivo || item.producto_nombre || "",
+        color: item.color || null,
+        talle: item.talle || null,
         stock: Number(item.stock),
         crear: false,
       })),
       ...nuevosSeleccionados.map(item => ({
         codigo_archivo: item.codigo_archivo,
         descripcion: item.nombre || "",
+        color: item.color || null,
+        talle: item.talle || null,
         stock: Number(item.stock),
         crear: true,
       })),
@@ -824,7 +897,7 @@ export default function MonitorPedidos() {
       });
 
       if (error) throw error;
-      if (!data?.ok) throw new Error("Supabase no confirmó la importación.");
+      if (!data?.ok) throw new Error("El sistema no confirmó la importación.");
 
       setStockMensaje(
         `✅ Importación confirmada. ${Number(data.total_procesado || 0)} productos procesados · ` +
@@ -835,11 +908,12 @@ export default function MonitorPedidos() {
       setStockReconocidos([]);
       setStockNoReconocidos([]);
       setProductosNuevosPropuestos([]);
-      setStockColumnas({ codigo: "", descripcion: "", stock: "" });
+      setStockColumnas({ codigo: "", descripcion: "", color: "", talle: "", stock: "" });
       setStockEncabezadoFila(null);
       setArchivoStockNombre("");
 
       await cargarCatalogoProductosStock();
+      await cargarStockActualEmpresa();
 
       alert(
         `✅ IMPORTACIÓN COMPLETADA\n\n` +
@@ -1200,6 +1274,8 @@ export default function MonitorPedidos() {
           producto_id: it.producto_id,
           producto_nombre: nombre,
           codigo: it.codigo || "",
+          color: String(it.color || "").trim() || null,
+          talle: String(it.talle || "").trim() || null,
           cantidad: Math.max(1, Number(it.cant || 1)),
           precio_unitario: Number(calc.unitario.toFixed(2)),
           subtotal: Number(calc.subtotal.toFixed(2))
@@ -1234,6 +1310,12 @@ export default function MonitorPedidos() {
         .eq("empresa_id", pedidoActivo.empresa_id || empresaIdActual);
       if (cabeceraError) throw cabeceraError;
 
+      // 📦 Ajustar solamente la diferencia de stock respecto de la versión anterior de la NVI.
+      const { error: stockError } = await supabase.rpc("sincronizar_stock_pedido", {
+        p_pedido_id: pedidoActivo.id
+      });
+      if (stockError) throw stockError;
+
       setEditandoNvi(false);
       setItemsEdicion([]);
       setBusquedaEdicion("");
@@ -1262,12 +1344,13 @@ export default function MonitorPedidos() {
     try {
       setEliminandoPedido(true);
 
-      // IMPORTANTE:
-      // MonitorPedidos no modifica stock físico al crear una NVI. El stock físico
-      // se carga mediante confirmar_importacion_stock. Por eso NO sumamos stock
-      // aquí: hacerlo sin una operación de descuento registrada duplicaría existencias.
-      // Cuando el descuento automático de stock esté conectado a las ventas,
-      // la reversión debe hacerse en una única función SQL/transacción junto al borrado.
+      // 📦 Antes de borrar la NVI, devolver exactamente el stock que esta NVI
+      // había descontado. La función usa el registro de movimientos del pedido,
+      // así que no duplica devoluciones.
+      const { error: errorStock } = await supabase.rpc("revertir_stock_pedido", {
+        p_pedido_id: pedido.id
+      });
+      if (errorStock) throw errorStock;
 
       const { error: errorItems } = await supabase
         .from("pedido_items")
@@ -1477,7 +1560,7 @@ export default function MonitorPedidos() {
                   <div>
                     <div style={{ fontSize: "17px", fontWeight: "900", color: "#0f172a" }}>📊 Stock físico</div>
                     <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
-                      El Supervisor carga la planilla de existencias de su empresa. Esta primera etapa solo muestra una vista previa y no modifica Supabase.
+                      El Supervisor carga la planilla de existencias de su empresa. Podés revisar los datos antes de confirmar la actualización del stock.
                     </div>
                   </div>
 
@@ -1525,12 +1608,138 @@ export default function MonitorPedidos() {
                   </div>
                 )}
 
+                {(() => {
+                  const stockPorProducto = new Map();
+
+                  // Conservamos todas las filas de stock por producto para soportar
+                  // artículos simples y también variantes de color/talle.
+                  (stockActualEmpresa || []).forEach((fila) => {
+                    const pid = String(fila.producto_id || "");
+                    if (!pid) return;
+                    if (!stockPorProducto.has(pid)) stockPorProducto.set(pid, []);
+                    stockPorProducto.get(pid).push(fila);
+                  });
+
+                  const filasStock = [];
+                  (productosStockCatalogo || []).forEach((producto) => {
+                    const filas = stockPorProducto.get(String(producto.id)) || [];
+                    if (filas.length > 0) {
+                      filas.forEach(fila => filasStock.push({ producto, fila }));
+                    } else {
+                      filasStock.push({ producto, fila: null });
+                    }
+                  });
+
+                  const q = busquedaStockActual.trim().toLowerCase();
+                  const filtradas = filasStock.filter(({ producto, fila }) => {
+                    if (!q) return true;
+                    return [
+                      producto.codigo_cge,
+                      producto.nombre,
+                      producto.descripcion,
+                      producto.marca,
+                      fila?.color,
+                      fila?.talle,
+                      fila?.variante_color,
+                      fila?.variante_talle,
+                    ].some(v => String(v || "").toLowerCase().includes(q));
+                  });
+
+                  const conStock = filasStock.filter(({ fila }) => fila && Number(fila.stock_informado ?? 0) > 0).length;
+                  const sinStock = filasStock.filter(({ fila }) => fila && Number(fila.stock_informado ?? 0) <= 0).length;
+                  const noInformado = filasStock.filter(({ fila }) => !fila).length;
+
+                  return (
+                    <div style={{ marginTop: "16px", border: "1px solid #cbd5e1", borderRadius: "10px", overflow: "hidden" }}>
+                      <div style={{ padding: "12px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontSize: "14px", fontWeight: "900", color: "#0f172a" }}>📦 Stock actual de artículos</div>
+                            <div style={{ fontSize: "10px", color: "#64748b", marginTop: "2px" }}>
+                              Inventario guardado de esta empresa. Se refresca automáticamente cada 5 segundos.
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                            <input
+                              value={busquedaStockActual}
+                              onChange={e => setBusquedaStockActual(e.target.value)}
+                              placeholder="Buscar código, artículo, color o talle..."
+                              style={{ width: "280px", maxWidth: "70vw", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "7px", fontSize: "11px" }}
+                            />
+                            <button type="button" onClick={cargarStockActualEmpresa} style={{ padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "7px", background: "#fff", fontWeight: "800", cursor: "pointer" }}>
+                              ↻ Actualizar
+                            </button>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: esMovil ? "1fr" : "repeat(3, 1fr)", gap: "8px", marginTop: "10px" }}>
+                          <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "8px 10px" }}>
+                            <div style={{ fontSize: "9px", color: "#166534", fontWeight: "900" }}>CON STOCK</div>
+                            <div style={{ fontSize: "19px", color: "#15803d", fontWeight: "900" }}>{conStock}</div>
+                          </div>
+                          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "8px 10px" }}>
+                            <div style={{ fontSize: "9px", color: "#991b1b", fontWeight: "900" }}>SIN STOCK</div>
+                            <div style={{ fontSize: "19px", color: "#dc2626", fontWeight: "900" }}>{sinStock}</div>
+                          </div>
+                          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "8px 10px" }}>
+                            <div style={{ fontSize: "9px", color: "#475569", fontWeight: "900" }}>NO INFORMADO</div>
+                            <div style={{ fontSize: "19px", color: "#475569", fontWeight: "900" }}>{noInformado}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ maxHeight: "380px", overflow: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", minWidth: "720px" }}>
+                          <thead style={{ position: "sticky", top: 0, background: "#eef2ff", zIndex: 1 }}>
+                            <tr>
+                              {["Código", "Artículo", "Color", "Talle", "Stock", "Actualizado"].map(h => (
+                                <th key={h} style={{ textAlign: h === "Stock" ? "right" : "left", padding: "8px", borderBottom: "1px solid #cbd5e1" }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cargandoStockActual && filtradas.length === 0 ? (
+                              <tr><td colSpan="6" style={{ padding: "14px", textAlign: "center", color: "#64748b" }}>Cargando stock...</td></tr>
+                            ) : filtradas.length === 0 ? (
+                              <tr><td colSpan="6" style={{ padding: "14px", textAlign: "center", color: "#64748b" }}>No hay artículos para mostrar.</td></tr>
+                            ) : filtradas.map(({ producto, fila }, idx) => {
+                              const cantidad = fila ? Number(fila.stock_informado ?? 0) : null;
+                              const fecha = fila?.fecha_actualizacion;
+                              return (
+                                <tr key={`${producto.id}-${fila?.id || idx}`} style={{ background: idx % 2 ? "#fff" : "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
+                                  <td style={{ padding: "8px", fontWeight: "800", whiteSpace: "nowrap" }}>{producto.codigo_cge || "—"}</td>
+                                  <td style={{ padding: "8px" }}>{producto.nombre || producto.descripcion || "Artículo"}</td>
+                                  <td style={{ padding: "8px" }}>{fila?.color || fila?.variante_color || "—"}</td>
+                                  <td style={{ padding: "8px" }}>{fila?.talle || fila?.variante_talle || "—"}</td>
+                                  <td style={{
+                                    padding: "8px",
+                                    textAlign: "right",
+                                    fontWeight: "900",
+                                    color: cantidad === null ? "#94a3b8" : cantidad <= 0 ? "#dc2626" : cantidad <= 5 ? "#d97706" : "#15803d"
+                                  }}>
+                                    {cantidad === null ? "No informado" : cantidad.toLocaleString("es-AR")}
+                                  </td>
+                                  <td style={{ padding: "8px", color: "#64748b", whiteSpace: "nowrap" }}>
+                                    {fecha ? new Date(fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {stockVistaPrevia.length > 0 && (
                   <>
                     <div style={{ display: "grid", gridTemplateColumns: esMovil ? "1fr" : "repeat(3, minmax(180px, 1fr))", gap: "8px", marginBottom: "12px" }}>
                       {[
                         ["Código", stockColumnas.codigo],
                         ["Artículo / descripción", stockColumnas.descripcion],
+                        ["Color", stockColumnas.color],
+                        ["Talle", stockColumnas.talle],
                         ["Stock", stockColumnas.stock],
                       ].map(([etiqueta, valor]) => (
                         <div key={etiqueta} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "9px 10px" }}>
@@ -1630,7 +1839,7 @@ export default function MonitorPedidos() {
                           </div>
 
                           <div style={{ marginTop: "9px", padding: "8px 9px", borderRadius: "7px", background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e40af", fontSize: "10px", lineHeight: 1.45 }}>
-                            Seleccionados para una futura incorporación: <strong>{productosNuevosPropuestos.filter(p => p.crear).length}</strong>. El Supervisor puede desmarcar cualquier fila que no quiera incorporar. El CGE se generará en Supabase recién al confirmar en un paso posterior.
+                            Seleccionados para una futura incorporación: <strong>{productosNuevosPropuestos.filter(p => p.crear).length}</strong>. El Supervisor puede desmarcar cualquier fila que no quiera incorporar. El CGE se generará recién al confirmar la incorporación.
                           </div>
                         </div>
                       </div>
@@ -1655,6 +1864,8 @@ export default function MonitorPedidos() {
                             <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Fila</th>
                             <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Código</th>
                             <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Artículo</th>
+                            <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Color</th>
+                            <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Talle</th>
                             <th style={{ textAlign: "right", padding: "8px", borderBottom: "1px solid #e2e8f0" }}>Stock</th>
                           </tr>
                         </thead>
@@ -1664,6 +1875,8 @@ export default function MonitorPedidos() {
                               <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", color: "#64748b" }}>{fila.__fila}</td>
                               <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", fontWeight: "700" }}>{stockColumnas.codigo ? String(fila[stockColumnas.codigo] ?? "") : "—"}</td>
                               <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9" }}>{stockColumnas.descripcion ? String(fila[stockColumnas.descripcion] ?? "") : "—"}</td>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9" }}>{stockColumnas.color ? String(fila[stockColumnas.color] ?? "") : "—"}</td>
+                              <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9" }}>{stockColumnas.talle ? String(fila[stockColumnas.talle] ?? "") : "—"}</td>
                               <td style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", textAlign: "right", fontWeight: "800" }}>{stockColumnas.stock ? String(fila[stockColumnas.stock] ?? "") : "—"}</td>
                             </tr>
                           ))}

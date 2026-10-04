@@ -3073,7 +3073,7 @@ useEffect(() => {
           📦 Pedidos
         </button>
         <button
-          onClick={() => setSeccionActiva("stock")}
+          onClick={() => window.location.href = "/pedidos?seccion=stock"}
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "stock" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "stock" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
           📥 CARGAR STOCK

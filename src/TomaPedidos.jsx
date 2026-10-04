@@ -389,6 +389,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
           producto_id: it.productoId,
           producto_nombre: nombreConDetalle,
           codigo: it.codigo,
+          color: String(it.color || '').trim() || null,
+          talle: String(it.talle || '').trim() || null,
           cantidad: Number(it.cant || 0),
           precio_unitario: Number((Number(it.precioLista || 0) * (1 - ajuste / 100)).toFixed(2)),
           subtotal: Number(neto.toFixed(2))
@@ -419,7 +421,17 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         throw new Error(`El pedido no pudo guardar sus artículos: ${errorItems.message}`);
       }
 
-      // Respaldo local solamente DESPUÉS de que Supabase confirmó cabecera + artículos.
+      // 📦 Sincronizar stock físico con la NVI. La función SQL compara lo ya
+      // descontado para este pedido contra los renglones actuales, por lo que
+      // sirve tanto para una venta nueva como para una edición sin duplicar movimientos.
+      const { error: errorStock } = await supabase.rpc('sincronizar_stock_pedido', {
+        p_pedido_id: pedidoId
+      });
+      if (errorStock) {
+        throw new Error(`La NVI se guardó, pero no se pudo sincronizar el stock: ${errorStock.message}`);
+      }
+
+      // Respaldo local solamente DESPUÉS de que Supabase confirmó cabecera + artículos + stock.
       const respaldoLocal = { id: pedidoId, ...pedidoPayload, items: itemsPedido };
       const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
       const historicoActualizado = pedidoExistente?.id
