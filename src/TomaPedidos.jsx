@@ -9,8 +9,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   const [disponibilidad, setDisponibilidad] = useState({});
   const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
   const [errorCatalogo, setErrorCatalogo] = useState('');
-  const [medioPago, setMedioPago] = useState('Efectivo');
-  const [diasCuentaCorriente, setDiasCuentaCorriente] = useState('');
+  const [medioPago, setMedioPago] = useState(pedidoExistente?.medioPago || 'Efectivo');
+  const [diasCuentaCorriente, setDiasCuentaCorriente] = useState(pedidoExistente?.diasCuentaCorriente || '');
   const [observaciones, setObservaciones] = useState(pedidoExistente?.observaciones || '');
   const [enviarWsp, setEnviarWsp] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -326,7 +326,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     setGuardando(true);
 
     try {
-      const pedidoId = crypto.randomUUID();
+      const pedidoId = pedidoExistente?.id || crypto.randomUUID();
       const ahora = new Date().toISOString();
       const descuentoPorcentaje = subtotalBruto > 0
         ? Number(((totalDescuentos / subtotalBruto) * 100).toFixed(4))
@@ -343,8 +343,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
       if (observaciones?.trim()) notasPartes.push(observaciones.trim());
 
       const pedidoPayload = {
-        id: pedidoId,
-        fecha: ahora,
+        ...(pedidoExistente ? {} : { id: pedidoId }),
+        fecha: pedidoExistente?.fecha || ahora,
         comercio_id: String(comercio?.id || ''),
         comercio_nombre: comercio?.nombre || `Comercio #${comercio?.id || ''}`,
         preventista: usuario?.nombre || 'Preventista',
@@ -357,9 +357,21 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         notas: notasPartes.join(' | ')
       };
 
-      const { error: errorPedido } = await supabase
-        .from('pedidos')
-        .insert([pedidoPayload]);
+      let errorPedido = null;
+
+      if (pedidoExistente?.id) {
+        const { error } = await supabase
+          .from('pedidos')
+          .update(pedidoPayload)
+          .eq('id', pedidoExistente.id)
+          .eq('empresa_id', empresaId);
+        errorPedido = error;
+      } else {
+        const { error } = await supabase
+          .from('pedidos')
+          .insert([{ id: pedidoId, ...pedidoPayload }]);
+        errorPedido = error;
+      }
 
       if (errorPedido) throw new Error(`No se pudo guardar el pedido: ${errorPedido.message}`);
 
@@ -383,21 +395,37 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         };
       });
 
+      if (pedidoExistente?.id) {
+        const { error: errorBorradoItems } = await supabase
+          .from('pedido_items')
+          .delete()
+          .eq('pedido_id', pedidoExistente.id);
+
+        if (errorBorradoItems) {
+          throw new Error(`No se pudieron preparar los artículos para actualizar: ${errorBorradoItems.message}`);
+        }
+      }
+
       const { error: errorItems } = await supabase
         .from('pedido_items')
         .insert(itemsPayload);
 
       if (errorItems) {
-        // Intentamos no dejar una cabecera huérfana si fallan los renglones.
-        await supabase.from('pedidos').delete().eq('id', pedidoId);
+        // En una venta nueva evitamos dejar una cabecera huérfana.
+        // En edición NO borramos la NVI: informamos el error para no perder la cabecera.
+        if (!pedidoExistente?.id) {
+          await supabase.from('pedidos').delete().eq('id', pedidoId);
+        }
         throw new Error(`El pedido no pudo guardar sus artículos: ${errorItems.message}`);
       }
 
       // Respaldo local solamente DESPUÉS de que Supabase confirmó cabecera + artículos.
-      const respaldoLocal = { ...pedidoPayload, items: itemsPedido };
+      const respaldoLocal = { id: pedidoId, ...pedidoPayload, items: itemsPedido };
       const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
-      historico.unshift(respaldoLocal);
-      localStorage.setItem('pedidos_guardados', JSON.stringify(historico));
+      const historicoActualizado = pedidoExistente?.id
+        ? [respaldoLocal, ...historico.filter(p => p.id !== pedidoExistente.id)]
+        : [respaldoLocal, ...historico];
+      localStorage.setItem('pedidos_guardados', JSON.stringify(historicoActualizado));
 
       // WhatsApp si está tildado
       if (enviarWsp) {
@@ -445,13 +473,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         </button>
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
-            {pedidoExistente ? 'Modificar Pedido #104' : 'Toma de Pedido'}
+            {pedidoExistente ? `Editar NVI #${String(pedidoExistente.numero_pedido || '').padStart(6, '0')}` : 'Toma de Pedido'}
           </h1>
-          {pedidoExistente && (
-            <span style={{ fontSize: '11px', color: '#d97706', fontWeight: '700' }}>
-              ⏱️ Ventana abierta: 15 min restantes
-            </span>
-          )}
+
         </div>
         <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: '#2563eb', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '13px' }}>
           {usuario?.nombre ? usuario.nombre[0] : 'A'}
@@ -473,9 +497,9 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
           <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '12px', padding: '12px', marginBottom: '16px', display: 'flex', gap: '10px' }}>
             <span style={{ fontSize: '20px' }}>✏️</span>
             <div>
-              <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>Modificando Pedido #104 (Unificación Activa)</div>
+              <div style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>Editando una venta ya guardada</div>
               <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#1e3a8a' }}>
-                Los nuevos ítems se unificarán en una <strong>sola comanda de reparto</strong> antes del despacho del camión.
+                Los cambios se guardarán sobre esta misma NVI. No se creará una venta nueva.
               </p>
             </div>
           </div>
@@ -648,7 +672,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                         {requiereColor(item) && (
                           <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
                             Color
-                            <select disabled={item.confirmadoItem !== false} value={item.color || ''} onChange={(e) => actualizarItem(item.id, { color: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '3px', padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}>
+                            <select disabled={!pedidoExistente && item.confirmadoItem !== false} value={item.color || ''} onChange={(e) => actualizarItem(item.id, { color: e.target.value })} style={{ width: '100%', boxSizing: 'border-box', marginTop: '3px', padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}>
                               <option value="">Elegir</option>
                               <option value="Negro">Negro</option>
                               <option value="Marrón">Marrón</option>
@@ -660,7 +684,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                         {requiereTalle(item) && (
                           <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
                             Talle
-                            <select disabled={item.confirmadoItem !== false} value={item.talle || ''} onChange={(e) => actualizarItem(item.id, { talle: e.target.value })} style={{ width: '100%', marginTop: '3px', padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}>
+                            <select disabled={!pedidoExistente && item.confirmadoItem !== false} value={item.talle || ''} onChange={(e) => actualizarItem(item.id, { talle: e.target.value })} style={{ width: '100%', marginTop: '3px', padding: '5px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}>
                               <option value="">Elegir</option>
                               {Array.from({ length: 18 }, (_, i) => 33 + i).map(t => <option key={t} value={t}>{t}</option>)}
                             </select>
@@ -672,7 +696,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: '8px', alignItems: 'end', marginBottom: '10px' }}>
                       <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
                         Ajuste
-                        <select disabled={item.confirmadoItem !== false} value={item.ajusteTipo || 'normal'} onChange={(e) => actualizarItem(item.id, { ajusteTipo: e.target.value, ajustePct: e.target.value === 'normal' ? 0 : Number(item.ajustePct || 0), bonif: 0 })} style={{ width: '100%', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                        <select disabled={!pedidoExistente && item.confirmadoItem !== false} value={item.ajusteTipo || 'normal'} onChange={(e) => actualizarItem(item.id, { ajusteTipo: e.target.value, ajustePct: e.target.value === 'normal' ? 0 : Number(item.ajustePct || 0), bonif: 0 })} style={{ width: '100%', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                           <option value="normal">Normal</option>
                           <option value="descuento">Descuento</option>
                           <option value="recargo">Recargo</option>
@@ -681,15 +705,15 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
                       <label style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
                         %
-                        <input type="number" min="0" step="1" disabled={item.confirmadoItem !== false || (item.ajusteTipo || 'normal') === 'normal'} value={item.ajustePct || ''} onChange={(e) => actualizarItem(item.id, { ajustePct: Math.max(0, Number(e.target.value || 0)) })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                        <input type="number" min="0" step="1" disabled={(!pedidoExistente && item.confirmadoItem !== false) || (item.ajusteTipo || 'normal') === 'normal'} value={item.ajustePct || ''} onChange={(e) => actualizarItem(item.id, { ajustePct: Math.max(0, Number(e.target.value || 0)) })} placeholder="0" style={{ width: '100%', boxSizing: 'border-box', marginTop: '4px', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
                       </label>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <button disabled={item.confirmadoItem !== false} onClick={() => modificarCant(item.id, -1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>-</button>
+                        <button disabled={!pedidoExistente && item.confirmadoItem !== false} onClick={() => modificarCant(item.id, -1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>-</button>
                         <span style={{ fontSize: '15px', fontWeight: '800', minWidth: '24px', textAlign: 'center' }}>{item.cant}</span>
-                        <button disabled={item.confirmadoItem !== false} onClick={() => modificarCant(item.id, 1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #2563eb', background: '#2563eb', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>+</button>
+                        <button disabled={!pedidoExistente && item.confirmadoItem !== false} onClick={() => modificarCant(item.id, 1)} style={{ width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #2563eb', background: '#2563eb', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' }}>+</button>
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>${subtotalItem.toLocaleString()}</div>
@@ -821,13 +845,13 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             }}
           >
             {guardando ? (
-              <span>⏳ Procesando Comanda...</span>
+              <span>⏳ Guardando...</span>
             ) : exitoGuardado ? (
-              <span>✅ Comanda Registrada y Enviada</span>
+              <span>✅ Venta guardada</span>
             ) : pedidoExistente ? (
               <>
-                <span>🔁 Actualizar y Reenviar Pedido #104</span>
-                <span style={{ fontSize: '11px', fontWeight: 'normal', opacity: 0.9 }}>Comanda Única · Sincroniza Depósito, WhatsApp y Supervisor</span>
+                <span>💾 Guardar cambios</span>
+                <span style={{ fontSize: '11px', fontWeight: 'normal', opacity: 0.9 }}>Actualiza esta misma NVI</span>
               </>
             ) : (
               <>

@@ -16,6 +16,10 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const [cargandoVentas, setCargandoVentas] = useState(false);
   const [busquedaVentas, setBusquedaVentas] = useState("");
   const [nuevaVentaDesdeVentas, setNuevaVentaDesdeVentas] = useState(false);
+  const [ventaDetalle, setVentaDetalle] = useState(null);
+  const [itemsVentaDetalle, setItemsVentaDetalle] = useState([]);
+  const [cargandoDetalleVenta, setCargandoDetalleVenta] = useState(false);
+  const [pedidoEditando, setPedidoEditando] = useState(null);
   const [guardandoCliente, setGuardandoCliente] = useState(false);
   const [listasCliente, setListasCliente] = useState([]);
   const [listaParaAsignar, setListaParaAsignar] = useState("");
@@ -211,7 +215,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
 
   const asignarListaAlCliente = async () => {
     if (!comercioSeleccionado?.id) return;
-    if (!listaParaAsignar) return alert("⚠️ Elegí una lista de precios.");
+    if (!listaParaAsignar) return alert("⚠️ Elegí una productos y precios.");
 
     const lista = listasPrecios.find(x => x.id === listaParaAsignar);
     if (!lista) return alert("⚠️ No pude identificar la lista.");
@@ -305,6 +309,132 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     }
   };
 
+  const abrirDetalleVenta = async (venta) => {
+    if (!venta?.id) return;
+    setVentaDetalle(venta);
+    setItemsVentaDetalle([]);
+    setCargandoDetalleVenta(true);
+    setVista("detalleVenta");
+
+    try {
+      const { data, error } = await supabase
+        .from("pedido_items")
+        .select("*")
+        .eq("pedido_id", venta.id);
+
+      if (error) throw error;
+      setItemsVentaDetalle(data || []);
+    } catch (error) {
+      console.error("Simplex - error cargando detalle NVI:", error);
+      alert("❌ No pude cargar el detalle de esta NVI.");
+      setItemsVentaDetalle([]);
+    } finally {
+      setCargandoDetalleVenta(false);
+    }
+  };
+
+  const editarVentaActual = async () => {
+    if (!ventaDetalle?.id || cargandoDetalleVenta) return;
+
+    const comercioId = String(ventaDetalle.comercio_id || '');
+    const comercio = comercios.find(c => String(c.id) === comercioId);
+
+    if (!comercio) {
+      alert("❌ No pude encontrar el cliente de esta NVI.");
+      return;
+    }
+
+    const productoIds = [...new Set(itemsVentaDetalle.map(it => it.producto_id).filter(Boolean))];
+    let productosPorId = new Map();
+
+    if (productoIds.length > 0) {
+      const { data: productos, error } = await supabase
+        .from("productos")
+        .select("id, marca, usa_color, usa_talle")
+        .in("id", productoIds);
+
+      if (error) {
+        alert("❌ No pude preparar los artículos para editar.");
+        return;
+      }
+      productosPorId = new Map((productos || []).map(p => [String(p.id), p]));
+    }
+
+    const items = itemsVentaDetalle.map((it, idx) => {
+      const producto = productosPorId.get(String(it.producto_id)) || {};
+      const nombreGuardado = String(it.producto_nombre || "Artículo");
+      const ajusteMatch = nombreGuardado.match(/·\s*(Descuento|Recargo)\s+([\d.,]+)%\s*$/i);
+      const ajusteTipo = ajusteMatch ? ajusteMatch[1].toLowerCase() : "normal";
+      const ajustePct = ajusteMatch ? Number(String(ajusteMatch[2]).replace(",", ".")) : 0;
+      const colorMatch = nombreGuardado.match(/·\s*Color\s+([^·]+?)(?=\s*·|$)/i);
+      const talleMatch = nombreGuardado.match(/·\s*Talle\s+([^·]+?)(?=\s*·|$)/i);
+      const nombreLimpio = nombreGuardado
+        .replace(/\s*·\s*Color\s+[^·]+/i, "")
+        .replace(/\s*·\s*Talle\s+[^·]+/i, "")
+        .replace(/\s*·\s*(Normal|Descuento\s+[\d.,]+%|Recargo\s+[\d.,]+%)\s*$/i, "")
+        .trim();
+
+      const precioNeto = Number(it.precio_unitario || 0);
+      const divisor = ajusteTipo === "descuento"
+        ? (1 - ajustePct / 100)
+        : ajusteTipo === "recargo"
+          ? (1 + ajustePct / 100)
+          : 1;
+      const precioLista = divisor > 0 ? precioNeto / divisor : precioNeto;
+
+      return {
+        id: it.id || `existente-${idx}`,
+        productoId: it.producto_id,
+        codigo: it.codigo || "",
+        marca: producto.marca || "",
+        nombre: nombreLimpio,
+        precioLista: Number(precioLista.toFixed(2)),
+        usaColor: producto.usa_color === true,
+        usaTalle: producto.usa_talle === true,
+        ajusteTipo,
+        ajustePct,
+        bonif: 0,
+        color: colorMatch ? colorMatch[1].trim() : "",
+        talle: talleMatch ? talleMatch[1].trim() : "",
+        cant: Number(it.cantidad || 0),
+        confirmadoItem: true,
+        esNuevo: false,
+        nota: ""
+      };
+    });
+
+    const notas = String(ventaDetalle.notas || "");
+    const medioMatch = notas.match(/Medio de pago:\s*([^|]+)/i);
+    let medioPago = "Efectivo";
+    let diasCuentaCorriente = "";
+    if (medioMatch) {
+      const textoMedio = medioMatch[1].trim();
+      if (/cuenta corriente/i.test(textoMedio)) {
+        medioPago = "Cuenta corriente";
+        const dias = textoMedio.match(/(\d+)\s*d[ií]as/i);
+        diasCuentaCorriente = dias ? dias[1] : "";
+      } else {
+        medioPago = textoMedio;
+      }
+    }
+    const observaciones = notas
+      .split("|")
+      .map(x => x.trim())
+      .filter(x => x && !/^Medio de pago:/i.test(x))
+      .join(" | ");
+
+    setPedidoEditando({
+      ...ventaDetalle,
+      items,
+      observaciones,
+      medioPago,
+      diasCuentaCorriente
+    });
+    setComercioSeleccionado(comercio);
+    setNuevaVentaDesdeVentas(true);
+    setTomandoPedido(true);
+  };
+
   const abrirModulo = (modulo) => {
     if (modulo === "clientes") return setVista("clientes");
     if (modulo === "ventas") {
@@ -329,7 +459,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     const ws=XLSX.utils.aoa_to_sheet(filas);
     ws["!cols"]=[{wch:16},{wch:18},{wch:38},{wch:22},{wch:14}];
     const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,"Lista de precios");
+    XLSX.utils.book_append_sheet(wb,ws,"Productos y precios");
     XLSX.writeFile(wb,"plantilla_lista_precios_rutacomercio.xlsx");
   };
 
@@ -475,7 +605,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     if(!listaActualizando?.id||!vistaPreviaActualizacion) return;
     const c=vistaPreviaActualizacion;
     if(c.conProblemas?.length) return alert("⚠️ Corregí primero las filas con problemas.");
-    if(!window.confirm(`🔄 ACTUALIZAR LISTA\n\n${listaActualizando.nombre}\nCambios de precio: ${c.cambiosPrecio.length}\nProductos nuevos: ${c.productosNuevos.length}\nProductos que ya no vienen: ${c.productosQuitar.length}\n\n¿Confirmar actualización?`)) return;
+    if(!window.confirm(`🔄 ACTUALIZAR PRECIOS\n\n${listaActualizando.nombre}\nCambios de precio: ${c.cambiosPrecio.length}\nProductos nuevos: ${c.productosNuevos.length}\nProductos que ya no vienen: ${c.productosQuitar.length}\n\n¿Confirmar actualización?`)) return;
     setGuardandoActualizacion(true);
     try{
       const {data:res,error}=await supabase.rpc("actualizar_lista_precios",{
@@ -557,8 +687,10 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       <TomaPedidos
         comercio={comercioSeleccionado}
         usuario={perfil}
+        pedidoExistente={pedidoEditando}
         onVolver={() => {
           setTomandoPedido(false);
+          setPedidoEditando(null);
           if (nuevaVentaDesdeVentas) {
             setNuevaVentaDesdeVentas(false);
             setComercioSeleccionado(null);
@@ -568,7 +700,9 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
         }}
         onPedidoGuardado={() => {
           setTomandoPedido(false);
-          alert("🚀 Pedido enviado correctamente.");
+          const eraEdicion = !!pedidoEditando;
+          setPedidoEditando(null);
+          alert(eraEdicion ? "✅ NVI actualizada correctamente." : "🚀 Pedido enviado correctamente.");
 
           if (nuevaVentaDesdeVentas) {
             setNuevaVentaDesdeVentas(false);
@@ -672,7 +806,19 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
                 const cliente = p.cliente || p.comercio_nombre || `Comercio #${p.comercio_id || ""}`;
                 const total = Number(p.total || p.total_pedido || 0);
                 return (
-                  <div key={p.id} style={estilos.panelSeccion}>
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => abrirDetalleVenta(p)}
+                    style={{
+                      ...estilos.panelSeccion,
+                      width: "100%",
+                      textAlign: "left",
+                      color: "inherit",
+                      cursor: "pointer",
+                      border: "1px solid #334155"
+                    }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
                       <div>
                         <div style={{ fontSize: "14px", fontWeight: 950 }}>
@@ -686,11 +832,102 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
                         ${total.toLocaleString("es-AR")}
                       </div>
                     </div>
+                    <div style={{ marginTop:"7px", fontSize:"11px", color:"#60a5fa", fontWeight:900 }}>
+                      Ver detalle →
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  if (vista === "detalleVenta" && ventaDetalle) {
+    const numero = String(ventaDetalle.numero_pedido || "").padStart(6, "0");
+    const fecha = ventaDetalle.created_at
+      ? new Date(ventaDetalle.created_at).toLocaleString("es-AR", {
+          day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"
+        })
+      : "Sin fecha";
+    const cliente = ventaDetalle.cliente || ventaDetalle.comercio_nombre || `Comercio #${ventaDetalle.comercio_id || ""}`;
+    const total = Number(ventaDetalle.total || ventaDetalle.total_pedido || 0);
+
+    return (
+      <div style={estilos.pagina}>
+        <header style={estilos.header}>
+          <button type="button" onClick={() => setVista("ventas")} style={estilos.botonVolver}>← Ventas</button>
+          <div style={estilos.marcaChica}>RutaComercio Simplex · V1.2</div>
+        </header>
+
+        <main style={estilos.contenedorFicha}>
+          <h2 style={{marginTop:0, marginBottom:"4px"}}>🧾 NVI #{numero || "—"}</h2>
+          <div style={{color:"#94a3b8",fontSize:"12px",marginBottom:"12px"}}>{fecha} · {ventaDetalle.estado || "Ingresado"}</div>
+
+          <div style={estilos.panelSeccion}>
+            <div style={{fontSize:"11px",color:"#94a3b8"}}>CLIENTE</div>
+            <div style={{fontSize:"16px",fontWeight:950,marginTop:"3px"}}>{cliente}</div>
+          </div>
+
+          <div style={{fontWeight:950,margin:"14px 0 8px"}}>Artículos</div>
+          {cargandoDetalleVenta ? (
+            <div style={estilos.mensaje}>⏳ Cargando detalle...</div>
+          ) : itemsVentaDetalle.length === 0 ? (
+            <div style={estilos.mensaje}>Esta NVI no tiene renglones para mostrar.</div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+              {itemsVentaDetalle.map((it, idx) => {
+                const cantidad = Number(it.cantidad || 0);
+                const unitario = Number(it.precio_unitario || 0);
+                const subtotal = Number(it.subtotal ?? (cantidad * unitario));
+                return (
+                  <div key={it.id || idx} style={estilos.panelSeccion}>
+                    <div style={{fontWeight:900,fontSize:"14px"}}>
+                      {it.codigo ? `${it.codigo} · ` : ""}{it.producto_nombre || it.nombre || "Artículo"}
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:"10px",marginTop:"7px",fontSize:"12px",color:"#cbd5e1"}}>
+                      <span>{cantidad} × ${unitario.toLocaleString("es-AR")}</span>
+                      <strong style={{color:"#fff"}}>${subtotal.toLocaleString("es-AR")}</strong>
+                    </div>
                   </div>
                 );
               })}
             </div>
           )}
+
+          {ventaDetalle.observaciones && (
+            <div style={{...estilos.panelSeccion,marginTop:"12px"}}>
+              <div style={{fontSize:"11px",color:"#94a3b8"}}>OBSERVACIONES</div>
+              <div style={{marginTop:"5px",fontSize:"13px"}}>{ventaDetalle.observaciones}</div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            disabled={cargandoDetalleVenta || itemsVentaDetalle.length === 0}
+            onClick={editarVentaActual}
+            style={{
+              width:"100%",
+              marginTop:"14px",
+              marginBottom:"2px",
+              padding:"12px",
+              borderRadius:"10px",
+              border:"1px solid #f59e0b",
+              background:"#fffbeb",
+              color:"#92400e",
+              fontWeight:950,
+              cursor:"pointer"
+            }}
+          >
+            ✏️ EDITAR VENTA
+          </button>
+
+          <div style={{...estilos.panelSeccion,marginTop:"12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontWeight:900}}>TOTAL NVI</span>
+            <span style={{fontSize:"22px",fontWeight:950}}>${total.toLocaleString("es-AR")}</span>
+          </div>
         </main>
       </div>
     );
@@ -704,19 +941,19 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           <div style={estilos.marcaChica}>RutaComercio Simplex · V1.2</div>
         </header>
         <main style={estilos.contenedorFicha}>
-          <h2 style={{marginTop:0}}>📦 Productos y listas</h2>
-          <div style={estilos.ayudaAlta}>Misma plantilla oficial de RutaComercio que utiliza el Supervisor. Todo queda asociado exclusivamente a tu empresa.</div>
+          <h2 style={{marginTop:0}}>📦 Productos y precios</h2>
+          <div style={estilos.ayudaAlta}>Cargá y actualizá los productos y precios de tu empresa.</div>
           <div style={estilos.panelSeccion}>
-            <div style={{fontWeight:900,marginBottom:"8px"}}>Tus listas de precios</div>
+            <div style={{fontWeight:900,marginBottom:"8px"}}>Tus productos y precios</div>
             {cargandoListas ? <div>⏳ Cargando...</div> : listasPrecios.length ? listasPrecios.map(l=>(
               <div key={l.id} style={{...estilos.filaLista,alignItems:"stretch",flexDirection:"column"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px"}}>
                   <div><strong>{l.nombre}</strong><div style={{fontSize:"11px",color:"#94a3b8"}}>{l.codigo||"Sin código"}</div></div>
                   {l.predeterminada&&<span style={estilos.badge}>Predeterminada</span>}
                 </div>
-                <button type="button" onClick={()=>iniciarActualizacionLista(l)} style={{...estilos.botonChico,backgroundColor:"#0f766e"}}>🔄 ACTUALIZAR LISTA</button>
+                <button type="button" onClick={()=>iniciarActualizacionLista(l)} style={{...estilos.botonChico,backgroundColor:"#0f766e"}}>🔄 ACTUALIZAR PRECIOS</button>
               </div>
-            )):<div style={{color:"#94a3b8",fontSize:"13px"}}>Todavía no tenés listas de precios.</div>}
+            )):<div style={{color:"#94a3b8",fontSize:"13px"}}>Todavía no tenés productos y precios cargados.</div>}
             <input ref={inputActualizarListaRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoActualizacion} style={{display:"none"}}/>
             {listaActualizando&&<div style={{...estilos.vistaPrevia,marginTop:"14px"}}>
               <div style={{fontWeight:900}}>🔄 Actualizando: {listaActualizando.nombre}</div>
@@ -994,7 +1231,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
               {[
                 ["clientes","🏪","Clientes","Alta, búsqueda, pedidos e historial"],
                 ["ventas","🧾","Ventas","NVI e historial general"],
-                ["productos","📦","Productos y listas","Catálogo y precios"],
+                ["productos","📦","Productos y precios","Catálogo y precios"],
                 ["stock","📊","Stock","Existencias y alertas"],
                 ["ruta","🗺️","Rutas y visitas","Organizá tus días de calle"],
                 ["estadisticas","📈","Estadísticas","Tu actividad y resultados"],
