@@ -978,6 +978,10 @@ const solicitarNoVisitar = async (comercio) => {
   const [jornadaActiva, setJornadaActiva] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [vistaComercios, setVistaComercios] = useState("HOY");
+  const [consultandoPrecios, setConsultandoPrecios] = useState(false);
+  const [busquedaPrecio, setBusquedaPrecio] = useState("");
+  const [productosPrecio, setProductosPrecio] = useState([]);
+  const [cargandoPrecios, setCargandoPrecios] = useState(false);
   const [destinoMapa, setDestinoMapa] = useState(null);
   const [llegueDestino, setLlegueDestino] = useState(null);
   const [tieneStockDestino, setTieneStockDestino] = useState(null);
@@ -1092,32 +1096,8 @@ const solicitarNoVisitar = async (comercio) => {
           ...prev.filter(c => c !== nuevo)
         ]);
 
-        // Buscar la lista activa predeterminada de la empresa y asignarla al nuevo comercio.
-        const { data: listaPredeterminada, error: errorLista } = await supabase
-          .from("listas_precios")
-          .select("id")
-          .ilike("empresa", String(nuevo.empresa || "").trim())
-          .eq("activo", true)
-          .eq("predeterminada", true)
-          .limit(1)
-          .maybeSingle();
-
-        if (errorLista) {
-          console.error("Error buscando lista predeterminada:", errorLista);
-        } else if (listaPredeterminada?.id) {
-          const { error: errorAsignacion } = await supabase
-            .from("comercios_listas")
-            .insert([{
-              comercio_id: comercioCreado.id,
-              lista_id: listaPredeterminada.id
-            }]);
-
-          if (errorAsignacion) {
-            console.error("Error asignando lista predeterminada:", errorAsignacion);
-          }
-        } else {
-          console.warn("La empresa no tiene una lista activa predeterminada:", nuevo.empresa);
-        }
+        // RutaComercio usa un único precio base de la empresa.
+        // Un comercio nuevo no necesita ninguna asignación de lista.
 
         // En Modo Manejo no mostramos ventanas que obliguen al preventista a tocar la pantalla.
         if (!modoManejo) {
@@ -1317,6 +1297,89 @@ obtenerUbicacionFresca()
 
     return a.distancia_actual - b.distancia_actual;
   });
+
+  const cargarProductosParaConsulta = async () => {
+    const pActivo = perfil || perfilProp || null;
+    if (!pActivo?.empresa_id) {
+      alert("⚠️ No pude identificar la empresa del preventista.");
+      return;
+    }
+
+    setCargandoPrecios(true);
+    try {
+      // La estructura interna de listas se conserva por compatibilidad,
+      // pero para el preventista se usa un único precio base de la empresa.
+      const { data: listas, error: errorListas } = await supabase
+        .from("listas_precios")
+        .select("id,predeterminada")
+        .eq("empresa_id", pActivo.empresa_id)
+        .eq("activo", true)
+        .order("predeterminada", { ascending: false });
+
+      if (errorListas) throw errorListas;
+
+      const listaBase = (listas || []).find(l => l.predeterminada) || (listas || [])[0];
+      if (!listaBase?.id) {
+        setProductosPrecio([]);
+        return;
+      }
+
+      const { data: precios, error: errorPrecios } = await supabase
+        .from("lista_productos")
+        .select("id,producto_id,codigo_lista,detalle_en_lista,precio,productos(id,codigo_cge,nombre,descripcion,marca,gtin)")
+        .eq("lista_id", listaBase.id)
+        .eq("activo", true);
+
+      if (errorPrecios) throw errorPrecios;
+
+      const productoIds = [...new Set((precios || []).map(x => x.producto_id).filter(Boolean))];
+      let stockPorProducto = new Map();
+
+      if (productoIds.length > 0) {
+        const { data: stocks, error: errorStock } = await supabase
+          .from("stock_informado")
+          .select("producto_id,stock,actualizado_at")
+          .eq("empresa_id", pActivo.empresa_id)
+          .in("producto_id", productoIds)
+          .order("actualizado_at", { ascending: false });
+
+        if (errorStock) {
+          console.warn("Consulta de precios: no se pudo cargar stock:", errorStock);
+        } else {
+          (stocks || []).forEach(s => {
+            const clave = String(s.producto_id);
+            if (!stockPorProducto.has(clave)) stockPorProducto.set(clave, s.stock);
+          });
+        }
+      }
+
+      setProductosPrecio((precios || []).map(x => ({
+        id: x.producto_id || x.id,
+        codigo: x.codigo_lista || x.productos?.codigo_cge || "",
+        cge: x.productos?.codigo_cge || "",
+        nombre: x.productos?.nombre || x.detalle_en_lista || "Producto",
+        descripcion: x.productos?.descripcion || "",
+        marca: x.productos?.marca || "",
+        gtin: x.productos?.gtin || "",
+        precio: Number(x.precio || 0),
+        stock: stockPorProducto.has(String(x.producto_id))
+          ? Number(stockPorProducto.get(String(x.producto_id)))
+          : null,
+      })));
+    } catch (error) {
+      console.error("Error consultando precios:", error);
+      setProductosPrecio([]);
+      alert("❌ No pude cargar precios y stock: " + (error?.message || "error desconocido"));
+    } finally {
+      setCargandoPrecios(false);
+    }
+  };
+
+  const abrirConsultaPrecios = async () => {
+    setBusquedaPrecio("");
+    setConsultandoPrecios(true);
+    await cargarProductosParaConsulta();
+  };
 
   const [tomandoPedido, setTomandoPedido] = useState(false);
   const [viendoHistorialCliente, setViendoHistorialCliente] = useState(false);
@@ -1997,6 +2060,93 @@ useEffect(() => {
             </div>
           )}
         </div>
+      </div>
+    );
+  }
+
+  if (consultandoPrecios) {
+    const q = busquedaPrecio.trim().toLowerCase();
+    const resultados = q
+      ? productosPrecio.filter(p =>
+          [p.codigo, p.cge, p.nombre, p.descripcion, p.marca, p.gtin]
+            .some(v => String(v || "").toLowerCase().includes(q))
+        )
+      : [];
+
+    return (
+      <div style={{ minHeight:"100vh", background:"#0f172a", color:"#fff", fontFamily:"sans-serif" }}>
+        <header style={{
+          padding:"10px 12px", background:"#1e293b", display:"flex",
+          alignItems:"center", justifyContent:"space-between", borderBottom:"1px solid #334155"
+        }}>
+          <button type="button" onClick={()=>setConsultandoPrecios(false)} style={{
+            border:"1px solid #64748b", background:"#0f172a", color:"#fff",
+            borderRadius:"8px", padding:"8px 10px", fontWeight:"800", cursor:"pointer"
+          }}>← VOLVER</button>
+          <div style={{fontSize:"13px",fontWeight:"900"}}>🔎 CONSULTAR PRECIOS</div>
+          <div style={{width:"72px"}} />
+        </header>
+
+        <main style={{padding:"14px",maxWidth:"720px",margin:"0 auto"}}>
+          <div style={{fontSize:"12px",color:"#94a3b8",marginBottom:"10px"}}>
+            Precio y stock disponibles sin iniciar una NVI.
+          </div>
+
+          <input
+            autoFocus
+            type="text"
+            value={busquedaPrecio}
+            onChange={e=>setBusquedaPrecio(e.target.value)}
+            placeholder="🔎 Código, producto o marca..."
+            style={{
+              width:"100%", boxSizing:"border-box", padding:"13px 14px",
+              background:"#0b1329", border:"2px solid #38bdf8", borderRadius:"10px",
+              color:"#fff", fontSize:"16px", outline:"none", marginBottom:"12px"
+            }}
+          />
+
+          {cargandoPrecios ? (
+            <div style={{padding:"20px",textAlign:"center",color:"#cbd5e1"}}>⏳ Cargando precios y stock...</div>
+          ) : !q ? (
+            <div style={{padding:"20px",textAlign:"center",color:"#94a3b8"}}>Escribí algo para buscar.</div>
+          ) : resultados.length === 0 ? (
+            <div style={{padding:"20px",textAlign:"center",color:"#94a3b8"}}>No encontré productos.</div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+              {resultados.slice(0,100).map(p=>(
+                <div key={p.id} style={{
+                  background:"#1e293b", border:"1px solid #334155",
+                  borderRadius:"9px", padding:"7px 9px"
+                }}>
+                  <div style={{fontWeight:"900",fontSize:"12px",lineHeight:1.15}}>{p.nombre}</div>
+                  <div style={{fontSize:"9px",color:"#94a3b8",marginTop:"2px"}}>
+                    {[p.codigo,p.marca].filter(Boolean).join(" · ")}
+                  </div>
+                  <div style={{
+                    display:"flex",justifyContent:"space-between",alignItems:"end",
+                    gap:"8px",marginTop:"5px",borderTop:"1px solid #334155",paddingTop:"5px"
+                  }}>
+                    <div>
+                      <div style={{fontSize:"9px",color:"#94a3b8",fontWeight:"800"}}>STOCK</div>
+                      <div style={{
+                        fontSize:"12px",fontWeight:"900",
+                        color:p.stock === null ? "#cbd5e1" : p.stock === 0 ? "#fca5a5" : "#93c5fd"
+                      }}>
+                        {p.stock === null ? "No informado" : p.stock}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:"9px",color:"#94a3b8",fontWeight:"800"}}>PRECIO</div>
+                      <div style={{fontSize:"18px",fontWeight:"950",color:"#86efac"}}>
+                        ${Number(p.precio || 0).toLocaleString("es-AR")}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </main>
       </div>
     );
   }
@@ -3153,23 +3303,49 @@ onChange={(e) =>
             ✕ Salir
           </button>
         </header>
-        <button
-  type="button"
-  onClick={() => setModoManejo(true)}
-  style={{
-    margin: "9px 16px 0",
-    padding: "11px",
-    backgroundColor: "#f59e0b",
-    color: "#111827",
-    border: "none",
-    borderRadius: "10px",
-    fontSize: "15px",
-    fontWeight: "800",
-    cursor: "pointer",
-  }}
->
-  🚗 MODO MANEJO
-</button>
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            margin: "9px 16px 0",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setModoManejo(true)}
+            style={{
+              flex: 1,
+              padding: "11px 6px",
+              backgroundColor: "#f59e0b",
+              color: "#111827",
+              border: "none",
+              borderRadius: "10px",
+              fontSize: "13px",
+              fontWeight: "800",
+              cursor: "pointer",
+            }}
+          >
+            🚗 MODO MANEJO
+          </button>
+
+          <button
+            type="button"
+            onClick={abrirConsultaPrecios}
+            style={{
+              flex: 1,
+              padding: "11px 6px",
+              backgroundColor: "#0369a1",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "10px",
+              fontSize: "13px",
+              fontWeight: "900",
+              cursor: "pointer",
+            }}
+          >
+            🔎 CONSULTAR PRECIOS
+          </button>
+        </div>
         {/* FRANJA DE MÉTRICAS DIARIAS DEL PREVENTISTA */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px", marginTop: "7px" }}>
           <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
