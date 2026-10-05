@@ -92,7 +92,7 @@ function ControlCentradoMapa({ accion, puntoPreventista, puntosRecorrido }) {
 function iconoAutoGPS(nombre) {
   return L.divIcon({
     className: "pin-auto-gps",
-    html: '<div style="background:#2563eb; color:#fff; border:2px solid #fff; border-radius:50%; width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:20px; box-shadow:0 0 16px rgba(37,99,235,0.95); position:relative;"><span style="position:absolute; width:100%; height:100%; border-radius:50%; border:2px solid #38bdf8; animation:ping 1.5s infinite;"></span>🚗</div><div style="background:#0f172a; color:#fff; font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; margin-top:2px; white-space:nowrap; text-align:center; box-shadow:0 2px 6px rgba(0,0,0,0.6);">' + (nombre || "Preventista") + ' (En vivo)</div>',
+    html: '<div style="background:#2563eb; color:#fff; border:2px solid #fff; border-radius:50%; width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:20px; box-shadow:0 0 16px rgba(37,99,235,0.95); position:relative;"><span style="position:absolute; width:100%; height:100%; border-radius:50%; border:2px solid #38bdf8; animation:ping 1.5s infinite;"></span>🚗</div><div style="background:#0f172a; color:#fff; font-size:10px; font-weight:800; padding:4px 10px; min-width:92px; border-radius:5px; margin-top:2px; white-space:nowrap; text-align:center; box-shadow:0 2px 6px rgba(0,0,0,0.6); position:relative; left:50%; transform:translateX(-50%); width:max-content;">' + (nombre || "Preventista") + ' (En vivo)</div>',
     iconSize: [38, 54],
     iconAnchor: [19, 27]
   });
