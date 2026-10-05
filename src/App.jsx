@@ -205,8 +205,16 @@ console.log("🚗 APP SE ESTÁ RENDERIZANDO");
         provincia: comercioSeleccionado.provincia || '',
         pais: comercioSeleccionado.pais || '',
         rubro: comercioSeleccionado.rubro || 'General',
+        codigo_cliente: comercioSeleccionado.codigo_cliente || '',
+        razon_social: comercioSeleccionado.razon_social || '',
         cuit: comercioSeleccionado.cuit || '',
+        condicion_fiscal: comercioSeleccionado.condicion_fiscal || '',
+        domicilio_fiscal: comercioSeleccionado.domicilio_fiscal || '',
+        codigo_postal: comercioSeleccionado.codigo_postal || '',
+        contacto: comercioSeleccionado.contacto || '',
+        email: comercioSeleccionado.email || '',
         telefono: comercioSeleccionado.telefono || '',
+        whatsapp: comercioSeleccionado.whatsapp || '',
         codigo_pais: comercioSeleccionado.codigo_pais || '+54',
         notas: comercioSeleccionado.notas || '',
         dia_visita: comercioSeleccionado.dia_visita || 'Lunes'
@@ -988,12 +996,14 @@ const solicitarNoVisitar = async (comercio) => {
   const [confirmarSaltoVisita, setConfirmarSaltoVisita] = useState(false);
   const [fechaRevisitaManual, setFechaRevisitaManual] = useState("");
   const [motivoRevisita, setMotivoRevisita] = useState("");
+  const [datosClienteAbiertos, setDatosClienteAbiertos] = useState(false);
 
   // 📍 Cada comercio empieza su corrección de ubicación desde SU propio punto.
   // Evita que quede visible la posición usada al editar el comercio anterior.
   useEffect(() => {
     setEditandoUbicacion(false);
     setPosicionEdicionUbicacion(null);
+    setDatosClienteAbiertos(false);
   }, [comercioSeleccionado?.id]);
 
   // Lista filtrada de comercios por búsqueda y orden
@@ -2738,6 +2748,19 @@ if (comercioSeleccionado) {
 </button>
 </div>  
        
+        <button
+          type="button"
+          onClick={() => setDatosClienteAbiertos((v) => !v)}
+          style={{
+            width: "100%", padding: "13px", marginBottom: "12px",
+            backgroundColor: "#1d4ed8", color: "#fff", border: "none",
+            borderRadius: "8px", fontSize: "15px", fontWeight: "bold", cursor: "pointer",
+          }}
+        >
+          📋 DATOS DEL CLIENTE {datosClienteAbiertos ? "▲" : "▼"}
+        </button>
+
+        {datosClienteAbiertos && (
         <div
           style={{
             backgroundColor: "#0f172a",
@@ -2746,6 +2769,16 @@ if (comercioSeleccionado) {
             border: "1px solid #1e293b",
           }}
         >
+          <div style={{fontSize:"12px", color:"#94a3b8", marginBottom:"14px"}}>
+            Completá o corregí solamente los datos que conozcas. No es obligatorio llenar todos los campos.
+          </div>
+
+          <label>Código de cliente (opcional)</label>
+          <input type="text" value={comercioSeleccionado.codigo_cliente || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, codigo_cliente:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Razón social</label>
+          <input type="text" value={comercioSeleccionado.razon_social || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, razon_social:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
           <label>Nombre del comercio</label>
 
           <input
@@ -2894,6 +2927,27 @@ if (comercioSeleccionado) {
             🧠 Localidad, partido, provincia y país se recuerdan para el próximo cliente.
           </div>
 
+          <label>Código postal</label>
+          <input type="text" value={comercioSeleccionado.codigo_postal || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, codigo_postal:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Domicilio fiscal</label>
+          <input type="text" value={comercioSeleccionado.domicilio_fiscal || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, domicilio_fiscal:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Nombre de contacto</label>
+          <input type="text" value={comercioSeleccionado.contacto || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, contacto:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>CUIT</label>
+          <input type="text" value={comercioSeleccionado.cuit || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, cuit:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Condición fiscal</label>
+          <input type="text" value={comercioSeleccionado.condicion_fiscal || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, condicion_fiscal:e.target.value})} placeholder="Ej.: Responsable Inscripto / Monotributo" style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Email</label>
+          <input type="email" value={comercioSeleccionado.email || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, email:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Notas</label>
+          <textarea value={comercioSeleccionado.notas || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, notas:e.target.value})} rows="3" style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box",resize:"vertical"}} />
+
           <label>Rubro</label>
 
           <input
@@ -2948,7 +3002,7 @@ if (comercioSeleccionado) {
                 marginBottom: "6px",
               }}
             >
-              Teléfono / WhatsApp
+              Teléfono
             </label>
 
             <div style={{ display: "flex", gap: "8px" }}>
@@ -2997,6 +3051,11 @@ onChange={(e) =>
                 }}
               />
             </div>
+          </div>
+
+          <div style={{ marginBottom: "20px" }}>
+            <label style={{display:"block", marginBottom:"6px"}}>WhatsApp</label>
+            <input type="tel" value={comercioSeleccionado.whatsapp || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, whatsapp:e.target.value})} placeholder="Ej: 11 2250 1680" style={{width:"100%",padding:"10px",boxSizing:"border-box"}} />
           </div>
 
           {/* 📸 Foto del comercio / fachada */}
@@ -3202,13 +3261,13 @@ onChange={(e) =>
   type="button"
   onClick={() => {
     const codigo = comercioSeleccionado.codigo_pais || "+54";
-    const telefono = comercioSeleccionado.telefono || "";
+    const telefono = comercioSeleccionado.whatsapp || comercioSeleccionado.telefono || "";
 
     const numeroLimpio =
       (codigo + telefono).replace(/\D/g, "");
 
     if (!telefono.trim()) {
-      alert("Este comercio no tiene un teléfono cargado.");
+      alert("Este comercio no tiene WhatsApp ni teléfono cargado.");
       return;
     }
 
@@ -3277,6 +3336,7 @@ onChange={(e) =>
             Solo se elimina si todavía no tiene visitas ni pedidos.
           </div>
         </div>
+        )}
       </div>
     </div>
   );
