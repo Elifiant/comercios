@@ -295,6 +295,7 @@ const reactivarComercio = async (comercio) => {
   const [comercioDetalleModal, setComercioDetalleModal] = useState(null);
   const [editPrevFicha, setEditPrevFicha] = useState("");
   const [editDiaFicha, setEditDiaFicha] = useState("");
+  const [editClienteDatos, setEditClienteDatos] = useState({});
   const [guardandoFicha, setGuardandoFicha] = useState(false);
   const [msgExitoFicha, setMsgExitoFicha] = useState(false);
   const [mostrarAsignacionClientes, setMostrarAsignacionClientes] = useState(false);
@@ -450,8 +451,7 @@ const reactivarComercio = async (comercio) => {
       const { data: listasEmpresa, error: errorListas } = await supabase
         .from("listas_precios")
         .select("id")
-        .eq("empresa_id", perfilSupervisor.empresa_id)
-        .eq("activo", true);
+        .eq("empresa_id", perfilSupervisor.empresa_id);
 
       if (errorListas) throw errorListas;
 
@@ -620,8 +620,101 @@ const reactivarComercio = async (comercio) => {
 
       const equivalenciaPorCodigo = {};
       (equivalencias || []).forEach(e => {
-        equivalenciaPorCodigo[String(e.codigo_archivo ?? "").trim()] = e;
+        const codigoEq = String(e.codigo_archivo ?? "").trim();
+        if (!codigoEq) return;
+        equivalenciaPorCodigo[codigoEq] = e;
+        equivalenciaPorCodigo[codigoEq.toUpperCase()] = e;
+        equivalenciaPorCodigo[codigoEq.toLowerCase()] = e;
       });
+
+      // Códigos comerciales históricos de las listas de ESTA empresa.
+      // Esto permite que Stock reconozca WELT001, DEM001, etc.
+      // aunque nunca hayan sido importados anteriormente por Stock.
+      const { data: listasActivasStock, error: errorListasActivasStock } = await supabase
+        .from("listas_precios")
+        .select("id")
+        .eq("empresa_id", perfilSupervisor.empresa_id);
+
+      if (errorListasActivasStock) throw errorListasActivasStock;
+
+      const idsListasActivasStock = (listasActivasStock || [])
+        .map(l => l.id)
+        .filter(Boolean);
+
+      let productosPorCodigoLista = {};
+
+      if (idsListasActivasStock.length > 0) {
+        const { data: filasListaStock, error: errorFilasListaStock } = await supabase
+          .from("lista_productos")
+          .select("producto_id, codigo_lista")
+          .in("lista_id", idsListasActivasStock)
+          .eq("activo", true);
+
+        if (errorFilasListaStock) throw errorFilasListaStock;
+
+        const idsDesdeLista = [...new Set(
+          (filasListaStock || [])
+            .map(f => f.producto_id)
+            .filter(Boolean)
+        )];
+
+        let productosDesdeListaPorId = {};
+
+        if (idsDesdeLista.length > 0) {
+          const { data: productosDesdeLista, error: errorProductosDesdeLista } = await supabase
+            .from("productos")
+            .select("id, codigo_cge, nombre, marca, presentacion")
+            .in("id", idsDesdeLista);
+
+          if (errorProductosDesdeLista) throw errorProductosDesdeLista;
+
+          (productosDesdeLista || []).forEach(p => {
+            productosDesdeListaPorId[String(p.id)] = p;
+          });
+        }
+
+        (filasListaStock || []).forEach(f => {
+          const codigo = String(f.codigo_lista || "").trim().toUpperCase();
+          const producto = productosDesdeListaPorId[String(f.producto_id)];
+
+          if (codigo && producto) {
+            productosPorCodigoLista[codigo] = producto;
+          }
+        });
+      }
+
+      // Tercera fuente segura: si el código ya tuvo stock informado en ESTA empresa,
+      // reutilizamos su producto_id. Esto evita proponer un producto nuevo cuando
+      // falta una fila en stock_equivalencias pero el vínculo ya existe en el historial.
+      const { data: stockPrevioEmpresa, error: errorStockPrevioEmpresa } = await supabase
+        .from("stock_informado")
+        .select("codigo_archivo, producto_id")
+        .eq("empresa_id", perfilSupervisor.empresa_id);
+
+      if (errorStockPrevioEmpresa) throw errorStockPrevioEmpresa;
+
+      const productoIdPorCodigoStockPrevio = {};
+      (stockPrevioEmpresa || []).forEach(f => {
+        const codigo = String(f.codigo_archivo || "").trim().toUpperCase();
+        if (codigo && f.producto_id && !productoIdPorCodigoStockPrevio[codigo]) {
+          productoIdPorCodigoStockPrevio[codigo] = f.producto_id;
+        }
+      });
+
+      const idsStockPrevio = [...new Set(Object.values(productoIdPorCodigoStockPrevio).filter(Boolean))];
+      let productosStockPrevioPorId = {};
+
+      if (idsStockPrevio.length > 0) {
+        const { data: productosStockPrevio, error: errorProductosStockPrevio } = await supabase
+          .from("productos")
+          .select("id, codigo_cge, nombre, marca, presentacion")
+          .in("id", idsStockPrevio);
+
+        if (errorProductosStockPrevio) throw errorProductosStockPrevio;
+        (productosStockPrevio || []).forEach(p => {
+          productosStockPrevioPorId[String(p.id)] = p;
+        });
+      }
 
       const reconocidos = [];
       const noReconocidos = [];
@@ -648,10 +741,29 @@ const reactivarComercio = async (comercio) => {
           stock: Number.isFinite(stockNumero) ? stockNumero : null,
         };
 
-        const equivalencia = equivalenciaPorCodigo[codigoArchivo];
-        const idsPermitidosEmpresa = new Set(productosStockCatalogo.map(p => String(p.id)));
+        // La equivalencia ya está aislada por empresa_id y productosPorCodigoLista
+        // se construyó exclusivamente desde listas de ESTA empresa.
+        // Por eso no dependemos del estado React productosStockCatalogo para validar:
+        // ese estado puede todavía estar cargándose cuando el Supervisor elige el Excel.
+        const equivalencia = equivalenciaPorCodigo[String(codigoArchivo || "").trim()] ||
+          equivalenciaPorCodigo[String(codigoArchivo || "").trim().toUpperCase()] ||
+          equivalenciaPorCodigo[String(codigoArchivo || "").trim().toLowerCase()];
 
         let producto = equivalencia ? productosPorId[String(equivalencia.producto_id)] : null;
+
+        // Segunda vía: código comercial de la lista de precios de la empresa.
+        if (!producto && codigoArchivo) {
+          producto = productosPorCodigoLista[codigoArchivo.toUpperCase()] || null;
+        }
+
+        // Tercera vía: historial real de stock de ESTA empresa.
+        // WELT001, por ejemplo, ya tiene producto_id porque ya tuvo stock cargado.
+        if (!producto && codigoArchivo) {
+          const productoIdPrevio = productoIdPorCodigoStockPrevio[codigoArchivo.toUpperCase()];
+          producto = productoIdPrevio
+            ? productosStockPrevioPorId[String(productoIdPrevio)] || null
+            : null;
+        }
 
         // Si nunca fue importado por Stock, también reconocer el código usado
         // en las listas de precios de ESTA empresa (ej. WELT001).
@@ -663,7 +775,10 @@ const reactivarComercio = async (comercio) => {
           ) || null;
         }
 
-        const productoPermitido = producto && idsPermitidosEmpresa.has(String(producto.id));
+        // Si llegamos a un producto por cualquiera de las vías anteriores, ya quedó
+        // validado dentro de la empresa. Evitamos rechazarlo por una carga asíncrona
+        // todavía incompleta de productosStockCatalogo.
+        const productoPermitido = Boolean(producto?.id);
 
         if (productoPermitido) {
           reconocidos.push({
@@ -1516,7 +1631,8 @@ useEffect(() => {
     const minutosDesdeSenal = ultimaSenal ? (Date.now() - new Date(ultimaSenal).getTime()) / 60000 : Infinity;
     // En línea si el celular reportó actividad en los últimos 60 minutos.
     // Las visitas de hoy se muestran aparte, pero no mantienen al preventista "en línea".
-    const activoHoy = minutosDesdeSenal <= 60;
+    const activoHoy = minutosDesdeSenal <= 2;
+    const señalReciente = minutosDesdeSenal <= 10;
 
     return {
       nombre: prev,
@@ -1529,6 +1645,7 @@ useEffect(() => {
       vendidoHoy,
       efectividadHoy,
       activoHoy,
+      señalReciente,
       ultimaSenal,
       proxima: cPrev[0]?.nombre || "Sin comercios asignados"
     };
@@ -1634,6 +1751,83 @@ useEffect(() => {
     setReproduciendoAudio(false);
     setMsgExitoFicha(false);
     setComercioDetalleModal(null);
+  };
+
+  const prepararEdicionCliente = (c) => {
+    setEditClienteDatos({
+      codigo_cliente: c.codigo_cliente || "",
+      razon_social: c.razon_social || "",
+      nombre: c.nombre || "",
+      direccion: c.direccion || "",
+      domicilio_fiscal: c.domicilio_fiscal || "",
+      localidad: c.localidad || "",
+      partido: c.partido || "",
+      provincia: c.provincia || "",
+      codigo_postal: c.codigo_postal || "",
+      pais: c.pais || "",
+      telefono: c.telefono || "",
+      whatsapp: c.whatsapp || "",
+      contacto: c.contacto || "",
+      cuit: c.cuit || "",
+      condicion_fiscal: c.condicion_fiscal || "",
+      email: c.email || "",
+      notas: c.notas || "",
+    });
+  };
+
+  const guardarFichaCompletaCliente = async () => {
+    if (!comercioDetalleModal || !perfilSupervisor?.empresa_id) return;
+    const nombre = String(editClienteDatos.nombre || "").trim();
+    if (!nombre) {
+      alert("⚠️ El nombre comercial no puede quedar vacío.");
+      return;
+    }
+    setGuardandoFicha(true);
+    try {
+      const pFinal = String(editPrevFicha || "").trim();
+      const dFinal = editDiaFicha ? String(editDiaFicha).trim().toUpperCase() : "";
+      const cambios = {
+        codigo_cliente: String(editClienteDatos.codigo_cliente || "").trim() || null,
+        razon_social: String(editClienteDatos.razon_social || "").trim() || null,
+        nombre,
+        direccion: String(editClienteDatos.direccion || "").trim() || null,
+        domicilio_fiscal: String(editClienteDatos.domicilio_fiscal || "").trim() || null,
+        localidad: String(editClienteDatos.localidad || "").trim() || null,
+        partido: String(editClienteDatos.partido || "").trim() || null,
+        provincia: String(editClienteDatos.provincia || "").trim() || null,
+        codigo_postal: String(editClienteDatos.codigo_postal || "").trim() || null,
+        pais: String(editClienteDatos.pais || "").trim() || null,
+        telefono: String(editClienteDatos.telefono || "").trim() || null,
+        whatsapp: String(editClienteDatos.whatsapp || "").trim() || null,
+        contacto: String(editClienteDatos.contacto || "").trim() || null,
+        cuit: String(editClienteDatos.cuit || "").trim() || null,
+        condicion_fiscal: String(editClienteDatos.condicion_fiscal || "").trim() || null,
+        email: String(editClienteDatos.email || "").trim() || null,
+        notas: String(editClienteDatos.notas || "").trim() || null,
+        preventista: pFinal || null,
+        dia_visita: dFinal || null,
+      };
+      const { data, error } = await supabase
+        .from("comercios")
+        .update(cambios)
+        .eq("id", comercioDetalleModal.id)
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .select("*")
+        .single();
+      if (error) throw error;
+      setComercios(prev => (prev || []).map(c => c.id === data.id ? data : c));
+      setComercioDetalleModal(data);
+      setEditPrevFicha(data.preventista || "");
+      setEditDiaFicha(data.dia_visita || "");
+      prepararEdicionCliente(data);
+      setMsgExitoFicha(true);
+      setTimeout(() => setMsgExitoFicha(false), 2500);
+    } catch (err) {
+      console.error("Error guardando ficha del cliente:", err);
+      alert("❌ No se pudieron guardar los datos del cliente: " + (err.message || "Verifique conexión"));
+    } finally {
+      setGuardandoFicha(false);
+    }
   };
 
   const guardarReasignacionComercio = async () => {
@@ -1930,16 +2124,28 @@ useEffect(() => {
           Object.fromEntries(encabezados.map((enc, i) => [enc, fila[i] ?? ""]))
         );
       } else {
+        // Orden oficial de la plantilla RutaComercio cuando el archivo no trae encabezados.
         filas = filasUtiles.map(fila => ({
           codigo_cliente: fila[0] ?? "",
-          nombre_comercio: fila[1] ?? "",
-          direccion: fila[2] ?? "",
-          localidad: fila[3] ?? "",
-          provincia: fila[4] ?? "",
-          pais: fila[5] ?? "",
-          email_preventista: fila[6] ?? "",
-          latitud: fila[7] ?? "",
-          longitud: fila[8] ?? ""
+          razon_social: fila[1] ?? "",
+          nombre_comercio: fila[2] ?? "",
+          direccion: fila[3] ?? "",
+          domicilio_fiscal: fila[4] ?? "",
+          localidad: fila[5] ?? "",
+          partido: fila[6] ?? "",
+          provincia_estado: fila[7] ?? "",
+          codigo_postal: fila[8] ?? "",
+          pais: fila[9] ?? "",
+          telefono: fila[10] ?? "",
+          whatsapp: fila[11] ?? "",
+          nombre_contacto: fila[12] ?? "",
+          cuit: fila[13] ?? "",
+          condicion_fiscal: fila[14] ?? "",
+          email: fila[15] ?? "",
+          email_preventista: fila[16] ?? "",
+          latitud: fila[17] ?? "",
+          longitud: fila[18] ?? "",
+          notas: fila[19] ?? ""
         }));
       }
 
@@ -1964,13 +2170,23 @@ useEffect(() => {
       filas.forEach((fila, indice) => {
         const numeroFila = indice + (archivoClientesTieneEncabezados ? 2 : 1);
         const codigo = String(obtenerCampo(fila, ["codigo_cliente", "código_cliente", "codigo cliente", "código cliente", "codigo", "código"]) || "").trim();
-        const nombre = String(obtenerCampo(fila, ["nombre_comercio", "nombre comercio", "nombre del comercio", "comercio", "cliente", "razon_social", "razón social", "razon social", "nombre"]) || "").trim();
-        const direccion = String(obtenerCampo(fila, ["direccion", "dirección", "domicilio"]) || "").trim();
+        const razonSocial = String(obtenerCampo(fila, ["razon_social", "razón_social", "razon social", "razón social"]) || "").trim();
+        const nombre = String(obtenerCampo(fila, ["nombre_comercio", "nombre comercio", "nombre del comercio", "nombre comercial", "comercio", "cliente", "nombre"]) || "").trim();
+        const direccion = String(obtenerCampo(fila, ["direccion", "dirección", "domicilio", "direccion comercial", "dirección comercial"]) || "").trim();
+        const domicilioFiscal = String(obtenerCampo(fila, ["domicilio_fiscal", "domicilio fiscal", "direccion fiscal", "dirección fiscal"]) || "").trim();
         const localidad = String(obtenerCampo(fila, ["localidad", "ciudad"]) || "").trim();
-        const provincia = String(obtenerCampo(fila, ["provincia", "estado", "provincia/estado", "departamento"]) || "").trim();
+        const partido = String(obtenerCampo(fila, ["partido", "municipio"]) || "").trim();
+        const provincia = String(obtenerCampo(fila, ["provincia_estado", "provincia", "estado", "provincia/estado", "departamento"]) || "").trim();
+        const codigoPostal = String(obtenerCampo(fila, ["codigo_postal", "código_postal", "codigo postal", "código postal", "cp"]) || "").trim();
         const pais = String(obtenerCampo(fila, ["pais", "país", "country"]) || "").trim();
+        const telefono = String(obtenerCampo(fila, ["telefono", "teléfono", "tel", "telefono fijo", "teléfono fijo"]) || "").trim();
+        const whatsapp = String(obtenerCampo(fila, ["whatsapp", "whats_app", "wa", "celular", "movil", "móvil"]) || "").trim();
+        const contacto = String(obtenerCampo(fila, ["nombre_contacto", "nombre contacto", "contacto", "persona contacto", "persona de contacto"]) || "").trim();
+        const cuit = String(obtenerCampo(fila, ["cuit", "cuil", "cuit/cuil"]) || "").trim();
+        const condicionFiscal = String(obtenerCampo(fila, ["condicion_fiscal", "condición_fiscal", "condicion fiscal", "condición fiscal", "iva"]) || "").trim();
+        const email = String(obtenerCampo(fila, ["email", "email_cliente", "email cliente", "correo", "correo cliente"]) || "").trim().toLowerCase();
         const emailPreventista = String(obtenerCampo(fila, ["email_preventista", "email preventista", "email del preventista", "correo_preventista", "correo preventista", "preventista_email"]) || "").trim().toLowerCase();
-        const telefono = String(obtenerCampo(fila, ["telefono", "teléfono", "telefono_whatsapp", "teléfono_whatsapp", "whatsapp", "celular", "movil", "móvil"]) || "").trim();
+        const notas = String(obtenerCampo(fila, ["notas", "nota", "observaciones", "observacion", "observación"]) || "").trim();
         const latRaw = String(obtenerCampo(fila, ["latitud", "latitude", "lat"]) || "").trim().replace(",", ".");
         const lngRaw = String(obtenerCampo(fila, ["longitud", "longitude", "lng", "lon"]) || "").trim().replace(",", ".");
         const latitud = latRaw === "" ? null : Number(latRaw);
@@ -1978,10 +2194,12 @@ useEffect(() => {
         const tieneCoordenadas = Number.isFinite(latitud) && Number.isFinite(longitud);
 
         if (!nombre) {
-          sinNombre.push({ fila: numeroFila, codigo, motivo: "Falta nombre" });
+          sinNombre.push({ fila: numeroFila, codigo, motivo: "Falta nombre_comercio" });
           return;
         }
 
+        // codigo_cliente es opcional. Si no existe, usamos nombre + dirección + localidad
+        // solamente para detectar duplicados dentro del mismo archivo.
         const clave = (codigo || `${nombre}|${direccion}|${localidad}`).toUpperCase();
         if (vistos.has(clave)) {
           duplicados.push({ fila: numeroFila, codigo, nombre });
@@ -2000,13 +2218,23 @@ useEffect(() => {
         validos.push({
           fila: numeroFila,
           codigo_cliente: codigo,
+          razon_social: razonSocial,
           nombre,
           direccion,
+          domicilio_fiscal: domicilioFiscal,
           localidad,
+          partido,
           provincia,
+          codigo_postal: codigoPostal,
           pais,
-          email_preventista: emailPreventista,
           telefono,
+          whatsapp,
+          contacto,
+          cuit,
+          condicion_fiscal: condicionFiscal,
+          email,
+          email_preventista: emailPreventista,
+          notas,
           latitud: tieneCoordenadas ? latitud : null,
           longitud: tieneCoordenadas ? longitud : null,
           estadoUbicacion: tieneCoordenadas ? "Con coordenadas" : "Pendiente de geocodificar"
@@ -2015,41 +2243,18 @@ useEffect(() => {
 
       const validarPreventista = (cliente) => {
         const email = String(cliente.email_preventista || "").trim().toLowerCase();
+        if (!email) return { ...cliente, preventista_estado: "sin_email", preventista_perfil: null };
 
-        if (!email) {
-          return { ...cliente, preventista_estado: "sin_email", preventista_perfil: null };
-        }
+        const perfil = (perfiles || []).find(p => String(p.email || "").trim().toLowerCase() === email);
+        if (!perfil) return { ...cliente, preventista_estado: "no_reconocido", preventista_perfil: null };
+        if (perfil.rol !== "preventista") return { ...cliente, preventista_estado: "rol_incorrecto", preventista_perfil: perfil };
+        if (perfil.empresa_id && perfilSupervisor?.empresa_id && perfil.empresa_id !== perfilSupervisor.empresa_id) return { ...cliente, preventista_estado: "otra_empresa", preventista_perfil: perfil };
+        if (perfil.activo === false) return { ...cliente, preventista_estado: "inactivo", preventista_perfil: perfil };
 
-        const perfil = (perfiles || []).find(p =>
-          String(p.email || "").trim().toLowerCase() === email
-        );
-
-        if (!perfil) {
-          return { ...cliente, preventista_estado: "no_reconocido", preventista_perfil: null };
-        }
-
-        if (perfil.rol !== "preventista") {
-          return { ...cliente, preventista_estado: "rol_incorrecto", preventista_perfil: perfil };
-        }
-
-        if (perfil.empresa_id && perfilSupervisor?.empresa_id && perfil.empresa_id !== perfilSupervisor.empresa_id) {
-          return { ...cliente, preventista_estado: "otra_empresa", preventista_perfil: perfil };
-        }
-
-        if (perfil.activo === false) {
-          return { ...cliente, preventista_estado: "inactivo", preventista_perfil: perfil };
-        }
-
-        return {
-          ...cliente,
-          preventista_estado: "ok",
-          preventista_perfil: perfil,
-          preventista_nombre: perfil.nombre || perfil.email
-        };
+        return { ...cliente, preventista_estado: "ok", preventista_perfil: perfil, preventista_nombre: perfil.nombre || perfil.email };
       };
 
       const validosConPreventista = validos.map(validarPreventista);
-
       setVistaPreviaClientes({
         totalFilas: filas.length,
         validos: validosConPreventista,
@@ -2280,51 +2485,74 @@ useEffect(() => {
 
   // 📥 Plantilla oficial RutaComercio para importación de clientes
   const descargarPlantillaClientes = () => {
-    const encabezados = [
-      "codigo_cliente",
-      "nombre_comercio",
-      "direccion",
-      "localidad",
-      "provincia_estado",
-      "pais",
-      "telefono",
-      "email_preventista",
-      "latitud",
-      "longitud"
-    ];
+    try {
+      const encabezados = [
+        "codigo_cliente", "razon_social", "nombre_comercio", "direccion", "domicilio_fiscal",
+        "localidad", "partido", "provincia_estado", "codigo_postal", "pais", "telefono",
+        "whatsapp", "nombre_contacto", "cuit", "condicion_fiscal", "email", "email_preventista",
+        "latitud", "longitud", "notas"
+      ];
 
-    const ejemplo = [
-      "CLI0001",
-      "Almacén El Sol",
-      "Av. Mitre 1234",
-      "Quilmes",
-      "Buenos Aires",
-      "Argentina",
-      "11 1234 5678",
-      "vendedor@empresa.com",
-      "",
-      ""
-    ];
+      const ejemplo = [{
+        codigo_cliente: "",
+        razon_social: "Comercial El Sol S.R.L.",
+        nombre_comercio: "Almacén El Sol",
+        direccion: "Av. Mitre 1234",
+        domicilio_fiscal: "Av. Mitre 1234",
+        localidad: "Quilmes",
+        partido: "Quilmes",
+        provincia_estado: "Buenos Aires",
+        codigo_postal: "1878",
+        pais: "Argentina",
+        telefono: "11 1234 5678",
+        whatsapp: "11 1234 5678",
+        nombre_contacto: "Juan Pérez",
+        cuit: "30-12345678-9",
+        condicion_fiscal: "Responsable Inscripto",
+        email: "cliente@empresa.com",
+        email_preventista: "vendedor@empresa.com",
+        latitud: "",
+        longitud: "",
+        notas: "Recibe mercadería de 8 a 13"
+      }];
 
-    const escaparCsv = (valor) => {
-      const texto = String(valor ?? "");
-      return `"${texto.replace(/"/g, '""')}"`;
-    };
+      const hoja = XLSX.utils.json_to_sheet(ejemplo, { header: encabezados });
+      hoja["!cols"] = encabezados.map(h => ({ wch: Math.max(14, Math.min(28, h.length + 4)) }));
 
-    // BOM UTF-8 para que LibreOffice/Excel reconozcan bien tildes y ñ.
-    const csv = "\uFEFF" +
-      encabezados.map(escaparCsv).join(";") + "\n" +
-      ejemplo.map(escaparCsv).join(";") + "\n";
+      const instrucciones = [
+        ["Campo", "Obligatorio", "Uso"],
+        ["codigo_cliente", "No", "Código propio de la empresa. Puede quedar vacío."],
+        ["razon_social", "No", "Razón social legal del cliente."],
+        ["nombre_comercio", "Sí", "Nombre comercial con el que se identifica al cliente."],
+        ["direccion", "Sí*", "Domicilio comercial. Puede omitirse solo si se informan latitud y longitud."],
+        ["domicilio_fiscal", "No", "Domicilio fiscal, si es diferente o se desea conservar."],
+        ["localidad", "No", "Localidad o ciudad."],
+        ["partido", "No", "Partido o municipio."],
+        ["provincia_estado", "No", "Provincia o estado."],
+        ["codigo_postal", "No", "Código postal."],
+        ["pais", "No", "País. Si se omite para geocodificar, RutaComercio usa Argentina como referencia."],
+        ["telefono", "No", "Teléfono del cliente."],
+        ["whatsapp", "No", "WhatsApp del cliente, separado del teléfono."],
+        ["nombre_contacto", "No", "Persona de contacto."],
+        ["cuit", "No", "CUIT/CUIL u otro identificador fiscal."],
+        ["condicion_fiscal", "No", "Condición fiscal del cliente."],
+        ["email", "No", "Email del cliente."],
+        ["email_preventista", "No", "Email de login del preventista asignado."],
+        ["latitud", "No", "Coordenada opcional. Si se informa, debe acompañarse de longitud."],
+        ["longitud", "No", "Coordenada opcional. Si se informa, debe acompañarse de latitud."],
+        ["notas", "No", "Observaciones libres sobre el cliente."]
+      ];
+      const hojaInstrucciones = XLSX.utils.aoa_to_sheet(instrucciones);
+      hojaInstrucciones["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 72 }];
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const enlace = document.createElement("a");
-    enlace.href = url;
-    enlace.download = "Plantilla_Clientes_RutaComercio.csv";
-    document.body.appendChild(enlace);
-    enlace.click();
-    document.body.removeChild(enlace);
-    URL.revokeObjectURL(url);
+      const libro = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(libro, hoja, "Clientes");
+      XLSX.utils.book_append_sheet(libro, hojaInstrucciones, "Instrucciones");
+      XLSX.writeFile(libro, "Plantilla_Clientes_RutaComercio.xlsx");
+    } catch (error) {
+      console.error("Error descargando plantilla de clientes:", error);
+      alert("❌ No se pudo descargar la plantilla de clientes.");
+    }
   };
 
   // 💾 Importación REAL de clientes aprobados por el supervisor
@@ -2347,12 +2575,6 @@ useEffect(() => {
     const pendientes = geos.filter(r => !r?.ok || r?.revisar);
     if (pendientes.length) {
       alert(`⚠️ Todavía hay ${pendientes.length} ubicación(es) sin resolver. No se cargó ningún cliente.`);
-      return;
-    }
-
-    const sinCodigo = clientes.filter(c => !String(c.codigo_cliente || "").trim());
-    if (sinCodigo.length) {
-      alert(`⚠️ Hay ${sinCodigo.length} cliente(s) sin código_cliente. Para esta primera importación real exigimos código para evitar duplicados.`);
       return;
     }
 
@@ -2403,15 +2625,24 @@ useEffect(() => {
 
           const codigo = String(c.codigo_cliente || "").trim();
 
-          // Seguridad contra reimportar el mismo código dentro de la misma empresa.
-          const { data: existente, error: errorExistente } = await supabase
+          // Evitar duplicados dentro de la empresa. Si hay código propio, es la referencia principal.
+          // Si no hay código, comparamos nombre comercial + dirección.
+          let consultaExistente = supabase
             .from("comercios")
             .select("id, nombre, codigo_cliente")
-            .eq("empresa_id", perfilSupervisor.empresa_id)
-            .eq("codigo_cliente", codigo)
-            .maybeSingle();
+            .eq("empresa_id", perfilSupervisor.empresa_id);
 
+          if (codigo) {
+            consultaExistente = consultaExistente.eq("codigo_cliente", codigo);
+          } else {
+            consultaExistente = consultaExistente
+              .eq("nombre", String(c.nombre || "").trim())
+              .eq("direccion", String(c.direccion || "").trim());
+          }
+
+          const { data: existentes, error: errorExistente } = await consultaExistente.limit(1);
           if (errorExistente) throw errorExistente;
+          const existente = (existentes || [])[0] || null;
           if (existente) {
             omitidosExistentes.push({
               nombre: c?.nombre || `Fila ${i + 1}`,
@@ -2430,12 +2661,25 @@ useEffect(() => {
 
           const nuevo = {
             nombre: String(c.nombre || "").trim(),
-            codigo_cliente: codigo,
+            codigo_cliente: codigo || null,
+            razon_social: String(c.razon_social || "").trim() || null,
+            direccion: String(c.direccion || "").trim(),
+            domicilio_fiscal: String(c.domicilio_fiscal || "").trim() || null,
+            localidad: String(c.localidad || "").trim() || null,
+            partido: String(c.partido || "").trim() || null,
+            provincia: String(c.provincia || "").trim() || null,
+            codigo_postal: String(c.codigo_postal || "").trim() || null,
+            pais: String(c.pais || "").trim() || null,
+            telefono: String(c.telefono || "").trim() || null,
+            whatsapp: String(c.whatsapp || "").trim() || null,
+            contacto: String(c.contacto || "").trim() || null,
+            cuit: String(c.cuit || "").trim() || null,
+            condicion_fiscal: String(c.condicion_fiscal || "").trim() || null,
+            email: String(c.email || "").trim().toLowerCase() || null,
+            notas: String(c.notas || "").trim() || null,
             empresa: perfilSupervisor.empresa || "",
             empresa_id: perfilSupervisor.empresa_id,
             preventista: perfilPrev ? (perfilPrev.nombre || perfilPrev.email) : null,
-            telefono: String(c.telefono || "").trim() || null,
-            direccion: String(c.direccion || "").trim(),
             latitud: lat,
             longitud: lng,
             ubicacion_exacta_latitud: lat,
@@ -3125,7 +3369,7 @@ useEffect(() => {
               <div style={{ marginTop: "12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "9px", padding: "10px", fontSize: "11px" }}>
                 🏢 Empresa: <strong>{perfilSupervisor?.empresa || "Empresa actual"}</strong><br/>
                 👥 Clientes preparados: <strong>{vistaPreviaClientes.validos.length}</strong><br/>
-                ✅ Alta desde supervisor: <strong>estado aprobado</strong> · creado_por_preventista = <strong>false</strong>
+                ✅ <strong>Los clientes quedarán activos y listos para usar.</strong>
               </div>
 
               <div style={{ marginTop: "12px", display: "grid", gap: "7px" }}>
@@ -3148,7 +3392,7 @@ useEffect(() => {
               </div>
 
               <div style={{ marginTop: "12px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: "9px", padding: "10px", fontSize: "11px", color: "#9a3412" }}>
-                ⚠️ Esta es la última revisión. Al tocar IMPORTAR AHORA aparecerá una confirmación final y, si aceptás, se guardarán los clientes en Supabase.
+                ⚠️ Esta es la última revisión. Al tocar IMPORTAR AHORA aparecerá una confirmación final y, si aceptás, los clientes se cargarán en RutaComercio.
               </div>
 
               <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "12px" }}>
@@ -3257,13 +3501,13 @@ useEffect(() => {
                 📥 DESCARGAR PLANTILLA DE CLIENTES
               </button>
               <div style={{ marginBottom: "8px", textAlign: "center", fontSize: "10px", color: "#64748b" }}>
-                Incluye una fila de ejemplo. Latitud y longitud son opcionales.
+                Incluye una fila de ejemplo y una hoja de instrucciones. Código de cliente, domicilio fiscal, latitud y longitud son opcionales.
               </div>
               </div>
 
               <div style={{ marginTop: "14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "9px", padding: "10px", fontSize: "12px", color: "#1e3a8a" }}>
-                Columnas recomendadas: <strong>codigo_cliente, nombre_comercio, direccion, localidad, provincia/estado, pais, email_preventista</strong>.<br />
-                Opcionales: <strong>latitud, longitud</strong>. Si ya existen, RutaComercio las reconoce.
+                Obligatorio: <strong>nombre_comercio</strong> y una ubicación resoluble (dirección o coordenadas).<br />
+                Opcionales: <strong>codigo_cliente, razon_social, domicilio_fiscal, localidad, partido, provincia_estado, codigo_postal, pais, telefono, whatsapp, nombre_contacto, cuit, condicion_fiscal, email, email_preventista, latitud, longitud y notas</strong>.
                 <div style={{ marginTop: "6px", fontWeight: "800" }}>🏪 “nombre_comercio” = nombre del negocio/cliente, NO el nombre del preventista.</div>
                 <div style={{ marginTop: "3px", fontWeight: "800" }}>📧 “email_preventista” = email de login del preventista. No usar su nombre.</div>
               </div>
@@ -3326,9 +3570,9 @@ useEffect(() => {
                 );
               })()}
 
-              <input ref={inputArchivoClientesRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoClientes} style={{ display: "none" }} />
+              <input ref={inputArchivoClientesRef} type="file" accept=".xlsx,.xls" onChange={leerArchivoClientes} style={{ display: "none" }} />
               <button type="button" onClick={() => inputArchivoClientesRef.current?.click()} style={{ marginTop: "14px", width: "100%", padding: "11px", border: "1px dashed #2563eb", borderRadius: "9px", background: "#eff6ff", color: "#1d4ed8", fontWeight: "800", cursor: "pointer" }}>
-                1️⃣ ELEGIR ARCHIVO EXCEL / CSV
+                1️⃣ ELEGIR ARCHIVO EXCEL
               </button>
               {archivoClientesNombre && <div style={{ fontSize: "11px", color: "#475569", marginTop: "6px" }}>Archivo: <strong>{archivoClientesNombre}</strong></div>}
 
@@ -3606,14 +3850,35 @@ useEffect(() => {
                     </div>
                   </div>
 
+
+
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                    <button type="button" onClick={descargarPlantillaStock} style={{ background: "#16a34a", color: "#fff", border: "none", borderRadius: "9px", padding: "12px 18px", fontSize: "13px", fontWeight: "900", cursor: "pointer" }}>📥 DESCARGAR PLANTILLA OFICIAL</button>
+                  <button
+                    type="button"
+                    onClick={descargarPlantillaStock}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      background: "#16a34a",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "9px",
+                      padding: "12px 18px",
+                      fontSize: "13px",
+                      fontWeight: "900",
+                      cursor: "pointer",
+                      boxShadow: "0 4px 10px rgba(22,163,74,0.20)"
+                    }}
+                  >
+                    📥 DESCARGAR PLANTILLA DE STOCK
+                  </button>
                   <label
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
                       gap: "8px",
-                      background: cargandoStockArchivo ? "#94a3b8" : "#2563eb",
+                      background: cargandoStockArchivo ? "#94a3b8" : "#dc2626",
                       color: "#fff",
                       border: "none",
                       borderRadius: "9px",
@@ -4112,6 +4377,7 @@ useEffect(() => {
                             setComercioDetalleModal(c);
                             setEditPrevFicha(c.preventista || "");
                             setEditDiaFicha(c.dia_visita ? String(c.dia_visita).trim().toUpperCase() : "");
+                            prepararEdicionCliente(c);
                             setMsgExitoFicha(false);
                           }}
                           style={{
@@ -4139,9 +4405,21 @@ useEffect(() => {
                         </button>
 
                         {comercioDetalleModal?.id === c.id && (
-                          <div style={{ marginTop: "6px", padding: "12px", background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "9px" }}>
-                            <div style={{ fontSize: "12px", fontWeight: "900", color: "#1e3a8a", marginBottom: "9px" }}>✏️ Editar asignación y día de visita</div>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "9px" }}>
+                          <div style={{ marginTop: "6px", padding: "14px", background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "9px" }}>
+                            <div style={{ fontSize: "13px", fontWeight: "900", color: "#1e3a8a", marginBottom: "12px" }}>✏️ Ficha completa del cliente</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" }}>
+                              {[
+                                ["codigo_cliente", "Código de cliente (opcional)"], ["razon_social", "Razón social"], ["nombre", "Nombre comercial *"],
+                                ["direccion", "Dirección comercial"], ["domicilio_fiscal", "Domicilio fiscal"], ["localidad", "Localidad"],
+                                ["partido", "Partido"], ["provincia", "Provincia / Estado"], ["codigo_postal", "Código postal"], ["pais", "País"],
+                                ["telefono", "Teléfono"], ["whatsapp", "WhatsApp"], ["contacto", "Nombre de contacto"], ["cuit", "CUIT"],
+                                ["condicion_fiscal", "Condición fiscal"], ["email", "Email del cliente"]
+                              ].map(([campo, etiqueta]) => (
+                                <div key={campo}>
+                                  <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>{etiqueta.toUpperCase()}</label>
+                                  <input value={editClienteDatos[campo] || ""} onChange={(e) => setEditClienteDatos(prev => ({ ...prev, [campo]: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff" }} />
+                                </div>
+                              ))}
                               <div>
                                 <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>👤 PREVENTISTA</label>
                                 <select value={editPrevFicha || ""} onChange={(e) => setEditPrevFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff" }}>
@@ -4157,10 +4435,17 @@ useEffect(() => {
                                 </select>
                               </div>
                             </div>
-                            <button type="button" onClick={guardarReasignacionComercio} disabled={guardandoFicha} style={{ width: "100%", marginTop: "10px", padding: "9px", border: "none", borderRadius: "7px", background: guardandoFicha ? "#94a3b8" : "#2563eb", color: "#fff", fontWeight: "900", cursor: guardandoFicha ? "not-allowed" : "pointer" }}>
-                              {guardandoFicha ? "GUARDANDO..." : "💾 GUARDAR CAMBIOS"}
+                            <div style={{ marginTop: "10px" }}>
+                              <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>NOTAS</label>
+                              <textarea value={editClienteDatos.notas || ""} onChange={(e) => setEditClienteDatos(prev => ({ ...prev, notas: e.target.value }))} rows={3} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", resize: "vertical" }} />
+                            </div>
+                            <div style={{ marginTop: "10px", padding: "8px 10px", borderRadius: "7px", background: "#fff", border: "1px solid #dbeafe", fontSize: "11px", color: "#475569" }}>
+                              📍 Ubicación en mapa: {Number.isFinite(Number(c.latitud)) && Number.isFinite(Number(c.longitud)) ? "registrada" : "sin ubicación registrada"}. Las coordenadas se administran desde el mapa para evitar modificaciones accidentales.
+                            </div>
+                            <button type="button" onClick={guardarFichaCompletaCliente} disabled={guardandoFicha} style={{ width: "100%", marginTop: "12px", padding: "10px", border: "none", borderRadius: "7px", background: guardandoFicha ? "#94a3b8" : "#2563eb", color: "#fff", fontWeight: "900", cursor: guardandoFicha ? "not-allowed" : "pointer" }}>
+                              {guardandoFicha ? "GUARDANDO..." : "💾 GUARDAR FICHA DEL CLIENTE"}
                             </button>
-                            {msgExitoFicha && <div style={{ marginTop: "6px", textAlign: "center", color: "#16a34a", fontSize: "11px", fontWeight: "900" }}>✅ Cambios guardados correctamente</div>}
+                            {msgExitoFicha && <div style={{ marginTop: "7px", textAlign: "center", color: "#16a34a", fontSize: "11px", fontWeight: "900" }}>✅ Datos del cliente guardados correctamente</div>}
                           </div>
                         )}
                       </div>
@@ -4833,11 +5118,11 @@ useEffect(() => {
                         ? (Date.now() - new Date(prev.ultimaSenal).getTime()) / 60000
                         : Infinity;
                       const estadoSenal =
-                        minutos <= 30
-                          ? { texto: "🟢 En línea", color: "#16a34a" }
-                          : minutos <= 60
-                            ? { texto: "🟡 Señal antigua", color: "#d97706" }
-                            : { texto: "⚫ Sin conexión reciente", color: "#64748b" };
+                        minutos <= 2
+                           ? { texto: "🟢 Activo", color: "#16a34a" }
+                           : minutos <= 10
+                             ? { texto: "🟡 Sin señal reciente", color: "#d97706" }
+                             : { texto: "⚫ Inactivo", color: "#64748b" };
                       return (
                         <div style={{ fontSize: "10px", color: estadoSenal.color, marginTop: "2px", fontWeight: "700" }}>
                           {estadoSenal.texto}
