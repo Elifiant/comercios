@@ -4417,19 +4417,19 @@ useEffect(() => {
                               ].map(([campo, etiqueta]) => (
                                 <div key={campo}>
                                   <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>{etiqueta.toUpperCase()}</label>
-                                  <input value={editClienteDatos[campo] || ""} onChange={(e) => setEditClienteDatos(prev => ({ ...prev, [campo]: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff" }} />
+                                  <input value={editClienteDatos[campo] || ""} onChange={(e) => setEditClienteDatos(prev => ({ ...prev, [campo]: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a" }} />
                                 </div>
                               ))}
                               <div>
                                 <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>👤 PREVENTISTA</label>
-                                <select value={editPrevFicha || ""} onChange={(e) => setEditPrevFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff" }}>
+                                <select value={editPrevFicha || ""} onChange={(e) => setEditPrevFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a" }}>
                                   <option value="">Sin preventista</option>
                                   {listaPreventistas.map(p => <option key={p} value={p}>{p}</option>)}
                                 </select>
                               </div>
                               <div>
                                 <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>🗓️ DÍA DE VISITA</label>
-                                <select value={editDiaFicha || ""} onChange={(e) => setEditDiaFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff" }}>
+                                <select value={editDiaFicha || ""} onChange={(e) => setEditDiaFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a" }}>
                                   <option value="">Sin día asignado</option>
                                   {["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"].map(d => <option key={d} value={d}>{d}</option>)}
                                 </select>
@@ -4437,7 +4437,7 @@ useEffect(() => {
                             </div>
                             <div style={{ marginTop: "10px" }}>
                               <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>NOTAS</label>
-                              <textarea value={editClienteDatos.notas || ""} onChange={(e) => setEditClienteDatos(prev => ({ ...prev, notas: e.target.value }))} rows={3} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", resize: "vertical" }} />
+                              <textarea value={editClienteDatos.notas || ""} onChange={(e) => setEditClienteDatos(prev => ({ ...prev, notas: e.target.value }))} rows={3} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", resize: "vertical" }} />
                             </div>
                             <div style={{ marginTop: "10px", padding: "8px 10px", borderRadius: "7px", background: "#fff", border: "1px solid #dbeafe", fontSize: "11px", color: "#475569" }}>
                               📍 Ubicación en mapa: {Number.isFinite(Number(c.latitud)) && Number.isFinite(Number(c.longitud)) ? "registrada" : "sin ubicación registrada"}. Las coordenadas se administran desde el mapa para evitar modificaciones accidentales.
