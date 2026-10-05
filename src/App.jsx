@@ -986,6 +986,7 @@ const solicitarNoVisitar = async (comercio) => {
   const [jornadaActiva, setJornadaActiva] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [vistaComercios, setVistaComercios] = useState("HOY");
+  const [ordenComerciosHoy, setOrdenComerciosHoy] = useState("CERCANIA");
   const [consultandoPrecios, setConsultandoPrecios] = useState(false);
   const [busquedaPrecio, setBusquedaPrecio] = useState("");
   const [productosPrecio, setProductosPrecio] = useState([]);
@@ -1301,6 +1302,20 @@ obtenerUbicacionFresca()
     };
   })
   .sort((a, b) => {
+    // En COMERCIOS DE HOY el preventista puede elegir entre
+    // cercanía GPS y el orden de ruta definido por el Supervisor.
+    if (vistaComercios === "HOY" && ordenComerciosHoy === "RUTA") {
+      const ordenA = Number(a.orden_visita);
+      const ordenB = Number(b.orden_visita);
+      const tieneOrdenA = Number.isFinite(ordenA);
+      const tieneOrdenB = Number.isFinite(ordenB);
+
+      if (tieneOrdenA && tieneOrdenB) return ordenA - ordenB;
+      if (tieneOrdenA) return -1;
+      if (tieneOrdenB) return 1;
+      return 0;
+    }
+
     if (a.distancia_actual === null && b.distancia_actual === null) return 0;
     if (a.distancia_actual === null) return 1;
     if (b.distancia_actual === null) return -1;
@@ -3671,6 +3686,44 @@ onChange={(e) =>
   ? `COMERCIOS DE HOY · ${obtenerDiaActual().toUpperCase()} (${listaFiltrada.length})`
   : `TODOS LOS COMERCIOS (${listaFiltrada.length})`}
           </span>
+          {vistaComercios === "HOY" && (
+            <div style={{ display: "flex", gap: "5px", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setOrdenComerciosHoy("CERCANIA")}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: "7px",
+                  border: ordenComerciosHoy === "CERCANIA" ? "1px solid #38bdf8" : "1px solid #475569",
+                  background: ordenComerciosHoy === "CERCANIA" ? "#0369a1" : "#1e293b",
+                  color: "#fff",
+                  fontSize: "10px",
+                  fontWeight: "900",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                📍 CERCANÍA
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrdenComerciosHoy("RUTA")}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: "7px",
+                  border: ordenComerciosHoy === "RUTA" ? "1px solid #fbbf24" : "1px solid #475569",
+                  background: ordenComerciosHoy === "RUTA" ? "#b45309" : "#1e293b",
+                  color: "#fff",
+                  fontSize: "10px",
+                  fontWeight: "900",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                🗺️ RUTA
+              </button>
+            </div>
+          )}
         </div>
 
         {cargando ? (
