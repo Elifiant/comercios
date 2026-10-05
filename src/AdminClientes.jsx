@@ -20,6 +20,19 @@ export default function AdminClientes() {
   const [tarifaValor, setTarifaValor] = useState("10000");
   const [cupoLimite, setCupoLimite] = useState("5");
   const [notasCobro, setNotasCobro] = useState("");
+  const [razonSocialEmpresa, setRazonSocialEmpresa] = useState("");
+  const [cuitEmpresa, setCuitEmpresa] = useState("");
+  const [provinciaEmpresa, setProvinciaEmpresa] = useState("");
+  const [localidadEmpresa, setLocalidadEmpresa] = useState("");
+  const [domicilioEmpresa, setDomicilioEmpresa] = useState("");
+  const [telefonoEmpresa, setTelefonoEmpresa] = useState("");
+  const [whatsappEmpresa, setWhatsappEmpresa] = useState("");
+  const [emailEmpresa, setEmailEmpresa] = useState("");
+  const [contactoEmpresa, setContactoEmpresa] = useState("");
+  const [partnerEmpresa, setPartnerEmpresa] = useState("");
+  const [notasEmpresa, setNotasEmpresa] = useState("");
+  const [notasAbono, setNotasAbono] = useState("");
+  const [partnersDisponibles, setPartnersDisponibles] = useState([]);
   const [tarifasMap, setTarifasMap] = useState(() => {
     try {
       const guardado = localStorage.getItem("tarifas_empresas");
@@ -69,7 +82,24 @@ export default function AdminClientes() {
   const [temporalDesdeNuevo, setTemporalDesdeNuevo] = useState("");
   const [temporalHastaNuevo, setTemporalHastaNuevo] = useState("");
 
-  useEffect(() => { cargarDatos(); }, []);
+  useEffect(() => {
+    cargarDatos();
+    const cargarPartners = () => {
+      try {
+        const guardados = JSON.parse(localStorage.getItem("rutacomercio_partners_v1") || "[]");
+        setPartnersDisponibles(Array.isArray(guardados) ? guardados.filter(p => p && p.activo !== false) : []);
+      } catch (e) {
+        setPartnersDisponibles([]);
+      }
+    };
+    cargarPartners();
+    window.addEventListener("focus", cargarPartners);
+    window.addEventListener("storage", cargarPartners);
+    return () => {
+      window.removeEventListener("focus", cargarPartners);
+      window.removeEventListener("storage", cargarPartners);
+    };
+  }, []);
 
   const cargarDatos = async () => {
     setCargando(true);
@@ -196,16 +226,22 @@ export default function AdminClientes() {
   };
 
   const abrirEditarEmpresa = (emp) => {
-    // Supabase / tarifasMap es la fuente actual. Evitamos datos viejos de localStorage.
-    const t = tarifasMap[emp] || {};
+    const e = empresasRegistros.find(x => x.nombre === emp);
+    if (!e) return alert("No encontré la empresa en Supabase");
     setEmpresaAEditar(emp);
-    setDiaCobroModal(t.dia_cobro || t.diaCobro || (diasCorteMap[emp] ? diasCorteMap[emp].dia : "05"));
-    setEstadoCobroModal(t.estado_pago || (diasCorteMap[emp] ? diasCorteMap[emp].estado : "Al Día"));
-    setTarifaEditada(t.valor || t.tarifa || "13000");
-    setCupoEditado(t.cupo || (diasCorteMap[emp] ? String(diasCorteMap[emp].cupo || 5) : "5"));
-    setMonedaEditada(t.moneda || "ARS");
-    setTipoTarifaEditada(t.tipo_tarifa || t.tipo || "preventista");
-    setPaisEditado(t.pais || "Argentina");
+    setNombreEmpresa(e.nombre || "");
+    setRazonSocialEmpresa(e.razon_social || "");
+    setCuitEmpresa(e.cuit || "");
+    setPaisEmpresa(e.pais || "Argentina");
+    setProvinciaEmpresa(e.provincia || "");
+    setLocalidadEmpresa(e.localidad || "");
+    setDomicilioEmpresa(e.domicilio || "");
+    setTelefonoEmpresa(e.telefono || "");
+    setWhatsappEmpresa(e.whatsapp || "");
+    setEmailEmpresa(e.email || "");
+    setContactoEmpresa(e.contacto || "");
+    setPartnerEmpresa(e.partner || "");
+    setNotasEmpresa(e.notas || "");
     setMostrarModalEditar(true);
   };
 
@@ -214,20 +250,28 @@ export default function AdminClientes() {
     try {
       const empresaDB = empresasRegistros.find(e => e.nombre === empresaAEditar);
       if (!empresaDB?.id) throw new Error("No encontré la empresa en Supabase");
-
+      const nombre = nombreEmpresa.trim();
+      if (!nombre) throw new Error("El nombre comercial es obligatorio");
       const cambios = {
-        pais: paisEditado,
-        moneda: monedaEditada,
-        modelo_cobro: tipoTarifaEditada,
-        tarifa_pactada: Number(tarifaEditada) || 0,
-        cupo_preventistas: Math.max(0, Number(cupoEditado) || 0),
-        dia_cobro: Number(diaCobroModal) || 5
+        nombre,
+        razon_social: razonSocialEmpresa.trim() || null,
+        cuit: cuitEmpresa.trim() || null,
+        pais: paisEmpresa,
+        provincia: provinciaEmpresa.trim() || null,
+        localidad: localidadEmpresa.trim() || null,
+        domicilio: domicilioEmpresa.trim() || null,
+        telefono: telefonoEmpresa.trim() || null,
+        whatsapp: whatsappEmpresa.trim() || null,
+        email: emailEmpresa.trim() || null,
+        contacto: contactoEmpresa.trim() || null,
+        partner: partnerEmpresa || null,
+        notas: notasEmpresa.trim() || null
       };
       const { error } = await supabase.from("empresas").update(cambios).eq("id", empresaDB.id);
       if (error) throw error;
       await cargarDatos();
       setMostrarModalEditar(false);
-      alert("✅ Empresa actualizada en Supabase.");
+      alert("✅ Datos de la empresa actualizados.");
     } catch (err) {
       alert("Error al guardar empresa: " + (err.message || "Error desconocido"));
     }
@@ -251,6 +295,7 @@ export default function AdminClientes() {
     setCambioPreventistasPago("");
     setCambioTemporalPago(false);
     setComprobantePago("");
+    setNotasAbono("");
     setMostrarModalPago(true);
   };
 
@@ -353,7 +398,8 @@ export default function AdminClientes() {
           periodo_hasta: periodoHastaPago || null,
           cambio_preventistas: cambioFirmado,
           cupo_resultante: cupoResultante,
-          cambio_temporal: (esAmpliacion || esReduccion) ? cambioTemporalPago : false
+          cambio_temporal: (esAmpliacion || esReduccion) ? cambioTemporalPago : false,
+          notas: notasAbono.trim() || null
         }]);
         if (error) throw error;
       }
@@ -881,50 +927,38 @@ export default function AdminClientes() {
         </div>
       )}
 
-      {/* MODAL EDITAR EMPRESA */}
+      {/* MODAL EDITAR EMPRESA - DATOS PROPIOS, NO ABONO */}
       {mostrarModalEditar && (
-        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20000, padding: "16px" }}>
-          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "480px", boxSizing: "border-box" }}>
-            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px", color: "#f8fafc" }}>✏️ Editar Empresa — {empresaAEditar}</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>País<input value={paisEditado} onChange={(e) => setPaisEditado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Moneda<input value={monedaEditada} onChange={(e) => setMonedaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Modelo de cobro<select value={tipoTarifaEditada} onChange={(e) => setTipoTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px" }}><option value="preventista">Por preventista</option><option value="plana">Tarifa plana</option></select></label>
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>{tipoTarifaEditada === "preventista" ? "Tarifa por preventista" : "Tarifa plana mensual"}<input type="number" min="0" onWheel={(e) => e.currentTarget.blur()} value={tarifaEditada} onChange={(e) => setTarifaEditada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
-              {tipoTarifaEditada === "preventista" && (
-                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Preventistas contratados<input type="number" min="0" onWheel={(e) => e.currentTarget.blur()} value={cupoEditado} onChange={(e) => setCupoEditado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
-              )}
-              <label style={{ color: "#94a3b8", fontSize: "12px" }}>Día de cobro<input type="number" min="1" max="31" onWheel={(e) => e.currentTarget.blur()} value={diaCobroModal} onChange={(e) => setDiaCobroModal(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "4px", boxSizing: "border-box" }} /></label>
+        <div style={{ position:"fixed", inset:0, backgroundColor:"rgba(0,0,0,0.75)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:20000, padding:"16px" }}>
+          <div style={{ backgroundColor:"#1e293b", border:"1px solid #334155", borderRadius:"12px", padding:"24px", width:"100%", maxWidth:"720px", maxHeight:"92vh", overflowY:"auto", boxSizing:"border-box" }}>
+            <h3 style={{ margin:"0 0 6px 0", fontSize:"18px", color:"#f8fafc" }}>✏️ Editar Empresa — {empresaAEditar}</h3>
+            <div style={{ color:"#94a3b8", fontSize:"12px", marginBottom:"18px" }}>Modificá los datos propios de la empresa o cambiala de Partner. El abono se administra por separado.</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(240px, 1fr))", gap:"12px" }}>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Nombre comercial *<input value={nombreEmpresa} onChange={e=>setNombreEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Razón social<input value={razonSocialEmpresa} onChange={e=>setRazonSocialEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>CUIT / Identificación fiscal<input value={cuitEmpresa} onChange={e=>setCuitEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>País<select value={paisEmpresa} onChange={e=>setPaisEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff"}}><option>Argentina</option><option>México</option><option>Colombia</option><option>Brasil</option><option>Internacional</option></select></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Provincia / Estado<input value={provinciaEmpresa} onChange={e=>setProvinciaEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Localidad<input value={localidadEmpresa} onChange={e=>setLocalidadEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px",gridColumn:"1 / -1"}}>Domicilio<input value={domicilioEmpresa} onChange={e=>setDomicilioEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Teléfono<input value={telefonoEmpresa} onChange={e=>setTelefonoEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>WhatsApp<input value={whatsappEmpresa} onChange={e=>setWhatsappEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Email<input type="email" value={emailEmpresa} onChange={e=>setEmailEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Responsable / Contacto<input value={contactoEmpresa} onChange={e=>setContactoEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#fbbf24",fontSize:"12px",fontWeight:"800",gridColumn:"1 / -1"}}>🤝 Partner<select value={partnerEmpresa} onChange={e=>setPartnerEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #b45309",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}}><option value="">Directo / Sin Partner</option>{partnersDisponibles.map(p=><option key={p.id || p.email || p.nombre} value={p.nombre}>{p.nombre}</option>)}</select></label>
+              <label style={{color:"#94a3b8",fontSize:"12px",gridColumn:"1 / -1"}}>Notas de la empresa<textarea value={notasEmpresa} onChange={e=>setNotasEmpresa(e.target.value)} rows={3} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box",resize:"vertical"}} /></label>
             </div>
-            <div style={{ marginTop: "14px", padding: "12px", borderRadius: "9px", backgroundColor: "#0f172a", border: "1px solid #38bdf8", color: "#cbd5e1", fontSize: "12px", lineHeight: 1.5 }}>
-              <div style={{ color: "#94a3b8", fontWeight: "800", marginBottom: "3px" }}>CONTRATO MENSUAL</div>
-              {tipoTarifaEditada === "preventista" ? (
-                <>
-                  <div>{Math.max(0, Number(cupoEditado) || 0)} preventistas × {monedaEditada} ${Number(tarifaEditada || 0).toLocaleString("es-AR")}</div>
-                  <div style={{ marginTop: "3px", color: "#38bdf8", fontSize: "17px", fontWeight: "900" }}>
-                    {monedaEditada} ${(Math.max(0, Number(cupoEditado) || 0) * Number(tarifaEditada || 0)).toLocaleString("es-AR")} / mes
-                  </div>
-                </>
-              ) : (
-                <div style={{ color: "#38bdf8", fontSize: "17px", fontWeight: "900" }}>
-                  {monedaEditada} ${Number(tarifaEditada || 0).toLocaleString("es-AR")} / mes
-                </div>
-              )}
-              <div style={{ marginTop: "6px", color: "#94a3b8" }}>Editar Empresa define qué tiene contratado el cliente. Abonos registra lo que efectivamente paga.</div>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
-              <button type="button" onClick={() => setMostrarModalEditar(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
-              <button type="button" onClick={guardarEdicionEmpresa} style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Guardar cambios</button>
-            </div>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:"8px",marginTop:"20px"}}><button type="button" onClick={()=>setMostrarModalEditar(false)} style={{backgroundColor:"#475569",color:"#fff",border:"none",padding:"10px 18px",borderRadius:"6px",cursor:"pointer"}}>Cancelar</button><button type="button" onClick={guardarEdicionEmpresa} style={{backgroundColor:"#2563eb",color:"#fff",border:"none",padding:"10px 18px",borderRadius:"6px",cursor:"pointer",fontWeight:"bold"}}>Guardar cambios</button></div>
           </div>
         </div>
       )}
 
-      {/* MODAL 4: ALTA EMPRESA */}
+      {/* MODAL 4: ALTA EMPRESA - SOLO DATOS DE LA EMPRESA */}
       {mostrarModalEmpresa && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20000, padding: "16px" }}>
-          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "480px", boxSizing: "border-box" }}>
-            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px", color: "#f8fafc" }}>🏢 Dar de Alta Nueva Empresa</h3>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "720px", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box" }}>
+            <h3 style={{ margin: "0 0 6px 0", fontSize: "18px", color: "#f8fafc" }}>🏢 Dar de Alta Nueva Empresa</h3>
+            <div style={{ color: "#94a3b8", fontSize: "12px", marginBottom: "18px" }}>Acá se cargan solamente los datos de la empresa. El plan, cupo y valor se configuran después desde 💳 Abonos.</div>
             <form onSubmit={async (e) => {
               e.preventDefault();
               try {
@@ -932,72 +966,48 @@ export default function AdminClientes() {
                 if (!nombre) return;
                 const { error } = await supabase.from("empresas").insert([{
                   nombre,
+                  razon_social: razonSocialEmpresa.trim() || null,
+                  cuit: cuitEmpresa.trim() || null,
                   pais: paisEmpresa,
-                  moneda: monedaEmpresa,
-                  modelo_cobro: tipoTarifa,
-                  tarifa_pactada: Number(tarifaValor) || 0,
-                  cupo_preventistas: Number(cupoLimite) || 5,
-                  metodo_pago: notasCobro || null,
+                  provincia: provinciaEmpresa.trim() || null,
+                  localidad: localidadEmpresa.trim() || null,
+                  domicilio: domicilioEmpresa.trim() || null,
+                  telefono: telefonoEmpresa.trim() || null,
+                  whatsapp: whatsappEmpresa.trim() || null,
+                  email: emailEmpresa.trim() || null,
+                  contacto: contactoEmpresa.trim() || null,
+                  partner: partnerEmpresa.trim() || null,
+                  notas: notasEmpresa.trim() || null,
                   activo: true
                 }]);
                 if (error) throw error;
-                setNombreEmpresa("");
-                setNotasCobro("");
+                setNombreEmpresa(""); setRazonSocialEmpresa(""); setCuitEmpresa("");
+                setProvinciaEmpresa(""); setLocalidadEmpresa(""); setDomicilioEmpresa("");
+                setTelefonoEmpresa(""); setWhatsappEmpresa(""); setEmailEmpresa("");
+                setContactoEmpresa(""); setPartnerEmpresa(""); setNotasEmpresa("");
                 setMostrarModalEmpresa(false);
                 await cargarDatos();
-                alert("✅ Empresa creada en Supabase.");
+                alert("✅ Empresa creada. Ahora podés configurar su abono desde el botón 💳 Abonos.");
               } catch (err) {
                 alert("Error al crear empresa: " + (err.message || "Error desconocido"));
               }
             }}>
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Nombre de la Empresa</label>
-                <input type="text" value={nombreEmpresa} onChange={(e) => setNombreEmpresa(e.target.value)} required placeholder="Ej. Distribuidora Sur" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Nombre comercial *<input type="text" value={nombreEmpresa} onChange={(e) => setNombreEmpresa(e.target.value)} required placeholder="Ej. WELT" style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Razón social<input type="text" value={razonSocialEmpresa} onChange={(e) => setRazonSocialEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>CUIT / Identificación fiscal<input type="text" value={cuitEmpresa} onChange={(e) => setCuitEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>País<select value={paisEmpresa} onChange={(e) => setPaisEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff" }}><option value="Argentina">🇦🇷 Argentina</option><option value="México">🇲🇽 México</option><option value="Colombia">🇨🇴 Colombia</option><option value="Brasil">🇧🇷 Brasil</option><option value="Internacional">🌐 Internacional</option></select></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Provincia / Estado<input type="text" value={provinciaEmpresa} onChange={(e) => setProvinciaEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Localidad<input type="text" value={localidadEmpresa} onChange={(e) => setLocalidadEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px", gridColumn:"1 / -1" }}>Domicilio<input type="text" value={domicilioEmpresa} onChange={(e) => setDomicilioEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Teléfono<input type="text" value={telefonoEmpresa} onChange={(e) => setTelefonoEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>WhatsApp<input type="text" value={whatsappEmpresa} onChange={(e) => setWhatsappEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Email<input type="email" value={emailEmpresa} onChange={(e) => setEmailEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Responsable / Contacto<input type="text" value={contactoEmpresa} onChange={(e) => setContactoEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#fbbf24", fontSize: "12px", fontWeight:"800", gridColumn:"1 / -1" }}>🤝 Partner<select value={partnerEmpresa} onChange={(e) => setPartnerEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #b45309", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}><option value="">Directo / Sin Partner</option>{partnersDisponibles.map(p => <option key={p.id || p.email || p.nombre} value={p.nombre}>{p.nombre}</option>)}</select></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px", gridColumn:"1 / -1" }}>Notas de la empresa<textarea value={notasEmpresa} onChange={(e) => setNotasEmpresa(e.target.value)} rows={3} placeholder="Observaciones administrativas o comerciales de la empresa..." style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box", resize:"vertical" }}/></label>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>País</label>
-                  <select value={paisEmpresa} onChange={(e) => {
-                    setPaisEmpresa(e.target.value);
-                    if (e.target.value === "Argentina") setMonedaEmpresa("ARS");
-                    else if (e.target.value === "México") setMonedaEmpresa("MXN");
-                    else if (e.target.value === "Colombia") setMonedaEmpresa("COP");
-                    else if (e.target.value === "Brasil") setMonedaEmpresa("BRL");
-                    else setMonedaEmpresa("USD");
-                  }} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
-                    <option value="Argentina">🇦🇷 Argentina</option>
-                    <option value="México">🇲🇽 México</option>
-                    <option value="Colombia">🇨🇴 Colombia</option>
-                    <option value="Brasil">🇧🇷 Brasil</option>
-                    <option value="Internacional">🌐 Internacional</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Cupo Preventistas</label>
-                  <input type="number" onWheel={(e) => e.currentTarget.blur()} value={cupoLimite} onChange={(e) => setCupoLimite(e.target.value)} required placeholder="Ej. 5" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Modelo</label>
-                  <select value={tipoTarifa} onChange={(e) => setTipoTarifa(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
-                    <option value="preventista">Por preventista</option>
-                    <option value="plana">Tarifa Plana (Fija)</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Valor ({monedaEmpresa})</label>
-                  <input type="number" onWheel={(e) => e.currentTarget.blur()} value={tarifaValor} onChange={(e) => setTarifaValor(e.target.value)} required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-                </div>
-              </div>
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "4px" }}>Datos de Cobro / CBU / Notas</label>
-                <input type="text" value={notasCobro} onChange={(e) => setNotasCobro(e.target.value)} placeholder="Ej. CBU / Alias / Wallet..." style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button type="button" onClick={() => setMostrarModalEmpresa(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
-                <button type="submit" style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Crear Empresa</button>
-              </div>
+              <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px", marginTop:"18px" }}><button type="button" onClick={() => setMostrarModalEmpresa(false)} style={{ backgroundColor:"#475569", color:"#fff", border:"none", padding:"10px 18px", borderRadius:"6px", cursor:"pointer" }}>Cancelar</button><button type="submit" style={{ backgroundColor:"#059669", color:"#fff", border:"none", padding:"10px 18px", borderRadius:"6px", cursor:"pointer", fontWeight:"bold" }}>Crear Empresa</button></div>
             </form>
           </div>
         </div>
@@ -1101,6 +1111,11 @@ export default function AdminClientes() {
               <div style={{ marginBottom: "14px" }}>
                 <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Concepto / detalle</label>
                 <input type="text" value={conceptoPago} onChange={(e) => setConceptoPago(e.target.value)} placeholder="Ej. Renovación semestral / acuerdo especial" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Notas del abono</label>
+                <textarea value={notasAbono} onChange={(e) => setNotasAbono(e.target.value)} rows={3} placeholder="Ej. primer mes bonificado, acuerdo especial, observaciones del abono..." style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", resize: "vertical" }} />
               </div>
 
               {(tipoMovimientoPago === "primer_abono" || tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (
