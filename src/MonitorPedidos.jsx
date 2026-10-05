@@ -116,24 +116,34 @@ export default function MonitorPedidos() {
         if (idsComercios.length > 0) {
           const { data: comerciosData, error: errorComercios } = await supabase
             .from("comercios")
-            .select("id, direccion, localidad, partido, provincia, pais")
+            .select("id, direccion, localidad, partido, provincia, pais, razon_social, codigo_cliente, cuit, condicion_fiscal, domicilio_fiscal, codigo_postal, telefono, whatsapp, contacto, email")
             .in("id", idsComercios);
 
           if (errorComercios) {
             console.error("Error cargando direcciones de comercios:", errorComercios);
           } else {
             (comerciosData || []).forEach(c => {
-              direccionPorComercio[String(c.id)] = [
-                c.localidad,
-                c.partido,
-              ].filter(Boolean).join(", ");
+              direccionPorComercio[String(c.id)] = {
+                direccion: [c.direccion, c.localidad, c.provincia].filter(Boolean).join(", "),
+                razon_social: c.razon_social || "",
+                codigo_cliente: c.codigo_cliente || "",
+                cuit: c.cuit || "",
+                condicion_fiscal: c.condicion_fiscal || "",
+                domicilio_fiscal: c.domicilio_fiscal || "",
+                codigo_postal: c.codigo_postal || "",
+                telefono: c.telefono || "",
+                whatsapp: c.whatsapp || "",
+                contacto: c.contacto || "",
+                email: c.email || "",
+              };
             });
           }
         }
 
         listaConsolidada = data.map(p => {
           const itemsReales = itemsPorPedido[String(p.id)] || [];
-          const direccionReal = direccionPorComercio[String(p.comercio_id)] || "";
+          const comercioReal = direccionPorComercio[String(p.comercio_id)] || {};
+          const direccionReal = comercioReal.direccion || "";
           return {
             id: p.id || ("PED-" + String(p.created_at || Date.now()).slice(-4)),
             empresa_id: p.empresa_id || perfil.empresa_id,
@@ -145,8 +155,18 @@ export default function MonitorPedidos() {
             preventista: p.preventista || p.vendedor || "Walter",
             ruta: p.ruta || "Ruta de Visita",
             cliente: p.cliente || p.comercio_nombre || ("Comercio #" + (p.comercio_id || "")),
-            direccion: direccionReal || p.direccion || "Sin localidad/partido cargado",
-            condicion: p.condicion || "Consumidor Final",
+            direccion: direccionReal || p.direccion || "Sin dirección cargada",
+            razon_social: comercioReal.razon_social || "",
+            codigo_cliente: comercioReal.codigo_cliente || "",
+            cuit: comercioReal.cuit || "",
+            condicion_fiscal: comercioReal.condicion_fiscal || "",
+            domicilio_fiscal: comercioReal.domicilio_fiscal || "",
+            codigo_postal: comercioReal.codigo_postal || "",
+            telefono_cliente: comercioReal.telefono || "",
+            whatsapp_cliente: comercioReal.whatsapp || "",
+            contacto_cliente: comercioReal.contacto || "",
+            email_cliente: comercioReal.email || "",
+            condicion: p.condicion || comercioReal.condicion_fiscal || "Consumidor Final",
             bultos: p.bultos || itemsReales.reduce((acc, it) => acc + Number(it.cant || 0), 0) || 1,
             total: Number(p.total || p.total_pedido || 0),
             estado: p.estado || "Ingresado",
@@ -557,8 +577,9 @@ export default function MonitorPedidos() {
       // 1. Solo las listas pertenecientes a la empresa del Supervisor.
       const { data: listasEmpresa, error: errorListas } = await supabase
         .from("listas_precios")
-        .select("id")
+        .select("id, predeterminada")
         .eq("empresa_id", empresaIdActual)
+        .order("predeterminada", { ascending: false })
         .eq("activo", true);
 
       if (errorListas) throw errorListas;
@@ -572,7 +593,7 @@ export default function MonitorPedidos() {
       // 2. Solo los producto_id incluidos en esas listas.
       const { data: filasLista, error: errorFilas } = await supabase
         .from("lista_productos")
-        .select("producto_id")
+        .select("producto_id, lista_id, codigo_lista")
         .in("lista_id", idsListas)
         .eq("activo", true);
 
@@ -593,7 +614,26 @@ export default function MonitorPedidos() {
         .order("nombre", { ascending: true });
 
       if (errorProductos) throw errorProductos;
-      setProductosStockCatalogo(productosEmpresa || []);
+
+      // Código visible para el cliente: usar el código de SU lista de precios
+      // (por ejemplo WELT001), no el CGE interno de RutaComercio.
+      // Como idsListas está ordenado con la predeterminada primero, conservamos
+      // la primera equivalencia encontrada para cada producto.
+      const codigoClientePorProducto = new Map();
+      idsListas.forEach(listaId => {
+        (filasLista || []).forEach(fila => {
+          if (String(fila.lista_id) !== String(listaId)) return;
+          const pid = String(fila.producto_id || "");
+          if (!pid || codigoClientePorProducto.has(pid)) return;
+          const codigoCliente = String(fila.codigo_lista || "").trim();
+          if (codigoCliente) codigoClientePorProducto.set(pid, codigoCliente);
+        });
+      });
+
+      setProductosStockCatalogo((productosEmpresa || []).map(producto => ({
+        ...producto,
+        codigo_cliente: codigoClientePorProducto.get(String(producto.id)) || "",
+      })));
     } catch (error) {
       console.error("Error cargando catálogo de stock de la empresa:", error);
       setProductosStockCatalogo([]);
@@ -688,7 +728,8 @@ export default function MonitorPedidos() {
 
       const equivalenciaPorCodigo = {};
       (equivalencias || []).forEach(e => {
-        equivalenciaPorCodigo[String(e.codigo_archivo ?? "").trim()] = e;
+        const codigoNormalizado = String(e.codigo_archivo ?? "").trim().toUpperCase();
+        if (codigoNormalizado) equivalenciaPorCodigo[codigoNormalizado] = e;
       });
 
       const reconocidos = [];
@@ -714,12 +755,24 @@ export default function MonitorPedidos() {
           stock: Number.isFinite(stockNumero) ? stockNumero : null,
         };
 
-        const equivalencia = equivalenciaPorCodigo[codigoArchivo];
-        const producto = equivalencia ? productosPorId[String(equivalencia.producto_id)] : null;
+        const codigoBuscado = codigoArchivo.toUpperCase();
+        const equivalencia = equivalenciaPorCodigo[codigoBuscado];
+        let producto = equivalencia ? productosPorId[String(equivalencia.producto_id)] : null;
         const idsPermitidosEmpresa = new Set(productosStockCatalogo.map(p => String(p.id)));
+
+        // Si el código todavía no tiene equivalencia de Stock, reconocer también
+        // el código vigente de la lista de precios de ESTA empresa (ej. WELT001)
+        // o el CGE interno. No crea productos ni consume CGE.
+        if (!producto) {
+          producto = productosStockCatalogo.find(p =>
+            String(p.codigo_cliente || "").trim().toUpperCase() === codigoBuscado ||
+            String(p.codigo_cge || "").trim().toUpperCase() === codigoBuscado
+          ) || null;
+        }
+
         const productoPermitido = producto && idsPermitidosEmpresa.has(String(producto.id));
 
-        if (equivalencia && productoPermitido) {
+        if (productoPermitido) {
           reconocidos.push({
             ...base,
             producto_id: producto.id,
@@ -753,6 +806,25 @@ export default function MonitorPedidos() {
     } finally {
       setAnalizandoStock(false);
     }
+  };
+
+  const descargarPlantillaStock = () => {
+    const datosPlantilla = [
+      ["Código", "Descripción", "Color", "Talle", "Stock"],
+    ];
+
+    const hoja = XLSX.utils.aoa_to_sheet(datosPlantilla);
+    hoja["!cols"] = [
+      { wch: 18 },
+      { wch: 42 },
+      { wch: 18 },
+      { wch: 12 },
+      { wch: 12 },
+    ];
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Stock");
+    XLSX.writeFile(libro, "RutaComercio_Plantilla_Stock.xlsx");
   };
 
   const cargarArchivoStock = async (event) => {
@@ -871,6 +943,7 @@ export default function MonitorPedidos() {
     const productosParaImportar = [
       ...stockReconocidos.map(item => ({
         codigo_archivo: item.codigoArchivo,
+        producto_id: item.producto_id,
         descripcion: item.descripcionArchivo || item.producto_nombre || "",
         color: item.color || null,
         talle: item.talle || null,
@@ -1564,7 +1637,29 @@ export default function MonitorPedidos() {
                     </div>
                   </div>
 
-                  <label
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={descargarPlantillaStock}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        background: "#16a34a",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "9px",
+                        padding: "12px 18px",
+                        fontSize: "13px",
+                        fontWeight: "900",
+                        cursor: "pointer",
+                        boxShadow: "0 4px 10px rgba(22,163,74,0.20)"
+                      }}
+                    >
+                      📥 DESCARGAR PLANTILLA DE STOCK
+                    </button>
+
+                    <label
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
@@ -1588,7 +1683,8 @@ export default function MonitorPedidos() {
                       disabled={cargandoStockArchivo}
                       style={{ display: "none" }}
                     />
-                  </label>
+                    </label>
+                  </div>
                 </div>
 
                 <div style={{ padding: "10px 12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", color: "#1e3a8a", fontSize: "11px", lineHeight: 1.5, marginBottom: "12px" }}>
@@ -1634,7 +1730,7 @@ export default function MonitorPedidos() {
                   const filtradas = filasStock.filter(({ producto, fila }) => {
                     if (!q) return true;
                     return [
-                      producto.codigo_cge,
+                      producto.codigo_cliente,
                       producto.nombre,
                       producto.descripcion,
                       producto.marca,
@@ -1707,7 +1803,7 @@ export default function MonitorPedidos() {
                               const fecha = fila?.fecha_actualizacion;
                               return (
                                 <tr key={`${producto.id}-${fila?.id || idx}`} style={{ background: idx % 2 ? "#fff" : "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
-                                  <td style={{ padding: "8px", fontWeight: "800", whiteSpace: "nowrap" }}>{producto.codigo_cge || "—"}</td>
+                                  <td style={{ padding: "8px", fontWeight: "800", whiteSpace: "nowrap" }}>{producto.codigo_cliente || "—"}</td>
                                   <td style={{ padding: "8px" }}>{producto.nombre || producto.descripcion || "Artículo"}</td>
                                   <td style={{ padding: "8px" }}>{fila?.color || fila?.variante_color || "—"}</td>
                                   <td style={{ padding: "8px" }}>{fila?.talle || fila?.variante_talle || "—"}</td>
