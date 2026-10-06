@@ -10,6 +10,7 @@ export default function AdminPromotores() {
   const [mostrarAlta,setMostrarAlta]=useState(false);
   const [partnerDetalle,setPartnerDetalle]=useState(null);
   const [pago,setPago]=useState(null);
+  const [partnerEditando,setPartnerEditando]=useState(null);
 
   const guardarPartners=(lista)=>{ setPartners(lista); localStorage.setItem(KEY,JSON.stringify(lista)); window.dispatchEvent(new Event("storage")); };
   const cargar=async()=>{
@@ -34,6 +35,7 @@ export default function AdminPromotores() {
   };
 
   return <div style={{minHeight:"100vh",backgroundColor:"#f8fafc",fontFamily:"Arial,sans-serif",color:"#0f172a"}}>
+    <style>{`.partner-editar-btn{background:#b45309 !important;background-color:#b45309 !important;color:#fff !important;-webkit-text-fill-color:#fff !important;border-color:#b45309 !important;opacity:1 !important}.partner-editar-btn:hover{background:#92400e !important;background-color:#92400e !important}`}</style>
     <header style={{backgroundColor:"#fff",borderBottom:"1px solid #e2e8f0",padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px",flexWrap:"wrap"}}>
       <div><div style={{fontSize:"18px",fontWeight:900,color:"#0284c7"}}>RutaComercio <span style={{fontSize:"10px",color:"#16a34a"}}>SUPERADMIN</span></div><div style={{fontSize:"11px",color:"#64748b"}}>Partners • Comisiones • Historial de pagos</div></div>
       <div style={{display:"flex",gap:"8px"}}><a href="/admin" style={{padding:"8px 12px",border:"1px solid #cbd5e1",borderRadius:"8px",textDecoration:"none",color:"#334155",fontWeight:700,fontSize:"12px"}}>🏢 Empresas</a><button onClick={()=>setMostrarAlta(true)} style={{padding:"8px 14px",border:0,borderRadius:"8px",backgroundColor:"#b45309",color:"#fff",fontWeight:800,cursor:"pointer"}}>+ Alta Partner</button></div>
@@ -46,11 +48,74 @@ export default function AdminPromotores() {
       <div style={{display:"grid",gap:"12px"}}>{partners.length===0?<div style={{backgroundColor:"#fff",padding:"22px",borderRadius:"10px",border:"1px solid #e2e8f0",color:"#64748b"}}>No hay Partners cargados.</div>:partners.map(p=>{
         const hist=comisiones.filter(c=>(c.partner_id&&c.partner_id===p.id)||(!c.partner_id&&c.partner_nombre===p.nombre));
         const pend=hist.filter(c=>c.estado!=="pagada").reduce((a,c)=>a+Number(c.importe_comision||0),0);
-        return <div key={p.id||p.email||p.nombre} style={{backgroundColor:"#fff",border:"1px solid #e2e8f0",borderRadius:"10px",padding:"15px"}}><div style={{display:"flex",justifyContent:"space-between",gap:"12px",flexWrap:"wrap"}}><div><div style={{fontWeight:900,fontSize:"16px"}}>{p.nombre}</div><div style={{fontSize:"12px",color:"#64748b"}}>{p.email||""} {p.telefono?`· ${p.telefono}`:""}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:"11px",color:"#64748b"}}>Pendiente</div><div style={{fontWeight:900,color:"#b45309"}}>${pend.toLocaleString('es-AR')}</div></div></div><div style={{marginTop:"10px",display:"flex",gap:"8px",flexWrap:"wrap"}}><button onClick={()=>setPartnerDetalle(p)} style={{padding:"7px 11px",borderRadius:"7px",border:"1px solid #0284c7",backgroundColor:"#e0f2fe",color:"#0369a1",fontWeight:800,cursor:"pointer"}}>📒 Ver historial</button><button onClick={()=>guardarPartners(partners.map(x=>x.id===p.id?{...x,activo:x.activo===false?true:false}:x))} style={{padding:"7px 11px",borderRadius:"7px",border:"1px solid #cbd5e1",backgroundColor:"#fff",fontWeight:700,cursor:"pointer"}}>{p.activo===false?"✓ Reactivar":"⏸ Pausar"}</button></div></div>
+        return <div key={p.id||p.email||p.nombre} style={{backgroundColor:"#fff",border:"1px solid #e2e8f0",borderRadius:"10px",padding:"15px"}}><div style={{display:"flex",justifyContent:"space-between",gap:"12px",flexWrap:"wrap"}}><div><div style={{fontWeight:900,fontSize:"16px"}}>{p.nombre}</div><div style={{fontSize:"12px",color:"#475569",marginTop:"5px",display:"grid",gap:"3px"}}>
+  <div><strong>Contacto:</strong> {p.contacto||"—"}</div>
+  <div><strong>Email:</strong> {p.email||"—"}</div>
+  <div><strong>Teléfono:</strong> {p.telefono||"—"}</div>
+  <div><strong>WhatsApp:</strong> {p.whatsapp||"—"}</div>
+  <div><strong>CUIT:</strong> {p.cuit||"—"}</div>
+  <div><strong>Notas:</strong> {p.notas||"—"}</div>
+  <div><strong>Estado:</strong> {p.activo===false?"⏸ Pausado":"✅ Activo"}</div>
+</div></div><div style={{textAlign:"right"}}><div style={{fontSize:"11px",color:"#64748b"}}>Pendiente</div><div style={{fontWeight:900,color:"#b45309"}}>${pend.toLocaleString('es-AR')}</div></div></div><div style={{marginTop:"10px",display:"flex",gap:"8px",flexWrap:"wrap"}}><button onClick={()=>setPartnerDetalle(p)} style={{padding:"7px 11px",borderRadius:"7px",border:"1px solid #0284c7",backgroundColor:"#e0f2fe",color:"#0369a1",fontWeight:800,cursor:"pointer"}}>📒 Ver historial</button><button className="partner-editar-btn" onClick={()=>setPartnerEditando({...p})} style={{padding:"8px 13px",borderRadius:"7px",border:"1px solid #b45309",background:"#b45309",backgroundColor:"#b45309",color:"#fff",WebkitTextFillColor:"#fff",fontWeight:900,cursor:"pointer",opacity:1,appearance:"none",WebkitAppearance:"none"}}>✏️ Editar</button><button onClick={()=>guardarPartners(partners.map(x=>x.id===p.id?{...x,activo:x.activo===false?true:false}:x))} style={{padding:"7px 11px",borderRadius:"7px",border:"1px solid #cbd5e1",backgroundColor:"#fff",fontWeight:700,cursor:"pointer"}}>{p.activo===false?"✓ Reactivar":"⏸ Pausar"}</button></div></div>
       })}</div>
     </main>
 
     {mostrarAlta&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",padding:"16px",zIndex:100}}><div style={{background:"#fff",borderRadius:"12px",padding:"22px",width:"100%",maxWidth:"520px"}}><h3 style={{marginTop:0}}>+ Alta Nuevo Partner</h3><form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);const nom=String(f.get('nombre')||'').trim(),mail=String(f.get('email')||'').trim();if(!nom||!mail)return;const n={id:'PR-'+Date.now(),nombre:nom,email:mail,telefono:String(f.get('telefono')||'').trim(),activo:true,territorios:[]};guardarPartners([n,...partners]);setMostrarAlta(false);}} style={{display:"grid",gap:"10px"}}><label>Nombre *<input name="nombre" required style={input}/></label><label>Email *<input name="email" type="email" required style={input}/></label><label>Teléfono / WhatsApp<input name="telefono" style={input}/></label><div style={{fontSize:"12px",color:"#64748b",background:"#f8fafc",padding:"10px",borderRadius:"8px"}}>La comisión se define después por cada empresa. Un mismo Partner puede tener acuerdos distintos con clientes distintos.</div><div style={{display:"flex",justifyContent:"flex-end",gap:"8px"}}><button type="button" onClick={()=>setMostrarAlta(false)}>Cancelar</button><button type="submit" style={{background:"#b45309",color:"#fff",border:0,borderRadius:"7px",padding:"9px 15px",fontWeight:800}}>Crear Partner</button></div></form></div></div>}
+
+    {partnerEditando&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",display:"flex",alignItems:"center",justifyContent:"center",padding:"16px",zIndex:115}}>
+      <div style={{background:"#fff",borderRadius:"12px",padding:"22px",width:"100%",maxWidth:"560px",maxHeight:"90vh",overflow:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px"}}>
+          <div>
+            <h3 style={{margin:"0 0 3px"}}>✏️ Editar Partner</h3>
+            <div style={{fontSize:"12px",color:"#64748b"}}>Podés actualizar sus datos sin alterar el historial de comisiones y pagos.</div>
+          </div>
+          <button type="button" onClick={()=>setPartnerEditando(null)}>✕</button>
+        </div>
+        <form onSubmit={e=>{
+          e.preventDefault();
+          const nombre=(partnerEditando.nombre||"").trim();
+          const email=(partnerEditando.email||"").trim();
+          if(!nombre) return alert("El nombre del Partner es obligatorio.");
+          if(!email) return alert("El email del Partner es obligatorio.");
+
+          const nombreAnterior=partners.find(x=>x.id===partnerEditando.id)?.nombre || "";
+          const actualizado={
+            ...partnerEditando,
+            nombre,
+            email,
+            telefono:(partnerEditando.telefono||"").trim(),
+            whatsapp:(partnerEditando.whatsapp||"").trim(),
+            contacto:(partnerEditando.contacto||"").trim(),
+            cuit:(partnerEditando.cuit||"").trim(),
+            notas:(partnerEditando.notas||"").trim()
+          };
+
+          guardarPartners(partners.map(x=>x.id===actualizado.id?actualizado:x));
+
+          // Mantener consistente el nombre mostrado en comisiones históricas si cambia.
+          if(nombreAnterior && nombreAnterior!==nombre){
+            supabase.from("partner_comisiones").update({partner_nombre:nombre}).eq("partner_id",actualizado.id)
+              .then(({error})=>{ if(error) console.warn("No se pudo actualizar el nombre histórico del Partner:",error.message); });
+          }
+
+          setPartnerEditando(null);
+          alert("✅ Datos del Partner actualizados.");
+        }} style={{display:"grid",gap:"10px",marginTop:"16px"}}>
+          <label>Nombre *<input required value={partnerEditando.nombre||""} onChange={e=>setPartnerEditando({...partnerEditando,nombre:e.target.value})} style={input}/></label>
+          <label>Nombre de contacto<input value={partnerEditando.contacto||""} onChange={e=>setPartnerEditando({...partnerEditando,contacto:e.target.value})} style={input}/></label>
+          <label>Email *<input required type="email" value={partnerEditando.email||""} onChange={e=>setPartnerEditando({...partnerEditando,email:e.target.value})} style={input}/></label>
+          <label>Teléfono<input value={partnerEditando.telefono||""} onChange={e=>setPartnerEditando({...partnerEditando,telefono:e.target.value})} style={input}/></label>
+          <label>WhatsApp<input value={partnerEditando.whatsapp||""} onChange={e=>setPartnerEditando({...partnerEditando,whatsapp:e.target.value})} style={input}/></label>
+          <label>CUIT / Identificación fiscal<input value={partnerEditando.cuit||""} onChange={e=>setPartnerEditando({...partnerEditando,cuit:e.target.value})} style={input}/></label>
+          <label>Notas<textarea rows="3" value={partnerEditando.notas||""} onChange={e=>setPartnerEditando({...partnerEditando,notas:e.target.value})} style={input}/></label>
+          <div style={{fontSize:"12px",color:"#64748b",background:"#f8fafc",padding:"10px",borderRadius:"8px"}}>Editar estos datos no modifica los acuerdos de comisión de las empresas ni los pagos ya registrados.</div>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:"8px"}}>
+            <button type="button" onClick={()=>setPartnerEditando(null)}>Cancelar</button>
+            <button type="submit" style={{background:"#b45309",color:"#fff",border:0,borderRadius:"7px",padding:"9px 15px",fontWeight:800,cursor:"pointer"}}>💾 Guardar cambios</button>
+          </div>
+        </form>
+      </div>
+    </div>}
 
     {partnerDetalle&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",display:"flex",alignItems:"center",justifyContent:"center",padding:"16px",zIndex:110}}><div style={{background:"#fff",borderRadius:"12px",padding:"20px",width:"100%",maxWidth:"900px",maxHeight:"90vh",overflow:"auto"}}><div style={{display:"flex",justifyContent:"space-between"}}><div><h3 style={{margin:"0 0 3px"}}>📒 {partnerDetalle.nombre}</h3><div style={{fontSize:"12px",color:"#64748b"}}>Historial de comisiones generado por cobros reales de empresas.</div></div><button onClick={()=>setPartnerDetalle(null)}>✕</button></div><div style={{marginTop:"14px",overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px"}}><thead><tr>{['Fecha','Empresa','Cobro','Acuerdo','Comisión','Estado','Pago'].map(h=><th key={h} style={{textAlign:"left",padding:"8px",borderBottom:"1px solid #cbd5e1"}}>{h}</th>)}</tr></thead><tbody>{comisiones.filter(c=>(c.partner_id&&c.partner_id===partnerDetalle.id)||(!c.partner_id&&c.partner_nombre===partnerDetalle.nombre)).map(c=><tr key={c.id}><td style={{padding:"8px",borderBottom:"1px solid #f1f5f9"}}>{new Date(c.fecha_generada).toLocaleDateString('es-AR')}</td><td style={{padding:"8px",borderBottom:"1px solid #f1f5f9"}}>{c.empresa}</td><td style={{padding:"8px",borderBottom:"1px solid #f1f5f9"}}>{c.moneda} ${Number(c.cobro_empresa||0).toLocaleString('es-AR')}</td><td style={{padding:"8px",borderBottom:"1px solid #f1f5f9"}}>{c.tipo_comision==='porcentaje'?`${c.valor_acuerdo}%`:`$${Number(c.valor_acuerdo||0).toLocaleString('es-AR')}`}</td><td style={{padding:"8px",borderBottom:"1px solid #f1f5f9",fontWeight:900}}>{c.moneda} ${Number(c.importe_comision||0).toLocaleString('es-AR')}</td><td style={{padding:"8px",borderBottom:"1px solid #f1f5f9"}}>{c.estado==='pagada'?`✅ Pagada${c.fecha_pago?' '+new Date(c.fecha_pago).toLocaleDateString('es-AR'):''}`:'🟡 Pendiente'}</td><td style={{padding:"8px",borderBottom:"1px solid #f1f5f9"}}>{c.estado==='pagada'?<span>{c.medio_pago||'—'}{c.notas_pago?` · ${c.notas_pago}`:''}</span>:<button onClick={()=>setPago({id:c.id,importe:String(c.importe_comision||0),medio:'Transferencia',notas:''})}>💰 Registrar pago</button>}</td></tr>)}{comisiones.filter(c=>(c.partner_id&&c.partner_id===partnerDetalle.id)||(!c.partner_id&&c.partner_nombre===partnerDetalle.nombre)).length===0&&<tr><td colSpan="7" style={{padding:"20px",textAlign:"center",color:"#64748b"}}>Todavía no hay comisiones generadas.</td></tr>}</tbody></table></div></div></div>}
 
