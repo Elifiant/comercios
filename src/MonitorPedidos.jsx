@@ -31,6 +31,11 @@ export default function MonitorPedidos() {
   const [stockActualEmpresa, setStockActualEmpresa] = useState([]);
   const [cargandoStockActual, setCargandoStockActual] = useState(false);
   const [busquedaStockActual, setBusquedaStockActual] = useState("");
+  const [stockMatrizDepositos, setStockMatrizDepositos] = useState([]);
+  const [stockMatrizVendedores, setStockMatrizVendedores] = useState([]);
+  const [stockMatrizFilasDeposito, setStockMatrizFilasDeposito] = useState([]);
+  const [stockMatrizFilasVendedor, setStockMatrizFilasVendedor] = useState([]);
+  const [cargandoStockMatriz, setCargandoStockMatriz] = useState(false);
   const [stockManualValores, setStockManualValores] = useState({});
   const [guardandoStockManual, setGuardandoStockManual] = useState(null);
   const [stockAlertaPorcentajeActiva, setStockAlertaPorcentajeActiva] = useState(false);
@@ -41,6 +46,51 @@ export default function MonitorPedidos() {
   const [alertasProducto, setAlertasProducto] = useState({});
   const [busquedaAlertasProducto, setBusquedaAlertasProducto] = useState("");
   const [guardandoAlertaProducto, setGuardandoAlertaProducto] = useState(null);
+  // 🏭 Depósitos — módulo aislado del stock existente
+  const [stockDepositos, setStockDepositos] = useState([]);
+  const [cargandoDepositos, setCargandoDepositos] = useState(false);
+  const [nuevoDepositoNombre, setNuevoDepositoNombre] = useState("");
+  const [nuevoDepositoDescripcion, setNuevoDepositoDescripcion] = useState("");
+  const [nuevoDepositoPrincipal, setNuevoDepositoPrincipal] = useState(false);
+  const [guardandoDeposito, setGuardandoDeposito] = useState(false);
+  // 🔄 Movimientos internos de stock / muestras
+  const [movPreventistas, setMovPreventistas] = useState([]);
+  const [movOrigenDeposito, setMovOrigenDeposito] = useState("");
+  const [movPreventistaDestino, setMovPreventistaDestino] = useState("");
+  const [movProductoId, setMovProductoId] = useState("");
+  const [movColor, setMovColor] = useState("");
+  const [movTalle, setMovTalle] = useState("");
+  const [movVariantesDisponibles, setMovVariantesDisponibles] = useState([]);
+  const [movProductosDeposito, setMovProductosDeposito] = useState([]);
+  const [movCantidad, setMovCantidad] = useState("1");
+  const [movObservacion, setMovObservacion] = useState("Muestra");
+  const [guardandoMovimiento, setGuardandoMovimiento] = useState(false);
+  // ↩️ Devolución de vendedor a depósito
+  const [devPreventistaOrigen, setDevPreventistaOrigen] = useState("");
+  const [devDepositoDestino, setDevDepositoDestino] = useState("");
+  const [devProductoId, setDevProductoId] = useState("");
+  const [devColor, setDevColor] = useState("");
+  const [devTalle, setDevTalle] = useState("");
+  const [devCantidad, setDevCantidad] = useState("1");
+  const [devObservacion, setDevObservacion] = useState("Devolución");
+  const [devStockVendedor, setDevStockVendedor] = useState([]);
+  const [devProductosVendedor, setDevProductosVendedor] = useState([]);
+  // 🔁 Transferencia entre depósitos
+  const [trasDepositoOrigen, setTrasDepositoOrigen] = useState("");
+  const [trasDepositoDestino, setTrasDepositoDestino] = useState("");
+  const [trasProductoId, setTrasProductoId] = useState("");
+  const [trasColor, setTrasColor] = useState("");
+  const [trasTalle, setTrasTalle] = useState("");
+  const [trasCantidad, setTrasCantidad] = useState("1");
+  const [trasObservacion, setTrasObservacion] = useState("Transferencia");
+  const [trasStockOrigen, setTrasStockOrigen] = useState([]);
+  const [trasProductosOrigen, setTrasProductosOrigen] = useState([]);
+  const [stockDepositoCargaId, setStockDepositoCargaId] = useState("");
+  const [depositoEditandoId, setDepositoEditandoId] = useState(null);
+  const [depositoEditNombre, setDepositoEditNombre] = useState("");
+  const [depositoEditDescripcion, setDepositoEditDescripcion] = useState("");
+  const [depositoEditActivo, setDepositoEditActivo] = useState(true);
+  const [guardandoEdicionDeposito, setGuardandoEdicionDeposito] = useState(false);
 
   const cargarPedidosReales = async () => {
     try {
@@ -416,7 +466,7 @@ export default function MonitorPedidos() {
     const seccionSolicitada = params.get("seccion");
 
     if (seccionSolicitada === "stock") {
-      setVistaPedidos("StockFisico");
+      setVistaPedidos("StockDepositos");
       setPedidoActivo(null);
     }
   }, []);
@@ -584,60 +634,72 @@ export default function MonitorPedidos() {
     if (!empresaIdActual) return;
 
     try {
-      // 1. Solo las listas pertenecientes a la empresa del Supervisor.
+      // Catálogo de Stock = productos vinculados a ESTA empresa por lista de precios
+      // + productos vinculados por equivalencias de stock.
+      // Esto permite que un producto nuevo importado (ej. WELT025) aparezca
+      // inmediatamente aunque todavía no haya sido agregado a una lista de precios.
       const { data: listasEmpresa, error: errorListas } = await supabase
         .from("listas_precios")
         .select("id, predeterminada")
         .eq("empresa_id", empresaIdActual)
         .order("predeterminada", { ascending: false })
         .eq("activo", true);
-
       if (errorListas) throw errorListas;
 
       const idsListas = (listasEmpresa || []).map(l => l.id).filter(Boolean);
-      if (idsListas.length === 0) {
-        setProductosStockCatalogo([]);
-        return;
+
+      let filasLista = [];
+      if (idsListas.length > 0) {
+        const { data, error } = await supabase
+          .from("lista_productos")
+          .select("producto_id, lista_id, codigo_lista")
+          .in("lista_id", idsListas)
+          .eq("activo", true);
+        if (error) throw error;
+        filasLista = data || [];
       }
 
-      // 2. Solo los producto_id incluidos en esas listas.
-      const { data: filasLista, error: errorFilas } = await supabase
-        .from("lista_productos")
-        .select("producto_id, lista_id, codigo_lista")
-        .in("lista_id", idsListas)
-        .eq("activo", true);
+      const { data: equivalenciasStock, error: errorEquivalenciasStock } = await supabase
+        .from("stock_equivalencias")
+        .select("producto_id, codigo_archivo")
+        .eq("empresa_id", empresaIdActual);
+      if (errorEquivalenciasStock) throw errorEquivalenciasStock;
 
-      if (errorFilas) throw errorFilas;
+      const idsProductos = [...new Set([
+        ...filasLista.map(x => x.producto_id),
+        ...(equivalenciasStock || []).map(x => x.producto_id),
+      ].filter(Boolean))];
 
-      const idsProductos = [...new Set((filasLista || []).map(x => x.producto_id).filter(Boolean))];
       if (idsProductos.length === 0) {
         setProductosStockCatalogo([]);
         return;
       }
 
-      // 3. Recién ahora traer esos productos, nunca el catálogo global.
       const { data: productosEmpresa, error: errorProductos } = await supabase
         .from("productos")
         .select("id, codigo_cge, nombre, marca, presentacion, descripcion, activo")
         .in("id", idsProductos)
         .eq("activo", true)
         .order("nombre", { ascending: true });
-
       if (errorProductos) throw errorProductos;
 
-      // Código visible para el cliente: usar el código de SU lista de precios
-      // (por ejemplo WELT001), no el CGE interno de RutaComercio.
-      // Como idsListas está ordenado con la predeterminada primero, conservamos
-      // la primera equivalencia encontrada para cada producto.
+      // Código visible: primero el código propio de la lista de la empresa;
+      // si todavía no está en una lista, usar la equivalencia de stock (WELT025).
       const codigoClientePorProducto = new Map();
       idsListas.forEach(listaId => {
-        (filasLista || []).forEach(fila => {
+        filasLista.forEach(fila => {
           if (String(fila.lista_id) !== String(listaId)) return;
           const pid = String(fila.producto_id || "");
           if (!pid || codigoClientePorProducto.has(pid)) return;
           const codigoCliente = String(fila.codigo_lista || "").trim();
           if (codigoCliente) codigoClientePorProducto.set(pid, codigoCliente);
         });
+      });
+      (equivalenciasStock || []).forEach(eq => {
+        const pid = String(eq.producto_id || "");
+        if (!pid || codigoClientePorProducto.has(pid)) return;
+        const codigo = String(eq.codigo_archivo || "").trim();
+        if (codigo) codigoClientePorProducto.set(pid, codigo);
       });
 
       setProductosStockCatalogo((productosEmpresa || []).map(producto => ({
@@ -647,6 +709,57 @@ export default function MonitorPedidos() {
     } catch (error) {
       console.error("Error cargando catálogo de stock de la empresa:", error);
       setProductosStockCatalogo([]);
+    }
+  };
+
+  const cargarStockMatriz = async () => {
+    if (!empresaIdActual) return;
+    try {
+      setCargandoStockMatriz(true);
+
+      const [
+        { data: deps, error: eDeps },
+        { data: prevs, error: ePrevs },
+        { data: porDep, error: ePorDep },
+        { data: porVend, error: ePorVend },
+      ] = await Promise.all([
+        supabase.from("stock_depositos")
+          .select("id,nombre,activo,es_principal")
+          .eq("empresa_id", empresaIdActual)
+          .eq("activo", true)
+          .order("es_principal", { ascending:false })
+          .order("nombre", { ascending:true }),
+        supabase.from("perfiles")
+          .select("id,nombre,activo")
+          .eq("empresa_id", empresaIdActual)
+          .eq("rol", "preventista")
+          .eq("activo", true)
+          .order("nombre", { ascending:true }),
+        supabase.from("stock_por_deposito")
+          .select("id,deposito_id,producto_id,color,talle,cantidad")
+          .eq("empresa_id", empresaIdActual),
+        supabase.from("stock_vendedores")
+          .select("preventista_id,producto_id,color,talle,cantidad")
+          .eq("empresa_id", empresaIdActual),
+      ]);
+
+      if (eDeps) throw eDeps;
+      if (ePrevs) throw ePrevs;
+      if (ePorDep) throw ePorDep;
+      if (ePorVend) throw ePorVend;
+
+      setStockMatrizDepositos(deps || []);
+      setStockMatrizVendedores(prevs || []);
+      setStockMatrizFilasDeposito(porDep || []);
+      setStockMatrizFilasVendedor(porVend || []);
+    } catch (error) {
+      console.error("Error cargando distribución física del stock:", error);
+      setStockMatrizDepositos([]);
+      setStockMatrizVendedores([]);
+      setStockMatrizFilasDeposito([]);
+      setStockMatrizFilasVendedor([]);
+    } finally {
+      setCargandoStockMatriz(false);
     }
   };
 
@@ -689,14 +802,18 @@ export default function MonitorPedidos() {
 
   useEffect(() => {
     if (!empresaIdActual) return;
-    const vistasStock = ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"];
+    const vistasStock = ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas", "StockMovimientos"];
     if (!vistasStock.includes(vistaPedidos)) return;
 
     cargarCatalogoProductosStock();
     cargarStockActualEmpresa();
+    if (vistaPedidos === "StockVer") cargarStockMatriz();
 
     const actualizarSiVisible = () => {
-      if (document.visibilityState === "visible") cargarStockActualEmpresa();
+      if (document.visibilityState === "visible") {
+        cargarStockActualEmpresa();
+        if (vistaPedidos === "StockVer") cargarStockMatriz();
+      }
     };
     const timerStockActual = setInterval(actualizarSiVisible, 60000);
     return () => clearInterval(timerStockActual);
@@ -704,7 +821,7 @@ export default function MonitorPedidos() {
 
   const textoProductoStock = (p) => {
     if (!p) return "";
-    const codigo = p.codigo_cge || p.cge || p.codigo || "";
+    const codigo = p.codigo_cliente || p.codigo_lista || p.codigo_cge || p.cge || p.codigo || "";
     const nombre = p.nombre || p.descripcion || p.producto || "Producto";
     const marca = p.marca || "";
     const presentacion = p.presentacion || "";
@@ -806,16 +923,26 @@ export default function MonitorPedidos() {
 
       // Los no reconocidos se muestran como PROPUESTAS de producto nuevo.
       // No se crea nada todavía y NO se consume ningún CGE.
-      setProductosNuevosPropuestos(
-        noReconocidos.map(item => ({
-          codigo_archivo: item.codigoArchivo,
-          nombre: item.descripcionArchivo,
-          color: item.color || null,
-          talle: item.talle || null,
-          stock: item.stock,
-          crear: true,
-        }))
+      const nuevosAgrupados = Object.values(
+        noReconocidos.reduce((acc, item) => {
+          const clave = String(item.codigoArchivo || "").trim().toUpperCase();
+          if (!acc[clave]) {
+            acc[clave] = {
+              codigo_archivo: item.codigoArchivo,
+              nombre: item.descripcionArchivo,
+              crear: true,
+              variantes: [],
+            };
+          }
+          acc[clave].variantes.push({
+            color: item.color || null,
+            talle: item.talle || null,
+            stock: item.stock,
+          });
+          return acc;
+        }, {})
       );
+      setProductosNuevosPropuestos(nuevosAgrupados);
 
       return { reconocidos, noReconocidos };
     } finally {
@@ -891,7 +1018,8 @@ export default function MonitorPedidos() {
       const descripcion = elegirColumnaStock(encabezados, ["articulo", "producto", "descripcion", "nombre"]);
       const color = elegirColumnaStock(encabezados, ["color", "colour", "tono"]);
       const talle = elegirColumnaStock(encabezados, ["talle", "talla", "size", "medida"]);
-      const stock = elegirColumnaStock(encabezados, ["stock", "existencia", "existencias", "cantidad", "saldo"]);
+      const stockTotalExacto = encabezados.find(h => normalizarTextoStock(h) === "stock total") || "";
+      const stock = stockTotalExacto || elegirColumnaStock(encabezados, ["stock", "existencia", "existencias", "cantidad", "saldo"]);
 
       setStockColumnas({ codigo, descripcion, color, talle, stock });
       setStockEncabezadoFila(encabezado.indice + 1);
@@ -927,17 +1055,26 @@ export default function MonitorPedidos() {
   const confirmarImportacionStock = async () => {
     if (!archivoStockNombre || confirmandoImportacionStock) return;
 
+    const depositoCarga = stockDepositos.find(d => String(d.id) === String(stockDepositoCargaId));
+    if (!depositoCarga) {
+      alert("Elegí el depósito donde ingresará esta mercadería.");
+      return;
+    }
+
     const nuevosSeleccionados = productosNuevosPropuestos.filter(p => p.crear);
-    const totalAProcesar = stockReconocidos.length + nuevosSeleccionados.length;
+    const nuevasVariantesSeleccionadas = nuevosSeleccionados.flatMap(p =>
+      (p.variantes || []).map(v => ({ ...v, codigo_archivo: p.codigo_archivo, nombre: p.nombre }))
+    );
+    const totalAProcesar = stockReconocidos.length + nuevasVariantesSeleccionadas.length;
 
     if (totalAProcesar === 0) {
-      alert("No hay productos seleccionados para importar.");
+      alert("No hay mercadería seleccionada para ingresar.");
       return;
     }
 
     const invalidos = [
       ...stockReconocidos.map(p => ({ codigo: p.codigoArchivo, stock: p.stock })),
-      ...nuevosSeleccionados.map(p => ({ codigo: p.codigo_archivo, stock: p.stock })),
+      ...nuevasVariantesSeleccionadas.map(p => ({ codigo: p.codigo_archivo, stock: p.stock })),
     ].filter(p => p.stock === null || !Number.isFinite(Number(p.stock)) || Number(p.stock) < 0);
 
     if (invalidos.length > 0) {
@@ -946,12 +1083,13 @@ export default function MonitorPedidos() {
     }
 
     const confirmar = window.confirm(
-      `¿Confirmás la importación de stock?\n\n` +
+      `¿Confirmás el ingreso de mercadería?\n\n` +
       `Archivo: ${archivoStockNombre}\n` +
       `Productos ya reconocidos: ${stockReconocidos.length}\n` +
       `Productos nuevos a crear: ${nuevosSeleccionados.length}\n` +
-      `Total a procesar: ${totalAProcesar}\n\n` +
-      `Los productos nuevos recibirán un CGE y el stock físico quedará actualizado con las cantidades de esta planilla.`
+      `Variantes a procesar: ${totalAProcesar}\n` +
+      `Depósito: ${depositoCarga.nombre}\n\n` +
+      `Las cantidades de esta planilla se SUMARÁN al stock actual del depósito elegido. Los artículos que no figuren en el archivo no se modificarán. Los códigos nuevos crearán automáticamente un producto y recibirán su CGE.`
     );
     if (!confirmar) return;
 
@@ -965,19 +1103,22 @@ export default function MonitorPedidos() {
         stock: Number(item.stock),
         crear: false,
       })),
-      ...nuevosSeleccionados.map(item => ({
-        codigo_archivo: item.codigo_archivo,
-        descripcion: item.nombre || "",
-        color: item.color || null,
-        talle: item.talle || null,
-        stock: Number(item.stock),
-        crear: true,
-      })),
+      ...nuevosSeleccionados.flatMap(item =>
+        (item.variantes || []).map((variante, varianteIdx) => ({
+          codigo_archivo: item.codigo_archivo,
+          descripcion: item.nombre || "",
+          color: variante.color || null,
+          talle: variante.talle || null,
+          stock: Number(variante.stock),
+          // Solo la primera variante solicita crear el producto/CGE.
+          crear: varianteIdx === 0,
+        }))
+      ),
     ];
 
     try {
       setConfirmandoImportacionStock(true);
-      setStockMensaje("⏳ Confirmando importación y guardando stock...");
+      setStockMensaje("⏳ Registrando ingreso de mercadería...");
 
       const { data, error } = await supabase.rpc("confirmar_importacion_stock", {
         p_nombre_archivo: archivoStockNombre,
@@ -987,9 +1128,77 @@ export default function MonitorPedidos() {
       if (error) throw error;
       if (!data?.ok) throw new Error("El sistema no confirmó la importación.");
 
+      // 🏭 Reflejar la misma importación en el depósito elegido.
+      // Primero resolvemos producto_id también para los productos que el RPC acaba de crear.
+      const codigosImportados = productosParaImportar.map(p => String(p.codigo_archivo || "").trim()).filter(Boolean);
+      const { data: equivalenciasPost, error: errorEqPost } = await supabase
+        .from("stock_equivalencias")
+        .select("codigo_archivo,producto_id")
+        .eq("empresa_id", empresaIdActual)
+        .in("codigo_archivo", codigosImportados);
+      if (errorEqPost) throw errorEqPost;
+
+      const productoPorCodigo = new Map(
+        (equivalenciasPost || []).map(e => [String(e.codigo_archivo || "").trim().toUpperCase(), e.producto_id])
+      );
+      stockReconocidos.forEach(p => {
+        if (p.producto_id) productoPorCodigo.set(String(p.codigoArchivo || "").trim().toUpperCase(), p.producto_id);
+      });
+
+      for (const item of productosParaImportar) {
+        const codigo = String(item.codigo_archivo || "").trim().toUpperCase();
+        const productoId = item.producto_id || productoPorCodigo.get(codigo);
+        if (!productoId) throw new Error(`No pude vincular ${codigo} con su producto para cargarlo en el depósito.`);
+
+        const color = String(item.color || "").trim();
+        const talle = String(item.talle || "").trim();
+
+        const { data: existentesDep, error: errorBuscarDep } = await supabase
+          .from("stock_por_deposito")
+          .select("id,color,talle,cantidad")
+          .eq("empresa_id", empresaIdActual)
+          .eq("deposito_id", depositoCarga.id)
+          .eq("producto_id", productoId);
+        if (errorBuscarDep) throw errorBuscarDep;
+
+        const existente = (existentesDep || []).find(x =>
+          String(x.color || "").trim().toLowerCase() === color.toLowerCase() &&
+          String(x.talle || "").trim().toLowerCase() === talle.toLowerCase()
+        );
+
+        if (existente?.id) {
+          const { error: errorUpdDep } = await supabase
+            .from("stock_por_deposito")
+            .update({
+              // INGRESO DE MERCADERÍA: siempre SUMA al stock que ya existe.
+              cantidad: Number(existente.cantidad || 0) + Number(item.stock),
+              color: color || null,
+              talle: talle || null,
+              actualizado_at: new Date().toISOString(),
+            })
+            .eq("id", existente.id)
+            .eq("empresa_id", empresaIdActual);
+          if (errorUpdDep) throw errorUpdDep;
+        } else {
+          const { error: errorInsDep } = await supabase
+            .from("stock_por_deposito")
+            .insert([{
+              empresa_id: empresaIdActual,
+              deposito_id: depositoCarga.id,
+              producto_id: productoId,
+              variante_id: null,
+              color: color || null,
+              talle: talle || null,
+              cantidad: Number(item.stock),
+              actualizado_at: new Date().toISOString(),
+            }]);
+          if (errorInsDep) throw errorInsDep;
+        }
+      }
+
       setStockMensaje(
-        `✅ Importación confirmada. ${Number(data.total_procesado || 0)} productos procesados · ` +
-        `${Number(data.productos_creados || 0)} nuevos creados · stock actualizado correctamente.`
+        `✅ Ingreso confirmado. ${Number(data.total_procesado || 0)} variantes procesadas · ` +
+        `${Number(data.productos_creados || 0)} productos nuevos creados · mercadería sumada al depósito correctamente.`
       );
 
       setStockVistaPrevia([]);
@@ -1001,18 +1210,20 @@ export default function MonitorPedidos() {
       setArchivoStockNombre("");
 
       await cargarCatalogoProductosStock();
-      await cargarStockActualEmpresa();
+      await Promise.all([cargarStockActualEmpresa(), cargarStockMatriz()]);
 
-      alert(
-        `✅ IMPORTACIÓN COMPLETADA\n\n` +
-        `Productos procesados: ${Number(data.total_procesado || 0)}\n` +
-        `Productos nuevos creados: ${Number(data.productos_creados || 0)}\n` +
-        `Stock actualizado: ${Number(data.stock_actualizado || 0)}`
+      // No usamos los contadores del RPC para informar esta operación porque el RPC
+      // fue creado para la importación anterior y puede devolver 0 aunque el ingreso
+      // físico se haya realizado correctamente.
+      const unidadesIngresadas = productosParaImportar.reduce((s, item) => s + Number(item.stock || 0), 0);
+      setStockMensaje(
+        `✅ Ingreso de mercadería completado · ${totalAProcesar} variante(s) · ` +
+        `${nuevosSeleccionados.length} producto(s) nuevo(s) · ${unidadesIngresadas} unidad(es) ingresada(s) en ${depositoCarga.nombre}.`
       );
     } catch (error) {
-      console.error("Error confirmando importación de stock:", error);
-      setStockMensaje("❌ No se pudo confirmar la importación: " + (error.message || "Error desconocido"));
-      alert("❌ No se guardó la importación. " + (error.message || "Error desconocido"));
+      console.error("Error registrando ingreso de mercadería:", error);
+      setStockMensaje("❌ No se pudo registrar el ingreso: " + (error.message || "Error desconocido"));
+      alert("❌ No se guardó el ingreso. " + (error.message || "Error desconocido"));
     } finally {
       setConfirmandoImportacionStock(false);
     }
@@ -1501,39 +1712,68 @@ export default function MonitorPedidos() {
     window.location.href = "/";
   };
 
+  useEffect(() => {
+    if (vistaPedidos === "StockManual" && empresaIdActual) cargarStockMatriz();
+  }, [vistaPedidos, empresaIdActual]);
+
   const guardarStockManual = async (fila) => {
-    if (!empresaIdActual || !fila?.id) return;
-    const nuevoStock = Number(stockManualValores[fila.id] ?? fila.stock_informado ?? 0);
+    if (!empresaIdActual || !fila?.producto_id || !fila?.deposito_id) return;
+
+    const clave = `dep:${fila.deposito_id}:${fila.producto_id}:${String(fila.color || "").trim().toLowerCase()}:${String(fila.talle || "").trim().toLowerCase()}`;
+    const anterior = Number(fila.cantidad ?? 0);
+    const nuevoStock = Number(stockManualValores[clave] ?? anterior);
 
     if (!Number.isFinite(nuevoStock) || nuevoStock < 0) {
       alert("Ingresá una cantidad válida, igual o mayor que 0.");
       return;
     }
-
-    const anterior = Number(fila.stock_informado ?? 0);
     if (nuevoStock === anterior) {
       alert("No hay cambios para guardar.");
       return;
     }
 
     const producto = productosStockCatalogo.find(p => String(p.id) === String(fila.producto_id));
-    const nombre = producto?.nombre || fila.descripcion_archivo || "Artículo";
+    const deposito = stockMatrizDepositos.find(d => String(d.id) === String(fila.deposito_id));
+    const nombre = producto?.nombre || "Artículo";
     const variante = [fila.color, fila.talle ? `Talle ${fila.talle}` : ""].filter(Boolean).join(" · ");
+    const nombreDeposito = deposito?.nombre || "Depósito";
 
-    if (!window.confirm(`¿Confirmás el ajuste manual?\n\n${nombre}${variante ? ` · ${variante}` : ""}\nStock anterior: ${anterior}\nStock nuevo: ${nuevoStock}`)) return;
+    if (!window.confirm(
+      `¿Confirmás el ajuste manual?\n\n${nombre}${variante ? ` · ${variante}` : ""}\nDepósito: ${nombreDeposito}\nStock anterior: ${anterior}\nStock nuevo: ${nuevoStock}`
+    )) return;
 
-    setGuardandoStockManual(fila.id);
+    setGuardandoStockManual(clave);
     try {
-      const { error } = await supabase
-        .from("stock_informado")
-        .update({ stock_informado: nuevoStock, fecha_actualizacion: new Date().toISOString() })
-        .eq("id", fila.id)
-        .eq("empresa_id", empresaIdActual);
+      // El ajuste manual modifica SOLO la existencia física del depósito elegido.
+      // stock_informado queda como historial de ingresos/importaciones y no se toca.
+      // IMPORTANTE: cargarStockMatriz() no trae el id de stock_por_deposito,
+      // por eso fila.id puede ser undefined. Actualizamos por la clave física real:
+      // empresa + depósito + producto + color + talle.
+      let ajuste = supabase
+        .from("stock_por_deposito")
+        .update({ cantidad: nuevoStock, actualizado_at: new Date().toISOString() })
+        .eq("empresa_id", empresaIdActual)
+        .eq("deposito_id", fila.deposito_id)
+        .eq("producto_id", fila.producto_id);
 
+      if (fila.color === null || fila.color === undefined || String(fila.color).trim() === "") {
+        ajuste = ajuste.is("color", null);
+      } else {
+        ajuste = ajuste.eq("color", fila.color);
+      }
+
+      if (fila.talle === null || fila.talle === undefined || String(fila.talle).trim() === "") {
+        ajuste = ajuste.is("talle", null);
+      } else {
+        ajuste = ajuste.eq("talle", fila.talle);
+      }
+
+      const { error } = await ajuste;
       if (error) throw error;
-      setStockManualValores(prev => ({ ...prev, [fila.id]: nuevoStock }));
-      await cargarStockActualEmpresa();
-      alert("✅ Stock actualizado manualmente.");
+
+      setStockManualValores(prev => ({ ...prev, [clave]: nuevoStock }));
+      await cargarStockMatriz();
+      setStockMensaje(`✅ Ajuste manual guardado en ${nombreDeposito}: ${nombre} ${variante ? `· ${variante} ` : ""}${anterior} → ${nuevoStock}.`);
     } catch (error) {
       console.error("Error modificando stock manual:", error);
       alert("❌ No se pudo modificar el stock: " + (error.message || "Error desconocido"));
@@ -1652,9 +1892,734 @@ export default function MonitorPedidos() {
     }
   };
 
+  const cargarDepositosStock = async () => {
+    if (!empresaIdActual) return;
+    try {
+      setCargandoDepositos(true);
+      const { data, error } = await supabase
+        .from("stock_depositos")
+        .select("id,empresa_id,nombre,descripcion,activo,es_principal,creado_at")
+        .eq("empresa_id", empresaIdActual)
+        .order("es_principal", { ascending: false })
+        .order("nombre", { ascending: true });
+      if (error) throw error;
+      setStockDepositos(data || []);
+    } catch (error) {
+      console.error("Error cargando depósitos:", error);
+      alert("❌ No se pudieron cargar los depósitos: " + (error.message || "Error desconocido"));
+    } finally {
+      setCargandoDepositos(false);
+    }
+  };
+
+  useEffect(() => {
+    if (["StockDepositos", "StockFisico"].includes(vistaPedidos) && empresaIdActual) cargarDepositosStock();
+  }, [vistaPedidos, empresaIdActual]);
+
+  const agregarDepositoStock = async () => {
+    if (!empresaIdActual) return;
+    const nombre = nuevoDepositoNombre.trim();
+    if (!nombre) {
+      alert("Ingresá un nombre para el depósito.");
+      return;
+    }
+
+    const seraPrincipal = nuevoDepositoPrincipal || stockDepositos.length === 0;
+    setGuardandoDeposito(true);
+    try {
+      if (seraPrincipal && stockDepositos.some(d => d.es_principal)) {
+        const { error: errorQuitarPrincipal } = await supabase
+          .from("stock_depositos")
+          .update({ es_principal: false })
+          .eq("empresa_id", empresaIdActual)
+          .eq("es_principal", true);
+        if (errorQuitarPrincipal) throw errorQuitarPrincipal;
+      }
+
+      const { error } = await supabase.from("stock_depositos").insert([{
+        empresa_id: empresaIdActual,
+        nombre,
+        descripcion: nuevoDepositoDescripcion.trim() || null,
+        activo: true,
+        es_principal: seraPrincipal,
+      }]);
+      if (error) throw error;
+
+      setNuevoDepositoNombre("");
+      setNuevoDepositoDescripcion("");
+      setNuevoDepositoPrincipal(false);
+      await cargarDepositosStock();
+      alert("✅ Depósito agregado correctamente.");
+    } catch (error) {
+      console.error("Error agregando depósito:", error);
+      alert("❌ No se pudo agregar el depósito: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoDeposito(false);
+    }
+  };
+
+  const marcarDepositoPrincipal = async (deposito) => {
+    if (!empresaIdActual || !deposito?.id || deposito.es_principal) return;
+    if (!window.confirm(`¿Usar "${deposito.nombre}" como depósito principal?`)) return;
+    try {
+      const { error: errorQuitar } = await supabase
+        .from("stock_depositos")
+        .update({ es_principal: false })
+        .eq("empresa_id", empresaIdActual)
+        .eq("es_principal", true);
+      if (errorQuitar) throw errorQuitar;
+
+      const { error } = await supabase
+        .from("stock_depositos")
+        .update({ es_principal: true })
+        .eq("empresa_id", empresaIdActual)
+        .eq("id", deposito.id);
+      if (error) throw error;
+      await cargarDepositosStock();
+    } catch (error) {
+      console.error("Error cambiando depósito principal:", error);
+      alert("❌ No se pudo cambiar el depósito principal: " + (error.message || "Error desconocido"));
+    }
+  };
+
+  const iniciarEdicionDeposito = (deposito) => {
+    setDepositoEditandoId(deposito.id);
+    setDepositoEditNombre(deposito.nombre || "");
+    setDepositoEditDescripcion(deposito.descripcion || "");
+    setDepositoEditActivo(deposito.activo !== false);
+  };
+
+  const cancelarEdicionDeposito = () => {
+    setDepositoEditandoId(null);
+    setDepositoEditNombre("");
+    setDepositoEditDescripcion("");
+    setDepositoEditActivo(true);
+  };
+
+  const guardarEdicionDeposito = async (deposito) => {
+    const nombre = String(depositoEditNombre || "").trim();
+    if (!nombre) {
+      alert("Ingresá un nombre para el depósito.");
+      return;
+    }
+    setGuardandoEdicionDeposito(true);
+    try {
+      const { error } = await supabase
+        .from("stock_depositos")
+        .update({
+          nombre,
+          descripcion: String(depositoEditDescripcion || "").trim() || null,
+          activo: depositoEditActivo,
+        })
+        .eq("id", deposito.id)
+        .eq("empresa_id", empresaIdActual);
+      if (error) throw error;
+
+      cancelarEdicionDeposito();
+      await cargarDepositosStock();
+      alert("✅ Depósito actualizado.");
+    } catch (error) {
+      console.error("Error editando depósito:", error);
+      alert("❌ No se pudo actualizar el depósito: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoEdicionDeposito(false);
+    }
+  };
+
+  const cargarDatosMovimientosStock = async () => {
+    if (!empresaIdActual) return;
+    try {
+      await cargarDepositosStock();
+      await cargarCatalogoProductosStock();
+      const { data, error } = await supabase
+        .from("perfiles")
+        .select("id,nombre,rol,activo,empresa_id")
+        .eq("empresa_id", empresaIdActual)
+        .eq("rol", "preventista")
+        .eq("activo", true)
+        .order("nombre", { ascending: true });
+      if (error) throw error;
+      setMovPreventistas(data || []);
+    } catch (error) {
+      console.error("Error cargando datos para movimientos:", error);
+      alert("❌ No se pudieron cargar los datos para Movimientos: " + (error.message || "Error desconocido"));
+    }
+  };
+
+  useEffect(() => {
+    if (vistaPedidos === "StockMovimientos" && empresaIdActual) cargarDatosMovimientosStock();
+  }, [vistaPedidos, empresaIdActual]);
+
+  useEffect(() => {
+    const cargarProductosDelDeposito = async () => {
+      setMovProductoId("");
+      setMovProductosDeposito([]);
+      if (!empresaIdActual || !movOrigenDeposito) return;
+
+      try {
+        // 1) Fuente de verdad: productos que REALMENTE tienen stock > 0
+        // en el depósito seleccionado.
+        const { data: stockDep, error: errorStockDep } = await supabase
+          .from("stock_por_deposito")
+          .select("producto_id")
+          .eq("empresa_id", empresaIdActual)
+          .eq("deposito_id", movOrigenDeposito)
+          .gt("cantidad", 0);
+
+        if (errorStockDep) throw errorStockDep;
+
+        const idsUnicos = [...new Set(
+          (stockDep || []).map(f => String(f.producto_id || "").trim()).filter(Boolean)
+        )];
+
+        if (!idsUnicos.length) {
+          setMovProductosDeposito([]);
+          return;
+        }
+
+        // 2) Traer el catálogo de la empresa y luego filtrar LOCALMENTE por los IDs
+        // del depósito. Evitamos depender de un .in(...) para esta parte.
+        const { data: equivalencias, error: errorEq } = await supabase
+          .from("stock_equivalencias")
+          .select("producto_id,codigo_archivo")
+          .eq("empresa_id", empresaIdActual);
+
+        if (errorEq) throw errorEq;
+
+        const idsSet = new Set(idsUnicos);
+        const eqDelDeposito = (equivalencias || []).filter(eq =>
+          idsSet.has(String(eq.producto_id || "").trim())
+        );
+
+        const idsProductosCatalogo = [...new Set(
+          eqDelDeposito.map(eq => String(eq.producto_id || "").trim()).filter(Boolean)
+        )];
+
+        if (!idsProductosCatalogo.length) {
+          setMovProductosDeposito([]);
+          return;
+        }
+
+        const { data: productos, error: errorProductos } = await supabase
+          .from("productos")
+          .select("id,codigo_cge,nombre,marca,presentacion,descripcion,activo")
+          .eq("activo", true);
+
+        if (errorProductos) throw errorProductos;
+
+        const productosDelDeposito = (productos || []).filter(p =>
+          idsSet.has(String(p.id || "").trim())
+        );
+
+        // Si hay más de una equivalencia por mayúsculas/minúsculas (welt001/WELT001),
+        // preferimos la forma en mayúsculas y mostramos UNA sola opción por producto.
+        const codigoPorProducto = new Map();
+        eqDelDeposito.forEach(eq => {
+          const pid = String(eq.producto_id || "").trim();
+          const codigo = String(eq.codigo_archivo || "").trim();
+          if (!pid || !codigo) return;
+
+          const actual = codigoPorProducto.get(pid);
+          if (!actual || codigo === codigo.toUpperCase()) {
+            codigoPorProducto.set(pid, codigo.toUpperCase());
+          }
+        });
+
+        const opciones = productosDelDeposito.map(p => ({
+          ...p,
+          codigo_cliente: codigoPorProducto.get(String(p.id).trim()) || p.codigo_cge || "",
+        })).sort((a,b) =>
+          String(a.codigo_cliente || "").localeCompare(
+            String(b.codigo_cliente || ""),
+            "es",
+            { numeric:true, sensitivity:"base" }
+          )
+        );
+
+        console.log("📦 Productos disponibles en depósito:", opciones.map(p => ({
+          codigo: p.codigo_cliente,
+          nombre: p.nombre,
+          id: p.id
+        })));
+
+        setMovProductosDeposito(opciones);
+      } catch (error) {
+        console.error("Error cargando artículos del depósito:", error);
+        setMovProductosDeposito([]);
+      }
+    };
+
+    cargarProductosDelDeposito();
+  }, [vistaPedidos, empresaIdActual, movOrigenDeposito]);
+
+  useEffect(() => {
+    const cargarVariantesMovimiento = async () => {
+      setMovColor("");
+      setMovTalle("");
+      setMovVariantesDisponibles([]);
+
+      if (!empresaIdActual || !movOrigenDeposito || !movProductoId) return;
+
+      try {
+        const { data, error } = await supabase
+          .from("stock_por_deposito")
+          .select("id,color,talle,cantidad")
+          .eq("empresa_id", empresaIdActual)
+          .eq("deposito_id", movOrigenDeposito)
+          .eq("producto_id", movProductoId)
+          .gt("cantidad", 0);
+
+        if (error) throw error;
+        setMovVariantesDisponibles(data || []);
+      } catch (error) {
+        console.error("Error cargando variantes para movimiento:", error);
+        setMovVariantesDisponibles([]);
+      }
+    };
+
+    cargarVariantesMovimiento();
+  }, [empresaIdActual, movOrigenDeposito, movProductoId]);
+
+  const movColoresDisponibles = [...new Set(
+    movVariantesDisponibles
+      .map(v => String(v.color || "").trim())
+      .filter(Boolean)
+  )].sort((a,b) => a.localeCompare(b, "es", { numeric:true }));
+
+  const movTallesDisponibles = [...new Set(
+    movVariantesDisponibles
+      .filter(v => !movColor || String(v.color || "").trim().toLowerCase() === movColor.toLowerCase())
+      .map(v => String(v.talle || "").trim())
+      .filter(Boolean)
+  )].sort((a,b) => a.localeCompare(b, "es", { numeric:true }));
+
+  const movVarianteSeleccionada = movVariantesDisponibles.find(v =>
+    String(v.color || "").trim().toLowerCase() === String(movColor || "").trim().toLowerCase() &&
+    String(v.talle || "").trim().toLowerCase() === String(movTalle || "").trim().toLowerCase()
+  );
+
+  useEffect(() => {
+    const cargarStockDelVendedor = async () => {
+      setDevProductoId("");
+      setDevColor("");
+      setDevTalle("");
+      setDevStockVendedor([]);
+      setDevProductosVendedor([]);
+      if (!empresaIdActual || !devPreventistaOrigen) return;
+
+      try {
+        const { data: stockVend, error } = await supabase
+          .from("stock_vendedores")
+          .select("id,producto_id,color,talle,cantidad")
+          .eq("empresa_id", empresaIdActual)
+          .eq("preventista_id", devPreventistaOrigen)
+          .gt("cantidad", 0);
+        if (error) throw error;
+
+        const filas = stockVend || [];
+        setDevStockVendedor(filas);
+        const ids = new Set(filas.map(x => String(x.producto_id || "")));
+        setDevProductosVendedor(
+          (productosStockCatalogo || []).filter(p => ids.has(String(p.id)))
+        );
+      } catch (error) {
+        console.error("Error cargando stock del vendedor:", error);
+        setDevStockVendedor([]);
+        setDevProductosVendedor([]);
+      }
+    };
+    cargarStockDelVendedor();
+  }, [empresaIdActual, devPreventistaOrigen, productosStockCatalogo]);
+
+  const devVariantesProducto = devStockVendedor.filter(x =>
+    String(x.producto_id) === String(devProductoId) && Number(x.cantidad || 0) > 0
+  );
+  const devColores = [...new Set(devVariantesProducto.map(x => String(x.color || "").trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,"es",{numeric:true}));
+  const devTalles = [...new Set(devVariantesProducto
+    .filter(x => !devColor || String(x.color || "").trim().toLowerCase() === devColor.toLowerCase())
+    .map(x => String(x.talle || "").trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,"es",{numeric:true}));
+  const devVariante = devVariantesProducto.find(x =>
+    String(x.color || "").trim().toLowerCase() === String(devColor || "").trim().toLowerCase() &&
+    String(x.talle || "").trim().toLowerCase() === String(devTalle || "").trim().toLowerCase()
+  );
+
+  useEffect(() => {
+    const cargarStockDepositoOrigen = async () => {
+      setTrasProductoId("");
+      setTrasColor("");
+      setTrasTalle("");
+      setTrasStockOrigen([]);
+      setTrasProductosOrigen([]);
+      if (!empresaIdActual || !trasDepositoOrigen) return;
+
+      try {
+        const { data, error } = await supabase
+          .from("stock_por_deposito")
+          .select("id,producto_id,color,talle,cantidad")
+          .eq("empresa_id", empresaIdActual)
+          .eq("deposito_id", trasDepositoOrigen)
+          .gt("cantidad", 0);
+        if (error) throw error;
+
+        const filas = data || [];
+        setTrasStockOrigen(filas);
+        const ids = new Set(filas.map(x => String(x.producto_id || "")));
+        setTrasProductosOrigen((productosStockCatalogo || []).filter(p => ids.has(String(p.id))));
+      } catch (error) {
+        console.error("Error cargando stock del depósito de origen:", error);
+        setTrasStockOrigen([]);
+        setTrasProductosOrigen([]);
+      }
+    };
+    cargarStockDepositoOrigen();
+  }, [empresaIdActual, trasDepositoOrigen, productosStockCatalogo]);
+
+  const trasVariantesProducto = trasStockOrigen.filter(x =>
+    String(x.producto_id) === String(trasProductoId) && Number(x.cantidad || 0) > 0
+  );
+  const trasColores = [...new Set(trasVariantesProducto.map(x => String(x.color || "").trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,"es",{numeric:true}));
+  const trasTalles = [...new Set(trasVariantesProducto
+    .filter(x => !trasColor || String(x.color || "").trim().toLowerCase() === trasColor.toLowerCase())
+    .map(x => String(x.talle || "").trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,"es",{numeric:true}));
+  const trasVariante = trasVariantesProducto.find(x =>
+    String(x.color || "").trim().toLowerCase() === String(trasColor || "").trim().toLowerCase() &&
+    String(x.talle || "").trim().toLowerCase() === String(trasTalle || "").trim().toLowerCase()
+  );
+
+  const transferirEntreDepositos = async () => {
+    if (!empresaIdActual) return;
+    const origen = stockDepositos.find(d => String(d.id) === String(trasDepositoOrigen));
+    const destino = stockDepositos.find(d => String(d.id) === String(trasDepositoDestino));
+    const producto = productosStockCatalogo.find(p => String(p.id) === String(trasProductoId));
+    const cantidad = Number(trasCantidad);
+
+    if (!origen) return alert("Elegí el depósito de origen.");
+    if (!destino) return alert("Elegí el depósito de destino.");
+    if (String(origen.id) === String(destino.id)) return alert("El depósito de destino debe ser distinto al de origen.");
+    if (!producto) return alert("Elegí el artículo.");
+    if (!trasVariante) return alert("Elegí color y talle.");
+    if (!Number.isFinite(cantidad) || cantidad <= 0) return alert("Ingresá una cantidad válida.");
+
+    const disponible = Number(trasVariante.cantidad || 0);
+    if (cantidad > disponible) return alert(`En ${origen.nombre} hay ${disponible} unidad${disponible === 1 ? "" : "es"} de esa variante.`);
+
+    const color = String(trasColor || "").trim();
+    const talle = String(trasTalle || "").trim();
+
+    setGuardandoMovimiento(true);
+    try {
+      const { error: errorOrigen } = await supabase
+        .from("stock_por_deposito")
+        .update({
+          cantidad: disponible - cantidad,
+          actualizado_at: new Date().toISOString(),
+        })
+        .eq("id", trasVariante.id)
+        .eq("empresa_id", empresaIdActual);
+      if (errorOrigen) throw errorOrigen;
+
+      const { data: filasDestino, error: errorBuscaDestino } = await supabase
+        .from("stock_por_deposito")
+        .select("id,cantidad,color,talle")
+        .eq("empresa_id", empresaIdActual)
+        .eq("deposito_id", destino.id)
+        .eq("producto_id", producto.id);
+      if (errorBuscaDestino) throw errorBuscaDestino;
+
+      const filaDestino = (filasDestino || []).find(x =>
+        String(x.color || "").trim().toLowerCase() === color.toLowerCase() &&
+        String(x.talle || "").trim().toLowerCase() === talle.toLowerCase()
+      );
+
+      if (filaDestino?.id) {
+        const { error } = await supabase
+          .from("stock_por_deposito")
+          .update({
+            cantidad: Number(filaDestino.cantidad || 0) + cantidad,
+            actualizado_at: new Date().toISOString(),
+          })
+          .eq("id", filaDestino.id)
+          .eq("empresa_id", empresaIdActual);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("stock_por_deposito").insert([{
+          empresa_id: empresaIdActual,
+          deposito_id: destino.id,
+          producto_id: producto.id,
+          variante_id: null,
+          color: color || null,
+          talle: talle || null,
+          cantidad,
+          actualizado_at: new Date().toISOString(),
+        }]);
+        if (error) throw error;
+      }
+
+      const { error: errorMov } = await supabase.from("stock_movimientos").insert([{
+        empresa_id: empresaIdActual,
+        producto_id: producto.id,
+        variante_id: null,
+        color: color || null,
+        talle: talle || null,
+        cantidad,
+        tipo: "deposito_a_deposito",
+        deposito_origen_id: origen.id,
+        deposito_destino_id: destino.id,
+        observacion: String(trasObservacion || "").trim() || "Transferencia",
+        creado_at: new Date().toISOString(),
+      }]);
+      if (errorMov) throw errorMov;
+
+      const { data: stockOrigenNuevo } = await supabase
+        .from("stock_por_deposito")
+        .select("id,producto_id,color,talle,cantidad")
+        .eq("empresa_id", empresaIdActual)
+        .eq("deposito_id", origen.id)
+        .gt("cantidad", 0);
+      setTrasStockOrigen(stockOrigenNuevo || []);
+      setTrasCantidad("1");
+      setTrasObservacion("Transferencia");
+      await cargarStockMatriz();
+
+      alert(`✅ ${cantidad} unidad${cantidad === 1 ? "" : "es"} transferida${cantidad === 1 ? "" : "s"} de ${origen.nombre} a ${destino.nombre}.`);
+    } catch (error) {
+      console.error("Error transfiriendo stock entre depósitos:", error);
+      alert("❌ No se pudo completar la transferencia: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoMovimiento(false);
+    }
+  };
+
+  const devolverStockADeposito = async () => {
+    if (!empresaIdActual) return;
+    const vendedor = movPreventistas.find(v => String(v.id) === String(devPreventistaOrigen));
+    const deposito = stockDepositos.find(d => String(d.id) === String(devDepositoDestino));
+    const producto = productosStockCatalogo.find(p => String(p.id) === String(devProductoId));
+    const cantidad = Number(devCantidad);
+
+    if (!vendedor) return alert("Elegí el vendedor de origen.");
+    if (!deposito) return alert("Elegí el depósito de destino.");
+    if (!producto) return alert("Elegí el artículo.");
+    if (!devVariante) return alert("Elegí color y talle.");
+    if (!Number.isFinite(cantidad) || cantidad <= 0) return alert("Ingresá una cantidad válida.");
+
+    const disponible = Number(devVariante.cantidad || 0);
+    if (cantidad > disponible) return alert(`El vendedor tiene ${disponible} unidad${disponible === 1 ? "" : "es"} de esa variante.`);
+
+    const color = String(devColor || "").trim();
+    const talle = String(devTalle || "").trim();
+
+    setGuardandoMovimiento(true);
+    try {
+      // 1. Restar al vendedor.
+      const { error: errorVend } = await supabase
+        .from("stock_vendedores")
+        .update({
+          cantidad: disponible - cantidad,
+          actualizado_at: new Date().toISOString(),
+        })
+        .eq("id", devVariante.id)
+        .eq("empresa_id", empresaIdActual);
+      if (errorVend) throw errorVend;
+
+      // 2. Sumar exactamente la misma variante al depósito.
+      const { data: filasDep, error: errorBuscaDep } = await supabase
+        .from("stock_por_deposito")
+        .select("id,cantidad,color,talle")
+        .eq("empresa_id", empresaIdActual)
+        .eq("deposito_id", deposito.id)
+        .eq("producto_id", producto.id);
+      if (errorBuscaDep) throw errorBuscaDep;
+
+      const filaDep = (filasDep || []).find(x =>
+        String(x.color || "").trim().toLowerCase() === color.toLowerCase() &&
+        String(x.talle || "").trim().toLowerCase() === talle.toLowerCase()
+      );
+
+      if (filaDep?.id) {
+        const { error } = await supabase
+          .from("stock_por_deposito")
+          .update({
+            cantidad: Number(filaDep.cantidad || 0) + cantidad,
+            actualizado_at: new Date().toISOString(),
+          })
+          .eq("id", filaDep.id)
+          .eq("empresa_id", empresaIdActual);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("stock_por_deposito").insert([{
+          empresa_id: empresaIdActual,
+          deposito_id: deposito.id,
+          producto_id: producto.id,
+          variante_id: null,
+          color: color || null,
+          talle: talle || null,
+          cantidad,
+          actualizado_at: new Date().toISOString(),
+        }]);
+        if (error) throw error;
+      }
+
+      // 3. Trazabilidad. Estas columnas son el espejo de depósito→vendedor.
+      const { error: errorMov } = await supabase.from("stock_movimientos").insert([{
+        empresa_id: empresaIdActual,
+        producto_id: producto.id,
+        variante_id: null,
+        color: color || null,
+        talle: talle || null,
+        cantidad,
+        tipo: "vendedor_a_deposito",
+        preventista_origen_id: vendedor.id,
+        deposito_destino_id: deposito.id,
+        observacion: String(devObservacion || "").trim() || "Devolución",
+        creado_at: new Date().toISOString(),
+      }]);
+      if (errorMov) throw errorMov;
+
+      // Refrescar la fuente del vendedor y la matriz.
+      const { data: stockVendNuevo } = await supabase
+        .from("stock_vendedores")
+        .select("id,producto_id,color,talle,cantidad")
+        .eq("empresa_id", empresaIdActual)
+        .eq("preventista_id", vendedor.id)
+        .gt("cantidad", 0);
+      setDevStockVendedor(stockVendNuevo || []);
+      setDevCantidad("1");
+      setDevObservacion("Devolución");
+      await cargarStockMatriz();
+
+      alert(`✅ ${cantidad} unidad${cantidad === 1 ? "" : "es"} devuelta${cantidad === 1 ? "" : "s"} por ${vendedor.nombre} a ${deposito.nombre}.`);
+    } catch (error) {
+      console.error("Error devolviendo stock al depósito:", error);
+      alert("❌ No se pudo completar la devolución: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoMovimiento(false);
+    }
+  };
+
+  const asignarStockAVendedor = async () => {
+    if (!empresaIdActual) return;
+    const deposito = stockDepositos.find(d => String(d.id) === String(movOrigenDeposito));
+    const vendedor = movPreventistas.find(v => String(v.id) === String(movPreventistaDestino));
+    const producto = productosStockCatalogo.find(p => String(p.id) === String(movProductoId));
+    const cantidad = Number(movCantidad);
+
+    if (!deposito) return alert("Elegí el depósito de origen.");
+    if (!vendedor) return alert("Elegí el vendedor.");
+    if (!producto) return alert("Elegí el artículo.");
+    if (!Number.isFinite(cantidad) || cantidad <= 0) return alert("Ingresá una cantidad válida.");
+
+    const color = String(movColor || "").trim();
+    const talle = String(movTalle || "").trim();
+
+    setGuardandoMovimiento(true);
+    try {
+      // Buscar el saldo de ESTA variante en el depósito.
+      let qDep = supabase
+        .from("stock_por_deposito")
+        .select("id,cantidad,color,talle")
+        .eq("empresa_id", empresaIdActual)
+        .eq("deposito_id", deposito.id)
+        .eq("producto_id", producto.id);
+
+      const { data: filasDep, error: errorDep } = await qDep;
+      if (errorDep) throw errorDep;
+
+      const filaDep = (filasDep || []).find(x =>
+        String(x.color || "").trim().toLowerCase() === color.toLowerCase() &&
+        String(x.talle || "").trim().toLowerCase() === talle.toLowerCase()
+      );
+
+      const disponible = Number(filaDep?.cantidad || 0);
+      if (disponible < cantidad) {
+        throw new Error(`Stock insuficiente en ${deposito.nombre}. Disponible para esta variante: ${disponible}.`);
+      }
+
+      // Restar del depósito.
+      const { error: errorResta } = await supabase
+        .from("stock_por_deposito")
+        .update({
+          cantidad: disponible - cantidad,
+          actualizado_at: new Date().toISOString(),
+        })
+        .eq("id", filaDep.id)
+        .eq("empresa_id", empresaIdActual);
+      if (errorResta) throw errorResta;
+
+      // Sumar a muestras/mercadería en poder del vendedor.
+      const { data: filasVend, error: errorVend } = await supabase
+        .from("stock_vendedores")
+        .select("id,cantidad,color,talle")
+        .eq("empresa_id", empresaIdActual)
+        .eq("preventista_id", vendedor.id)
+        .eq("producto_id", producto.id);
+      if (errorVend) throw errorVend;
+
+      const filaVend = (filasVend || []).find(x =>
+        String(x.color || "").trim().toLowerCase() === color.toLowerCase() &&
+        String(x.talle || "").trim().toLowerCase() === talle.toLowerCase()
+      );
+
+      if (filaVend?.id) {
+        const { error } = await supabase
+          .from("stock_vendedores")
+          .update({
+            cantidad: Number(filaVend.cantidad || 0) + cantidad,
+            actualizado_at: new Date().toISOString(),
+          })
+          .eq("id", filaVend.id)
+          .eq("empresa_id", empresaIdActual);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("stock_vendedores").insert([{
+          empresa_id: empresaIdActual,
+          preventista_id: vendedor.id,
+          producto_id: producto.id,
+          variante_id: null,
+          color: color || null,
+          talle: talle || null,
+          cantidad,
+          actualizado_at: new Date().toISOString(),
+        }]);
+        if (error) throw error;
+      }
+
+      // Registrar trazabilidad.
+      const { error: errorMov } = await supabase.from("stock_movimientos").insert([{
+        empresa_id: empresaIdActual,
+        producto_id: producto.id,
+        variante_id: null,
+        color: color || null,
+        talle: talle || null,
+        cantidad,
+        tipo: "deposito_a_vendedor",
+        deposito_origen_id: deposito.id,
+        preventista_destino_id: vendedor.id,
+        observacion: String(movObservacion || "").trim() || "Muestra",
+        creado_at: new Date().toISOString(),
+      }]);
+      if (errorMov) throw errorMov;
+
+      setMovCantidad("1");
+      setMovObservacion("Muestra");
+      alert(`✅ ${cantidad} unidad${cantidad === 1 ? "" : "es"} asignada${cantidad === 1 ? "" : "s"} a ${vendedor.nombre}.`);
+    } catch (error) {
+      console.error("Error asignando stock al vendedor:", error);
+      alert("❌ No se pudo completar la asignación: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoMovimiento(false);
+    }
+  };
+
   const StockSubnav = () => {
     const opciones = [
-      ["StockFisico", "📥 Cargar / actualizar"],
+      ["StockDepositos", "🏭 Depósitos"],
+      ["StockMovimientos", "🔄 Movimientos"],
+      ["StockFisico", "📥 Ingreso de mercadería"],
       ["StockVer", "📦 Ver stock"],
       ["StockManual", "✏️ Modificar manualmente"],
       ["Disponibilidad", "🔓 Disponibilidad"],
@@ -1700,8 +2665,8 @@ export default function MonitorPedidos() {
       <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px", overflowX: "auto", whiteSpace: "nowrap" }}>
         <a href="/supervisor?seccion=monitoreo" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>📡 Monitoreo en Vivo</a>
         <a href="/supervisor?seccion=planificador" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🗓️ Diseñador Hojas de Ruta (Semanal)</a>
-        <button type="button" onClick={() => setVistaPedidos("Activos")} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: !["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: !["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Pedidos</button>
-        <button type="button" onClick={() => { setVistaPedidos("StockFisico"); setPedidoActivo(null); }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Stock</button>
+        <button type="button" onClick={() => setVistaPedidos("Activos")} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: !["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: !["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Pedidos</button>
+        <button type="button" onClick={() => { setVistaPedidos("StockDepositos"); setPedidoActivo(null); }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: ["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: ["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Stock</button>
         <a href="/supervisor?seccion=clientes" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🏪 Clientes</a>
         <a href="/supervisor?seccion=estadoCuenta" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💳 Estado de Cuenta</a>
         <a href="/supervisor?seccion=listasPrecios" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💲 Listas de Precios</a>
@@ -1711,7 +2676,7 @@ export default function MonitorPedidos() {
       <div style={{ width: "100%" }}>
         <main style={{ padding: "16px 24px", maxWidth: "1500px", width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
           {/* Métricas Resumen */}
-          {!["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) && (
+          {!["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: "8px", marginBottom: "12px" }}>
             <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
               <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>💰 VENDIDO HOY · {fechaCorta(hoyMetricas)}</div>
@@ -1741,7 +2706,7 @@ export default function MonitorPedidos() {
           )}
 
           <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
-            {!["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) &&
+            {!["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) &&
               ["Activos", "Historial", "HistorialClientes"].map(v => (
                 <button key={v} type="button" onClick={() => { setVistaPedidos(v); setFiltroEstado("Todos"); setPedidoActivo(null); }}
                   style={{ padding: "8px 14px", borderRadius: "8px", border: vistaPedidos === v ? "1px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === v ? "#eff6ff" : "#fff", color: vistaPedidos === v ? "#1d4ed8" : "#475569", fontWeight: "800", cursor: "pointer" }}>
@@ -1813,19 +2778,328 @@ export default function MonitorPedidos() {
                 </div>
               )}
             </div>
+          ) : vistaPedidos === "StockDepositos" ? (
+            <div>
+              <StockSubnav />
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
+                <div style={{ marginBottom: "14px" }}>
+                  <div style={{ fontSize: "17px", fontWeight: "900", color: "#0f172a" }}>🏭 Depósitos</div>
+                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                    Creá los depósitos físicos de la empresa. Más adelante, al cargar stock, vas a poder elegir a cuál corresponde la mercadería.
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(220px, 2fr) auto", gap: "8px", alignItems: "end", padding: "12px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "9px", marginBottom: "14px" }}>
+                  <div>
+                    <div style={{ fontSize: "10px", fontWeight: "900", color: "#475569", marginBottom: "4px" }}>NOMBRE DEL DEPÓSITO</div>
+                    <input value={nuevoDepositoNombre} onChange={(e) => setNuevoDepositoNombre(e.target.value)} placeholder="Ej.: Depósito Central" style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", border: "1px solid #cbd5e1", borderRadius: "7px" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "10px", fontWeight: "900", color: "#475569", marginBottom: "4px" }}>DESCRIPCIÓN (OPCIONAL)</div>
+                    <input value={nuevoDepositoDescripcion} onChange={(e) => setNuevoDepositoDescripcion(e.target.value)} placeholder="Ej.: Planta principal, Quilmes" style={{ width: "100%", boxSizing: "border-box", padding: "9px 10px", border: "1px solid #cbd5e1", borderRadius: "7px" }} />
+                  </div>
+                  <button type="button" onClick={agregarDepositoStock} disabled={guardandoDeposito} style={{ padding: "10px 14px", border: "none", borderRadius: "8px", background: guardandoDeposito ? "#94a3b8" : "#2563eb", color: "#fff", fontWeight: "900", cursor: guardandoDeposito ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+                    {guardandoDeposito ? "Guardando..." : "+ Agregar depósito"}
+                  </button>
+                  <label style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: "7px", fontSize: "11px", color: "#475569" }}>
+                    <input type="checkbox" checked={nuevoDepositoPrincipal} onChange={(e) => setNuevoDepositoPrincipal(e.target.checked)} />
+                    Marcar como depósito principal {stockDepositos.length === 0 ? "(el primero quedará como principal automáticamente)" : ""}
+                  </label>
+                </div>
+
+                {cargandoDepositos ? (
+                  <div style={{ padding: "18px", color: "#64748b" }}>Cargando depósitos...</div>
+                ) : stockDepositos.length === 0 ? (
+                  <div style={{ padding: "18px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "8px", color: "#92400e", fontSize: "12px" }}>
+                    Todavía no hay depósitos. Creá el primero antes de empezar a distribuir el stock por ubicaciones.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: "8px" }}>
+                    {stockDepositos.map((deposito) => (
+                      <div key={deposito.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", padding: "11px 12px", border: deposito.es_principal ? "2px solid #2563eb" : "1px solid #e2e8f0", borderRadius: "9px", background: deposito.es_principal ? "#eff6ff" : "#fff" }}>
+                        {depositoEditandoId === deposito.id ? (
+                          <div style={{ width:"100%", display:"grid", gap:"8px" }}>
+                            <div style={{display:"grid",gridTemplateColumns:"minmax(180px,1fr) minmax(220px,2fr)",gap:"8px"}}>
+                              <input
+                                value={depositoEditNombre}
+                                onChange={e=>setDepositoEditNombre(e.target.value)}
+                                placeholder="Nombre del depósito"
+                                style={{padding:"8px",border:"1px solid #cbd5e1",borderRadius:"7px",fontWeight:"800"}}
+                              />
+                              <input
+                                value={depositoEditDescripcion}
+                                onChange={e=>setDepositoEditDescripcion(e.target.value)}
+                                placeholder="Descripción"
+                                style={{padding:"8px",border:"1px solid #cbd5e1",borderRadius:"7px"}}
+                              />
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
+                              <label style={{fontSize:"11px",fontWeight:"800",color:"#475569"}}>
+                                <input type="checkbox" checked={depositoEditActivo} onChange={e=>setDepositoEditActivo(e.target.checked)} /> Activo
+                              </label>
+                              <button type="button" disabled={guardandoEdicionDeposito} onClick={()=>guardarEdicionDeposito(deposito)} style={{padding:"7px 11px",border:"none",borderRadius:"7px",background:"#16a34a",color:"#fff",fontSize:"10px",fontWeight:"900",cursor:"pointer"}}>💾 Guardar</button>
+                              <button type="button" disabled={guardandoEdicionDeposito} onClick={cancelarEdicionDeposito} style={{padding:"7px 11px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff",color:"#475569",fontSize:"10px",fontWeight:"900",cursor:"pointer"}}>Cancelar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div>
+                              <div style={{ fontSize: "13px", fontWeight: "900", color: "#0f172a" }}>🏭 {deposito.nombre} {deposito.es_principal ? "⭐" : ""}</div>
+                              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>{deposito.descripcion || "Sin descripción"}</div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap:"wrap" }}>
+                              <span style={{ fontSize: "10px", fontWeight: "900", color: deposito.activo ? "#15803d" : "#64748b" }}>{deposito.activo ? "● ACTIVO" : "● INACTIVO"}</span>
+                              <button type="button" onClick={() => iniciarEdicionDeposito(deposito)} style={{ padding:"7px 10px", border:"1px solid #cbd5e1", borderRadius:"7px", background:"#fff", color:"#334155", fontSize:"10px", fontWeight:"900", cursor:"pointer" }}>✏️ Editar</button>
+                              {!deposito.es_principal && deposito.activo && (
+                                <button type="button" onClick={() => marcarDepositoPrincipal(deposito)} style={{ padding: "7px 10px", border: "1px solid #bfdbfe", borderRadius: "7px", background: "#fff", color: "#1d4ed8", fontSize: "10px", fontWeight: "900", cursor: "pointer" }}>⭐ Hacer principal</button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : vistaPedidos === "StockMovimientos" ? (
+            <div>
+              <StockSubnav />
+              <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"16px" }}>
+                <div style={{ fontSize:"17px", fontWeight:"900", color:"#0f172a" }}>🔄 Movimientos de stock</div>
+                <div style={{ fontSize:"11px", color:"#64748b", marginTop:"3px", marginBottom:"14px" }}>
+                  Podés entregar mercadería a un vendedor o recibir una devolución. En ambos casos cambia la ubicación, pero no el stock total de la empresa.
+                </div>
+
+                <div style={{ padding:"12px", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"9px" }}>
+                  <div style={{ fontSize:"12px", fontWeight:"900", marginBottom:"10px" }}>🏭 Depósito → 👤 Vendedor</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:"9px" }}>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>DEPÓSITO DE ORIGEN
+                      <select value={movOrigenDeposito} onChange={e=>setMovOrigenDeposito(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}}>
+                        <option value="">Elegir depósito...</option>
+                        {stockDepositos.filter(d=>d.activo).map(d=><option key={d.id} value={d.id}>{d.nombre}{d.es_principal?" ⭐":""}</option>)}
+                      </select>
+                    </label>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>VENDEDOR
+                      <select value={movPreventistaDestino} onChange={e=>setMovPreventistaDestino(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}}>
+                        <option value="">Elegir vendedor...</option>
+                        {movPreventistas.map(v=><option key={v.id} value={v.id}>{v.nombre}</option>)}
+                      </select>
+                    </label>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>ARTÍCULO
+                      <select value={movProductoId} onChange={e=>setMovProductoId(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}}>
+                        <option value="">Elegir artículo...</option>
+                        {movProductosDeposito.map(p=><option key={p.id} value={p.id}>{textoProductoStock(p)}</option>)}
+                      </select>
+                    </label>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>COLOR
+                      <select
+                        value={movColor}
+                        onChange={e=>{ setMovColor(e.target.value); setMovTalle(""); }}
+                        disabled={!movProductoId || movColoresDisponibles.length === 0}
+                        style={{width:"100%",boxSizing:"border-box",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}
+                      >
+                        <option value="">{!movProductoId ? "Elegí primero un artículo..." : movColoresDisponibles.length ? "Elegir color..." : "Sin color"}</option>
+                        {movColoresDisponibles.map(color => <option key={color} value={color}>{color}</option>)}
+                      </select>
+                    </label>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>TALLE / VARIANTE
+                      <select
+                        value={movTalle}
+                        onChange={e=>setMovTalle(e.target.value)}
+                        disabled={!movProductoId || (movColoresDisponibles.length > 0 && !movColor) || movTallesDisponibles.length === 0}
+                        style={{width:"100%",boxSizing:"border-box",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}
+                      >
+                        <option value="">
+                          {!movProductoId
+                            ? "Elegí primero un artículo..."
+                            : (movColoresDisponibles.length > 0 && !movColor)
+                              ? "Elegí primero el color..."
+                              : movTallesDisponibles.length
+                                ? "Elegir talle..."
+                                : "Sin talle"}
+                        </option>
+                        {movTallesDisponibles.map(talle => <option key={talle} value={talle}>{talle}</option>)}
+                      </select>
+                    </label>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>CANTIDAD
+                      <input type="number" min="0.01" step="0.01" value={movCantidad} onChange={e=>setMovCantidad(e.target.value)} style={{width:"100%",boxSizing:"border-box",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}} />
+                      {movVarianteSeleccionada && (
+                        <div style={{
+                          marginTop:"8px",
+                          padding:"10px 12px",
+                          fontSize:"16px",
+                          color:"#166534",
+                          fontWeight:"950",
+                          textAlign:"center",
+                          background:"#dcfce7",
+                          border:"2px solid #86efac",
+                          borderRadius:"9px",
+                          whiteSpace:"nowrap"
+                        }}>
+                          📦 DISPONIBLE: {Number(movVarianteSeleccionada.cantidad || 0).toLocaleString("es-AR")} u.
+                        </div>
+                      )}
+                    </label>
+                  </div>
+                  <label style={{display:"block",fontSize:"10px",fontWeight:"900",color:"#475569",marginTop:"9px"}}>OBSERVACIÓN
+                    <input value={movObservacion} onChange={e=>setMovObservacion(e.target.value)} placeholder="Ej.: Muestra" style={{width:"100%",boxSizing:"border-box",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}} />
+                  </label>
+                  <button type="button" onClick={asignarStockAVendedor} disabled={guardandoMovimiento} style={{marginTop:"12px",padding:"10px 15px",border:"none",borderRadius:"8px",background:guardandoMovimiento?"#94a3b8":"#2563eb",color:"#fff",fontWeight:"900",cursor:guardandoMovimiento?"wait":"pointer"}}>
+                    {guardandoMovimiento ? "Guardando movimiento..." : "✅ Asignar al vendedor"}
+                  </button>
+                  <div style={{fontSize:"10px",color:"#64748b",marginTop:"8px"}}>
+                    Este movimiento descuenta del depósito y suma al vendedor.
+                  </div>
+                </div>
+
+                <div style={{ marginTop:"14px", padding:"12px", background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:"9px" }}>
+                  <div style={{ fontSize:"12px", fontWeight:"900", marginBottom:"10px", color:"#9a3412" }}>👤 Vendedor → 🏭 Depósito · DEVOLUCIÓN</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:"9px" }}>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>VENDEDOR DE ORIGEN
+                      <select value={devPreventistaOrigen} onChange={e=>setDevPreventistaOrigen(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">Elegir vendedor...</option>
+                        {movPreventistas.map(v=><option key={v.id} value={v.id}>{v.nombre}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>DEPÓSITO DE INGRESO
+                      <select value={devDepositoDestino} onChange={e=>setDevDepositoDestino(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">Elegir depósito...</option>
+                        {stockDepositos.filter(d=>d.activo).map(d=><option key={d.id} value={d.id}>{d.nombre}{d.es_principal?" ⭐":""}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>ARTÍCULO
+                      <select value={devProductoId} onChange={e=>{setDevProductoId(e.target.value);setDevColor("");setDevTalle("");}} disabled={!devPreventistaOrigen} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">{devPreventistaOrigen ? "Elegir artículo..." : "Elegí primero el vendedor..."}</option>
+                        {devProductosVendedor.map(p=><option key={p.id} value={p.id}>{textoProductoStock(p)}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>COLOR
+                      <select value={devColor} onChange={e=>{setDevColor(e.target.value);setDevTalle("");}} disabled={!devProductoId || devColores.length===0} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">{!devProductoId ? "Elegí primero un artículo..." : devColores.length ? "Elegir color..." : "Sin color"}</option>
+                        {devColores.map(x=><option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>TALLE / VARIANTE
+                      <select value={devTalle} onChange={e=>setDevTalle(e.target.value)} disabled={!devProductoId || (devColores.length>0 && !devColor) || devTalles.length===0} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">{!devProductoId ? "Elegí primero un artículo..." : (devColores.length>0&&!devColor) ? "Elegí primero el color..." : devTalles.length ? "Elegir talle..." : "Sin talle"}</option>
+                        {devTalles.map(x=><option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>CANTIDAD
+                      <input type="number" min="1" step="1" value={devCantidad} onChange={e=>setDevCantidad(e.target.value)} style={{width:"100%",boxSizing:"border-box",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}} />
+                      {devVariante && (
+                        <div style={{marginTop:"8px",padding:"8px 10px",fontSize:"12px",color:"#c2410c",fontWeight:"800",textAlign:"center",background:"#fff7ed",border:"1px solid #fb923c",borderRadius:"7px",whiteSpace:"nowrap"}}>
+                          👤 EN PODER DEL VENDEDOR: {Number(devVariante.cantidad || 0).toLocaleString("es-AR")} u.
+                        </div>
+                      )}
+                    </label>
+                  </div>
+
+                  <label style={{display:"block",fontSize:"10px",fontWeight:"900",color:"#475569",marginTop:"9px"}}>OBSERVACIÓN
+                    <input value={devObservacion} onChange={e=>setDevObservacion(e.target.value)} placeholder="Ej.: Devolución de muestra" style={{width:"100%",boxSizing:"border-box",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}} />
+                  </label>
+
+                  <button type="button" onClick={devolverStockADeposito} disabled={guardandoMovimiento} style={{marginTop:"12px",padding:"10px 15px",border:"none",borderRadius:"8px",background:guardandoMovimiento?"#94a3b8":"#ea580c",color:"#fff",fontWeight:"900",cursor:guardandoMovimiento?"wait":"pointer"}}>
+                    {guardandoMovimiento ? "Guardando movimiento..." : "↩️ Confirmar devolución"}
+                  </button>
+                  <div style={{fontSize:"10px",color:"#64748b",marginTop:"8px"}}>
+                    La devolución resta al vendedor y vuelve a sumar la misma variante al depósito elegido. El TOTAL de la empresa no cambia.
+                  </div>
+                </div>
+
+                <div style={{ marginTop:"14px", padding:"12px", background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:"9px" }}>
+                  <div style={{ fontSize:"12px", fontWeight:"900", marginBottom:"10px", color:"#1d4ed8" }}>🏭 Depósito → 🏭 Depósito · TRANSFERENCIA</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:"9px" }}>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>DEPÓSITO DE ORIGEN
+                      <select value={trasDepositoOrigen} onChange={e=>{setTrasDepositoOrigen(e.target.value);setTrasDepositoDestino("");}} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">Elegir depósito...</option>
+                        {stockDepositos.filter(d=>d.activo).map(d=><option key={d.id} value={d.id}>{d.nombre}{d.es_principal?" ⭐":""}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>DEPÓSITO DE INGRESO
+                      <select value={trasDepositoDestino} onChange={e=>setTrasDepositoDestino(e.target.value)} disabled={!trasDepositoOrigen} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">{trasDepositoOrigen ? "Elegir depósito distinto..." : "Elegí primero el origen..."}</option>
+                        {stockDepositos.filter(d=>d.activo && String(d.id)!==String(trasDepositoOrigen)).map(d=><option key={d.id} value={d.id}>{d.nombre}{d.es_principal?" ⭐":""}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>ARTÍCULO
+                      <select value={trasProductoId} onChange={e=>{setTrasProductoId(e.target.value);setTrasColor("");setTrasTalle("");}} disabled={!trasDepositoOrigen} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">{trasDepositoOrigen ? "Elegir artículo..." : "Elegí primero el depósito..."}</option>
+                        {trasProductosOrigen.map(p=><option key={p.id} value={p.id}>{textoProductoStock(p)}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>COLOR
+                      <select value={trasColor} onChange={e=>{setTrasColor(e.target.value);setTrasTalle("");}} disabled={!trasProductoId || trasColores.length===0} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">{!trasProductoId ? "Elegí primero un artículo..." : trasColores.length ? "Elegir color..." : "Sin color"}</option>
+                        {trasColores.map(x=><option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>TALLE / VARIANTE
+                      <select value={trasTalle} onChange={e=>setTrasTalle(e.target.value)} disabled={!trasProductoId || (trasColores.length>0 && !trasColor) || trasTalles.length===0} style={{width:"100%",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff"}}>
+                        <option value="">{!trasProductoId ? "Elegí primero un artículo..." : (trasColores.length>0&&!trasColor) ? "Elegí primero el color..." : trasTalles.length ? "Elegir talle..." : "Sin talle"}</option>
+                        {trasTalles.map(x=><option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569"}}>CANTIDAD
+                      <input type="number" min="1" step="1" value={trasCantidad} onChange={e=>setTrasCantidad(e.target.value)} style={{width:"100%",boxSizing:"border-box",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}} />
+                      {trasVariante && (
+                        <div style={{marginTop:"8px",padding:"10px 12px",fontSize:"16px",color:"#1d4ed8",fontWeight:"950",textAlign:"center",background:"#dbeafe",border:"2px solid #93c5fd",borderRadius:"9px",whiteSpace:"nowrap"}}>
+                          🏭 DISPONIBLE EN ORIGEN: {Number(trasVariante.cantidad || 0).toLocaleString("es-AR")} u.
+                        </div>
+                      )}
+                    </label>
+                  </div>
+
+                  <label style={{display:"block",fontSize:"10px",fontWeight:"900",color:"#475569",marginTop:"9px"}}>OBSERVACIÓN
+                    <input value={trasObservacion} onChange={e=>setTrasObservacion(e.target.value)} placeholder="Ej.: Reposición sucursal" style={{width:"100%",boxSizing:"border-box",padding:"9px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"7px"}} />
+                  </label>
+
+                  <button type="button" onClick={transferirEntreDepositos} disabled={guardandoMovimiento} style={{marginTop:"12px",padding:"10px 15px",border:"none",borderRadius:"8px",background:guardandoMovimiento?"#94a3b8":"#2563eb",color:"#fff",fontWeight:"900",cursor:guardandoMovimiento?"wait":"pointer"}}>
+                    {guardandoMovimiento ? "Guardando movimiento..." : "🔁 Confirmar transferencia"}
+                  </button>
+                  <div style={{fontSize:"10px",color:"#64748b",marginTop:"8px"}}>
+                    La transferencia resta del depósito de origen y suma al de destino. El TOTAL de la empresa no cambia.
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : vistaPedidos === "StockFisico" ? (
             <div>
               <StockSubnav />
               <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
                   <div>
-                    <div style={{ fontSize: "17px", fontWeight: "900", color: "#0f172a" }}>📊 Stock físico</div>
+                    <div style={{ fontSize: "17px", fontWeight: "900", color: "#0f172a" }}>📥 Ingreso de mercadería</div>
                     <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
-                      El Supervisor carga la planilla de existencias de su empresa. Podés revisar los datos antes de confirmar la actualización del stock.
+                      Cargá un Excel con la mercadería que entra. Puede contener uno, varios o productos nuevos. Las cantidades se suman al depósito elegido; lo que no aparece en el archivo no se toca.
                     </div>
                   </div>
 
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <div style={{ display:"flex", alignItems:"end", gap:"8px", flexWrap:"wrap" }}>
+                    <label style={{fontSize:"10px",fontWeight:"900",color:"#475569",minWidth:"220px"}}>
+                      DEPÓSITO DE INGRESO
+                      <select
+                        value={stockDepositoCargaId}
+                        onChange={e => setStockDepositoCargaId(e.target.value)}
+                        style={{display:"block",width:"100%",padding:"10px",marginTop:"4px",border:"1px solid #cbd5e1",borderRadius:"8px",background:"#fff"}}
+                      >
+                        <option value="">Elegir depósito...</option>
+                        {stockDepositos.filter(d => d.activo).map(d => (
+                          <option key={d.id} value={d.id}>{d.nombre}{d.es_principal ? " ⭐" : ""}</option>
+                        ))}
+                      </select>
+                    </label>
                     <button
                       type="button"
                       onClick={descargarPlantillaStock}
@@ -2108,18 +3382,17 @@ export default function MonitorPedidos() {
                           </div>
 
                           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                            {productosNuevosPropuestos.map((p, idx) => (
-                              <label key={`${p.codigo_archivo}-${idx}`} style={{ display: "grid", gridTemplateColumns: "28px 90px minmax(220px,1fr) 80px", gap: "7px", alignItems: "center", padding: "7px 8px", background: "#fff", border: "1px solid #fde68a", borderRadius: "7px" }}>
-                                <input
-                                  type="checkbox"
-                                  checked={p.crear}
-                                  onChange={e => setProductosNuevosPropuestos(prev => prev.map((x, i) => i === idx ? { ...x, crear: e.target.checked } : x))}
-                                />
-                                <span style={{ fontSize: "10px", fontWeight: "900" }}>{p.codigo_archivo || "—"}</span>
-                                <span style={{ fontSize: "10px", fontWeight: "700" }}>{p.nombre || "Sin descripción"}</span>
-                                <span style={{ fontSize: "10px", textAlign: "right", fontWeight: "900" }}>{p.stock ?? "—"} u.</span>
-                              </label>
-                            ))}
+                            {productosNuevosPropuestos.map((p, idx) => {
+                              const unidades = (p.variantes || []).reduce((s,v) => s + Number(v.stock || 0), 0);
+                              return (
+                                <label key={`${p.codigo_archivo}-${idx}`} style={{ display: "grid", gridTemplateColumns: "28px 90px minmax(220px,1fr) 120px", gap: "7px", alignItems: "center", padding: "8px", background: "#fff", border: "1px solid #fde68a", borderRadius: "7px" }}>
+                                  <input type="checkbox" checked={p.crear} onChange={e => setProductosNuevosPropuestos(prev => prev.map((x, i) => i === idx ? { ...x, crear: e.target.checked } : x))} />
+                                  <span style={{ fontSize: "10px", fontWeight: "900" }}>{p.codigo_archivo || "—"}</span>
+                                  <span style={{ fontSize: "10px", fontWeight: "700" }}>{p.nombre || "Sin descripción"} <span style={{color:"#64748b"}}>· {(p.variantes || []).length} variantes</span></span>
+                                  <span style={{ fontSize: "10px", textAlign: "right", fontWeight: "900" }}>{unidades} u.</span>
+                                </label>
+                              );
+                            })}
                           </div>
 
                           <div style={{ marginTop: "9px", padding: "8px 9px", borderRadius: "7px", background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e40af", fontSize: "10px", lineHeight: 1.45 }}>
@@ -2128,6 +3401,21 @@ export default function MonitorPedidos() {
                         </div>
                       </div>
                     )}
+
+                    <div style={{ marginBottom:"12px", padding:"12px", borderRadius:"9px", background:"#eff6ff", border:"1px solid #bfdbfe" }}>
+                      <div style={{fontSize:"13px",fontWeight:"900",color:"#1e3a8a"}}>
+                        🏭 {stockDepositos.find(d => String(d.id) === String(stockDepositoCargaId))?.nombre || "Elegí un depósito"}
+                      </div>
+                      <div style={{marginTop:"5px",fontSize:"12px",fontWeight:"800",color:"#334155"}}>
+                        {new Set([
+                          ...stockReconocidos.map(x => String(x.codigoArchivo || "").toUpperCase()),
+                          ...productosNuevosPropuestos.filter(x=>x.crear).map(x => String(x.codigo_archivo || "").toUpperCase())
+                        ]).size} productos · {stockReconocidos.length + productosNuevosPropuestos.filter(x=>x.crear).reduce((s,x)=>s+(x.variantes||[]).length,0)} variantes · {[
+                          ...stockReconocidos.map(x=>Number(x.stock||0)),
+                          ...productosNuevosPropuestos.filter(x=>x.crear).flatMap(x=>(x.variantes||[]).map(v=>Number(v.stock||0)))
+                        ].reduce((a,b)=>a+b,0).toLocaleString("es-AR")} unidades
+                      </div>
+                    </div>
 
                     <div style={{ marginBottom: "12px", padding: "10px 12px", borderRadius: "8px", background: "#f8fafc", border: "1px solid #cbd5e1" }}>
                       <div style={{ fontSize: "11px", fontWeight: "900", color: "#0f172a" }}>Estado de esta importación</div>
@@ -2170,23 +3458,23 @@ export default function MonitorPedidos() {
 
                     <div style={{ marginTop: "14px", padding: "14px", border: "1px solid #bbf7d0", borderRadius: "9px", background: "#f0fdf4" }}>
                       <div style={{ fontSize: "11px", color: "#166534", fontWeight: "900", marginBottom: "8px" }}>
-                        Todo listo para confirmar
+                        Todo listo para ingresar mercadería
                       </div>
                       <div style={{ fontSize: "10px", color: "#166534", lineHeight: 1.5, marginBottom: "10px" }}>
-                        Se procesarán <strong>{stockReconocidos.length + productosNuevosPropuestos.filter(p => p.crear).length}</strong> productos. Los nuevos seleccionados recibirán su CGE al confirmar.
+                        Se ingresarán <strong>{stockReconocidos.length + productosNuevosPropuestos.filter(p => p.crear).reduce((s,p)=>s+(p.variantes||[]).length,0)}</strong> variantes. Las cantidades se <strong>SUMARÁN</strong> al stock existente. Cada código nuevo recibirá un único CGE al confirmar.
                       </div>
                       <button
                         type="button"
                         onClick={confirmarImportacionStock}
-                        disabled={confirmandoImportacionStock || (stockReconocidos.length + productosNuevosPropuestos.filter(p => p.crear).length === 0)}
+                        disabled={confirmandoImportacionStock || !stockDepositoCargaId || (stockReconocidos.length + productosNuevosPropuestos.filter(p => p.crear).length === 0)}
                         style={{ width: "100%", padding: "13px 16px", border: "none", borderRadius: "8px", background: confirmandoImportacionStock ? "#94a3b8" : "#16a34a", color: "#fff", fontSize: "13px", fontWeight: "900", cursor: confirmandoImportacionStock ? "wait" : "pointer", boxShadow: "0 4px 10px rgba(22,163,74,0.20)" }}
                       >
-                        {confirmandoImportacionStock ? "⏳ GUARDANDO IMPORTACIÓN..." : "✅ CONFIRMAR IMPORTACIÓN"}
+                        {confirmandoImportacionStock ? "⏳ GUARDANDO INGRESO..." : "📥 CONFIRMAR INGRESO DE MERCADERÍA"}
                       </button>
                     </div>
 
                     <div style={{ marginTop: "10px", fontSize: "10px", color: "#64748b" }}>
-                      Vista previa de hasta 30 filas en pantalla. El stock solo se modifica después de confirmar.
+                      Vista previa de hasta 30 filas. El stock solo se suma después de confirmar el ingreso.
                     </div>
                   </>
                 )}
@@ -2197,31 +3485,147 @@ export default function MonitorPedidos() {
               <StockSubnav />
               <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap", marginBottom: "12px" }}>
-                  <div><div style={{ fontSize: "17px", fontWeight: "900" }}>📦 Ver stock</div><div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>Inventario físico actual, incluyendo color y talle cuando corresponda.</div></div>
-                  <button type="button" onClick={cargarStockActualEmpresa} style={{ padding: "9px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", fontWeight: "900", cursor: "pointer" }}>↻ Actualizar</button>
+                  <div>
+                    <div style={{ fontSize: "17px", fontWeight: "900" }}>📦 Ver stock</div>
+                    <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                      Total primero y, a continuación, dónde está físicamente cada unidad.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => { await Promise.all([cargarStockActualEmpresa(), cargarStockMatriz()]); }}
+                    style={{ padding: "9px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", fontWeight: "900", cursor: "pointer" }}
+                  >
+                    ↻ Actualizar
+                  </button>
                 </div>
-                <input value={busquedaStockActual} onChange={e => setBusquedaStockActual(e.target.value)} placeholder="Buscar código, artículo, color o talle..." style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "12px", marginBottom: "12px" }} />
-                <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "9px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "680px", fontSize: "11px" }}>
-                    <thead><tr style={{ background: "#f8fafc" }}>{["Código","Artículo","Color","Talle","Stock","Actualizado"].map(h => <th key={h} style={{ padding: "9px", textAlign: h === "Stock" ? "right" : "left" }}>{h}</th>)}</tr></thead>
-                    <tbody>
-                      {(stockActualEmpresa || []).filter(f => {
-                        const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
-                        const q = busquedaStockActual.trim().toLowerCase();
-                        return !q || [p.codigo_cliente,p.nombre,f.descripcion_archivo,f.color,f.talle].some(v => String(v || "").toLowerCase().includes(q));
-                      }).map((f, idx) => {
-                        const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
-                        const cantidad = Number(f.stock_informado ?? 0);
-                        return <tr key={f.id || idx} style={{ borderTop: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "9px", fontWeight: "900" }}>{p.codigo_cliente || f.codigo_archivo || "—"}</td>
-                          <td style={{ padding: "9px" }}>{p.nombre || f.descripcion_archivo || "Artículo"}</td>
-                          <td style={{ padding: "9px" }}>{f.color || "—"}</td><td style={{ padding: "9px" }}>{f.talle || "—"}</td>
-                          <td style={{ padding: "9px", textAlign: "right", fontWeight: "900", color: cantidad <= 0 ? "#dc2626" : cantidad <= 5 ? "#d97706" : "#15803d" }}>{cantidad.toLocaleString("es-AR")}</td>
-                          <td style={{ padding: "9px", color: "#64748b" }}>{f.fecha_actualizacion ? new Date(f.fecha_actualizacion).toLocaleString("es-AR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "—"}</td>
-                        </tr>;
-                      })}
-                    </tbody>
-                  </table>
+
+                {(() => {
+                  // El stock físico total es la suma de TODAS sus ubicaciones reales:
+                  // depósitos + mercadería en poder de vendedores.
+                  // stock_informado no se usa aquí porque conserva registros por carga/variante
+                  // y no representa necesariamente la existencia física actual.
+                  const totalDepositos = (stockMatrizFilasDeposito || [])
+                    .reduce((a,x) => a + Number(x.cantidad || 0), 0);
+                  const totalVendedores = (stockMatrizFilasVendedor || [])
+                    .reduce((a,x) => a + Number(x.cantidad || 0), 0);
+                  const totalEmpresa = totalDepositos + totalVendedores;
+
+                  const totalDep = id => (stockMatrizFilasDeposito || [])
+                    .filter(x => String(x.deposito_id) === String(id))
+                    .reduce((a,x) => a + Number(x.cantidad || 0), 0);
+                  const totalVend = id => (stockMatrizFilasVendedor || [])
+                    .filter(x => String(x.preventista_id) === String(id))
+                    .reduce((a,x) => a + Number(x.cantidad || 0), 0);
+
+                  return (
+                    <div style={{ marginBottom:"12px" }}>
+                      <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
+                        <div style={{ padding:"9px 12px", borderRadius:"8px", background:"#f0fdf4", border:"1px solid #bbf7d0", color:"#166534", fontSize:"12px", fontWeight:"950" }}>
+                          📦 STOCK TOTAL: {totalEmpresa.toLocaleString("es-AR")} u.
+                        </div>
+                        {stockMatrizDepositos.map(d => (
+                          <div key={`res-dep-${d.id}`} style={{ padding:"9px 12px", borderRadius:"8px", background:d.es_principal?"#dbeafe":"#eff6ff", border:d.es_principal?"2px solid #60a5fa":"1px solid #bfdbfe", color:"#1d4ed8", fontSize:"12px", fontWeight:"900" }}>
+                            🏭 {d.nombre}{d.es_principal ? " ⭐ PRINCIPAL" : ""}: {totalDep(d.id).toLocaleString("es-AR")} u.
+                          </div>
+                        ))}
+                        {stockMatrizVendedores.filter(v => totalVend(v.id) > 0).map(v => (
+                          <div key={`res-vend-${v.id}`} style={{ padding:"9px 12px", borderRadius:"8px", background:"#fff7ed", border:"1px solid #fed7aa", color:"#9a3412", fontSize:"12px", fontWeight:"900" }}>
+                            👤 {v.nombre}: {totalVend(v.id).toLocaleString("es-AR")} u.
+                          </div>
+                        ))}
+                      </div>
+
+                    </div>
+                  );
+                })()}
+
+                <input
+                  value={busquedaStockActual}
+                  onChange={e => setBusquedaStockActual(e.target.value)}
+                  placeholder="Buscar código, artículo, color o talle..."
+                  style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "12px", marginBottom: "12px" }}
+                />
+
+                {(cargandoStockActual || cargandoStockMatriz) ? (
+                  <div style={{ padding:"18px", color:"#64748b", fontWeight:"800" }}>Cargando stock...</div>
+                ) : (
+                  <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "9px", maxWidth:"100%" }}>
+                    <table style={{ width: "max-content", minWidth:"100%", borderCollapse: "separate", borderSpacing:0, fontSize: "11px" }}>
+                      <thead>
+                        <tr style={{ background: "#f8fafc" }}>
+                          {["Código","Artículo","Color","Talle"].map((h, i) => (
+                            <th key={h} style={{
+                              padding:"10px", textAlign:"left", whiteSpace:"nowrap",
+                              position:"sticky", left:[0,90,310,400][i], zIndex:4,
+                              background:"#f8fafc", borderBottom:"1px solid #e2e8f0",
+                              resize:"horizontal", overflow:"hidden", minWidth:i===1?"160px":"70px", maxWidth:"520px"
+                            }} title="Arrastrá el borde derecho para cambiar el ancho">{h}</th>
+                          ))}
+                          <th title="Arrastrá el borde derecho para cambiar el ancho" style={{ padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", fontSize:"12px", fontWeight:"950", background:"#ecfdf5", color:"#166534", borderBottom:"1px solid #bbf7d0", resize:"horizontal", overflow:"hidden", minWidth:"80px", maxWidth:"300px" }}>📦 TOTAL</th>
+                          {stockMatrizDepositos.map(d => (
+                            <th key={`dep-${d.id}`} title="Arrastrá el borde derecho para cambiar el ancho" style={{ padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", background:"#eff6ff", color:"#1d4ed8", borderBottom:"1px solid #bfdbfe", resize:"horizontal", overflow:"hidden", minWidth:"120px", maxWidth:"420px" }}>
+                              🏭 {d.nombre}{d.es_principal ? " ⭐" : ""}
+                            </th>
+                          ))}
+                          {stockMatrizVendedores.map(v => (
+                            <th key={`vend-${v.id}`} title="Arrastrá el borde derecho para cambiar el ancho" style={{ padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", background:"#fff7ed", color:"#9a3412", borderBottom:"1px solid #fed7aa", resize:"horizontal", overflow:"hidden", minWidth:"120px", maxWidth:"420px" }}>
+                              👤 {v.nombre}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(stockActualEmpresa || []).filter(f => {
+                          const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
+                          const q = busquedaStockActual.trim().toLowerCase();
+                          return !q || [p.codigo_cliente,p.nombre,f.descripcion_archivo,f.color,f.talle].some(v => String(v || "").toLowerCase().includes(q));
+                        }).map((f, idx) => {
+                          const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
+                          const color = String(f.color || "").trim().toLowerCase();
+                          const talle = String(f.talle || "").trim().toLowerCase();
+                          const coincideVariante = x =>
+                            String(x.producto_id) === String(f.producto_id) &&
+                            String(x.color || "").trim().toLowerCase() === color &&
+                            String(x.talle || "").trim().toLowerCase() === talle;
+
+                          const cantDep = depId => stockMatrizFilasDeposito
+                            .filter(x => String(x.deposito_id) === String(depId) && coincideVariante(x))
+                            .reduce((a,x) => a + Number(x.cantidad || 0), 0);
+                          const cantVend = prevId => stockMatrizFilasVendedor
+                            .filter(x => String(x.preventista_id) === String(prevId) && coincideVariante(x))
+                            .reduce((a,x) => a + Number(x.cantidad || 0), 0);
+                          // TOTAL de la fila = existencia física real en todas las ubicaciones.
+                          // Nunca usamos stock_informado para el total actual.
+                          const total =
+                            stockMatrizDepositos.reduce((s,d) => s + cantDep(d.id), 0) +
+                            stockMatrizVendedores.reduce((s,v) => s + cantVend(v.id), 0);
+
+                          const stickyBase = { position:"sticky", zIndex:2, background:"#fff", borderTop:"1px solid #f1f5f9" };
+                          return (
+                            <tr key={f.id || idx}>
+                              <td style={{ ...stickyBase, left:0, padding:"9px", minWidth:"90px", fontWeight:"900", whiteSpace:"nowrap" }}>{p.codigo_cliente || f.codigo_archivo || "—"}</td>
+                              <td style={{ ...stickyBase, left:90, padding:"9px", minWidth:"220px", fontWeight:"800", whiteSpace:"nowrap" }}>{p.nombre || f.descripcion_archivo || "Artículo"}</td>
+                              <td style={{ ...stickyBase, left:310, padding:"9px", minWidth:"90px", whiteSpace:"nowrap" }}>{f.color || "—"}</td>
+                              <td style={{ ...stickyBase, left:400, padding:"9px", minWidth:"70px", whiteSpace:"nowrap" }}>{f.talle || "—"}</td>
+                              <td style={{ padding:"9px 14px", textAlign:"right", fontWeight:"950", fontSize:"12px", background:"#f0fdf4", color: total <= 0 ? "#dc2626" : "#166534", borderTop:"1px solid #dcfce7" }}>{total.toLocaleString("es-AR")}</td>
+                              {stockMatrizDepositos.map(d => {
+                                const n=cantDep(d.id);
+                                return <td key={`dep-${d.id}`} style={{ padding:"9px 14px", textAlign:"right", fontWeight:n ? "900":"600", color:n ? "#1d4ed8":"#94a3b8", borderTop:"1px solid #f1f5f9" }}>{n.toLocaleString("es-AR")}</td>;
+                              })}
+                              {stockMatrizVendedores.map(v => {
+                                const n=cantVend(v.id);
+                                return <td key={`vend-${v.id}`} style={{ padding:"9px 14px", textAlign:"right", fontWeight:n ? "900":"600", color:n ? "#9a3412":"#94a3b8", borderTop:"1px solid #f1f5f9" }}>{n.toLocaleString("es-AR")}</td>;
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div style={{ marginTop:"9px", fontSize:"10px", color:"#64748b" }}>
+                  Si hay muchos depósitos o vendedores, desplazá la tabla horizontalmente. El depósito principal aparece primero y marcado con ⭐. Podés arrastrar el borde derecho de los encabezados para achicar o agrandar las columnas.
                 </div>
               </div>
             </div>
@@ -2230,25 +3634,35 @@ export default function MonitorPedidos() {
               <StockSubnav />
               <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
                 <div style={{ fontSize: "17px", fontWeight: "900" }}>✏️ Modificar stock manualmente</div>
-                <div style={{ fontSize: "11px", color: "#64748b", margin: "3px 0 12px" }}>Para correcciones puntuales. Las actualizaciones masivas siguen haciéndose desde Excel.</div>
-                <div style={{ padding: "9px 11px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px", color: "#9a3412", fontSize: "11px", marginBottom: "12px" }}>Cada modificación pide confirmación antes de guardar.</div>
-                <input value={busquedaStockActual} onChange={e => setBusquedaStockActual(e.target.value)} placeholder="Buscar producto o variante..." style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "12px", marginBottom: "12px" }} />
+                <div style={{ fontSize: "11px", color: "#64748b", margin: "3px 0 12px" }}>
+                  Para correcciones puntuales por depósito: faltantes, roturas, robos o diferencias de inventario. El total de la empresa se recalcula automáticamente.
+                </div>
+                <div style={{ padding: "9px 11px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px", color: "#9a3412", fontSize: "11px", marginBottom: "12px" }}>
+                  El ajuste modifica únicamente el depósito indicado. No altera el historial de ingresos ni el stock que está en poder de vendedores.
+                </div>
+                {stockMensaje && <div style={{ marginBottom:"10px", padding:"9px 11px", background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:"8px", color:"#166534", fontSize:"11px", fontWeight:"800" }}>{stockMensaje}</div>}
+                <input value={busquedaStockActual} onChange={e => setBusquedaStockActual(e.target.value)} placeholder="Buscar código, producto, color, talle o depósito..." style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "12px", marginBottom: "12px" }} />
                 <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "9px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "720px", fontSize: "11px" }}>
-                    <thead><tr style={{ background: "#f8fafc" }}>{["Código","Artículo / variante","Actual","Nuevo stock",""].map((h,i) => <th key={`${h}-${i}`} style={{ padding: "9px", textAlign: "left" }}>{h}</th>)}</tr></thead>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "820px", fontSize: "11px" }}>
+                    <thead><tr style={{ background: "#f8fafc" }}>{["Código","Artículo / variante","Depósito","Actual","Nuevo stock",""].map((h,i) => <th key={`${h}-${i}`} style={{ padding: "9px", textAlign: "left" }}>{h}</th>)}</tr></thead>
                     <tbody>
-                      {(stockActualEmpresa || []).filter(f => {
+                      {(stockMatrizFilasDeposito || []).filter(f => {
                         const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
+                        const d = stockMatrizDepositos.find(x => String(x.id) === String(f.deposito_id)) || {};
                         const q = busquedaStockActual.trim().toLowerCase();
-                        return !q || [p.codigo_cliente,p.nombre,f.descripcion_archivo,f.color,f.talle].some(v => String(v || "").toLowerCase().includes(q));
+                        return !q || [p.codigo_cliente,p.codigo_cge,p.nombre,p.marca,f.color,f.talle,d.nombre].some(v => String(v || "").toLowerCase().includes(q));
                       }).map((f, idx) => {
                         const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
-                        return <tr key={f.id || idx} style={{ borderTop: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "9px", fontWeight: "900" }}>{p.codigo_cliente || f.codigo_archivo || "—"}</td>
-                          <td style={{ padding: "9px" }}><div style={{ fontWeight: "800" }}>{p.nombre || f.descripcion_archivo || "Artículo"}</div><div style={{ fontSize: "10px", color: "#64748b" }}>{[f.color, f.talle ? `Talle ${f.talle}` : ""].filter(Boolean).join(" · ") || "Sin variante"}</div></td>
-                          <td style={{ padding: "9px", fontWeight: "900" }}>{Number(f.stock_informado ?? 0)}</td>
-                          <td style={{ padding: "9px" }}><input type="number" min="0" value={stockManualValores[f.id] ?? f.stock_informado ?? 0} onChange={e => setStockManualValores(prev => ({ ...prev, [f.id]: e.target.value }))} style={{ width:"100px", padding:"7px", border:"1px solid #cbd5e1", borderRadius:"7px", fontWeight:"800" }} /></td>
-                          <td style={{ padding: "9px" }}><button type="button" disabled={guardandoStockManual === f.id} onClick={() => guardarStockManual(f)} style={{ padding:"8px 11px", border:"none", borderRadius:"7px", background:guardandoStockManual === f.id ? "#94a3b8" : "#16a34a", color:"#fff", fontWeight:"900", fontSize:"10px", cursor:"pointer" }}>{guardandoStockManual === f.id ? "Guardando..." : "Guardar"}</button></td>
+                        const d = stockMatrizDepositos.find(x => String(x.id) === String(f.deposito_id)) || {};
+                        const clave = `dep:${f.deposito_id}:${f.producto_id}:${String(f.color || "").trim().toLowerCase()}:${String(f.talle || "").trim().toLowerCase()}`;
+                        const actual = Number(f.cantidad || 0);
+                        return <tr key={f.id || clave || idx} style={{ borderTop: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "9px", fontWeight: "900" }}>{p.codigo_cliente || p.codigo_cge || "—"}</td>
+                          <td style={{ padding: "9px" }}><div style={{ fontWeight: "800" }}>{p.nombre || "Artículo"}</div><div style={{ fontSize: "10px", color: "#64748b" }}>{[f.color, f.talle ? `Talle ${f.talle}` : ""].filter(Boolean).join(" · ") || "Sin variante"}</div></td>
+                          <td style={{ padding:"9px", fontWeight:"900", color:"#1d4ed8" }}>🏭 {d.nombre || "Depósito"}{d.es_principal ? " ⭐" : ""}</td>
+                          <td style={{ padding: "9px", fontWeight: "950", fontSize:"12px" }}>{actual}</td>
+                          <td style={{ padding: "9px" }}><input type="number" min="0" value={stockManualValores[clave] ?? actual} onChange={e => setStockManualValores(prev => ({ ...prev, [clave]: e.target.value }))} style={{ width:"100px", padding:"7px", border:"1px solid #cbd5e1", borderRadius:"7px", fontWeight:"800" }} /></td>
+                          <td style={{ padding: "9px" }}><button type="button" disabled={guardandoStockManual === clave} onClick={() => guardarStockManual(f)} style={{ padding:"8px 11px", border:"none", borderRadius:"7px", background:guardandoStockManual === clave ? "#94a3b8" : "#16a34a", color:"#fff", fontWeight:"900", fontSize:"10px", cursor:"pointer" }}>{guardandoStockManual === clave ? "Guardando..." : "Guardar"}</button></td>
                         </tr>;
                       })}
                     </tbody>

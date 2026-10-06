@@ -1272,7 +1272,7 @@ const reactivarComercio = async (comercio) => {
 
         const { data, error } = await supabase
           .from("visitas")
-          .select("id,empresa_id,preventista,comercio_id,comercio_nombre,fecha,hora,resultado,tipo,observacion,observaciones,notas,created_at")
+          .select("id,empresa_id,preventista,comercio_id,comercio_nombre,fecha,resultado,observacion,created_at")
           .eq("empresa_id", perfilSupervisor.empresa_id)
           .gte("fecha", inicioHoy.toISOString())
           .lt("fecha", inicioManana.toISOString())
@@ -1566,19 +1566,11 @@ useEffect(() => {
     }
   };
 
-  // En Monitoreo, los números del mapa representan el orden REAL de captura:
-  // 1 = primera captura, 2 = segunda, etc.
-  // El planificador conserva su orden manual de visitas.
+  // El mapa debe respetar exactamente el orden guardado de la hoja de ruta.
+  // Planificador y Monitoreo muestran la misma secuencia 1, 2, 3, 4...
   const listaParaMapa = (seccionActiva === "planificador" && secuenciaPersonalizada.length > 0)
     ? secuenciaPersonalizada
-    : [...comerciosVisibles].sort((a, b) => {
-        const idA = Number(a.id);
-        const idB = Number(b.id);
-        if (Number.isFinite(idA) && Number.isFinite(idB)) return idA - idB;
-        const fechaA = new Date(a.created_at || a.fecha || 0).getTime();
-        const fechaB = new Date(b.created_at || b.fecha || 0).getTime();
-        return fechaA - fechaB;
-      });
+    : ordenarPorSecuenciaGuardada(comerciosVisibles);
 
   const coordenadasValidas = listaParaMapa
     .map(c => [c.ubicacion_exacta_latitud || c.latitud, c.ubicacion_exacta_longitud || c.longitud])
@@ -1709,7 +1701,7 @@ useEffect(() => {
       id: `visita-${v.id || i}`,
       tipo: "visita",
       fecha: v.fecha || v.created_at || null,
-      horaTexto: v.hora || "",
+      horaTexto: "",
       titulo: v.comercio_nombre || v.nombre_comercio || (v.comercio_id ? `Comercio #${v.comercio_id}` : "Visita"),
       detalle: v.resultado || v.tipo || v.observacion || v.observaciones || v.notas || "Visita registrada",
     }));
@@ -5103,9 +5095,19 @@ useEffect(() => {
               </button>
             )}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "7px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
             {telemetriaFlota.map((prev, idx) => {
               const seleccionado = (preventistaSeleccionado?.nombre || preventistaSeleccionado) === prev.nombre;
+              const minutos = prev.ultimaSenal
+                ? (Date.now() - new Date(prev.ultimaSenal).getTime()) / 60000
+                : Infinity;
+              const estadoSenal =
+                minutos <= 2
+                  ? { texto: "🟢 Activo", color: "#16a34a" }
+                  : minutos <= 10
+                    ? { texto: "🟡 Sin señal", color: "#d97706" }
+                    : { texto: "⚫ Inactivo", color: "#64748b" };
+
               return (
                 <div
                   key={prev.nombre || idx}
@@ -5114,47 +5116,25 @@ useEffect(() => {
                     backgroundColor: seleccionado ? "#eff6ff" : "#ffffff",
                     border: seleccionado ? "2px solid #2563eb" : "1px solid #e2e8f0",
                     borderRadius: "8px",
-                    padding: "8px 12px",
+                    padding: "7px 10px",
                     cursor: "pointer",
                     display: "flex",
-                    justifyContent: "space-between",
                     alignItems: "center",
-                    boxShadow: seleccionado ? "0 2px 8px rgba(37,99,235,0.15)" : "none"
+                    gap: "12px",
+                    minHeight: "38px",
+                    boxShadow: seleccionado ? "0 2px 8px rgba(37,99,235,0.15)" : "none",
+                    overflowX: "auto",
+                    whiteSpace: "nowrap"
                   }}
                 >
-                  <div>
-                    <div style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>👤 {prev.nombre}</div>
-                    {(() => {
-                      const minutos = prev.ultimaSenal
-                        ? (Date.now() - new Date(prev.ultimaSenal).getTime()) / 60000
-                        : Infinity;
-                      const estadoSenal =
-                        minutos <= 2
-                           ? { texto: "🟢 Activo", color: "#16a34a" }
-                           : minutos <= 10
-                             ? { texto: "🟡 Sin señal reciente", color: "#d97706" }
-                             : { texto: "⚫ Inactivo", color: "#64748b" };
-                      return (
-                        <div style={{ fontSize: "10px", color: estadoSenal.color, marginTop: "2px", fontWeight: "700" }}>
-                          {estadoSenal.texto}
-                        </div>
-                      );
-                    })()}
-                    <div
-                      title={prev.ultimaSenal ? `Fecha y hora exactas: ${new Date(prev.ultimaSenal).toLocaleString("es-AR")}` : "Sin señal registrada"}
-                      style={{ fontSize: "10px", color: "#64748b", marginTop: "2px", cursor: prev.ultimaSenal ? "help" : "default" }}
-                    >
-                      {textoUltimaSenal(prev.ultimaSenal)}
-                    </div>
-                    <div style={{ fontSize: "10px", color: "#334155", marginTop: "4px", fontWeight: "800", lineHeight: 1.5 }}>
-                      📍 {prev.paradasHoy} visita{prev.paradasHoy === 1 ? "" : "s"} · 🧾 {prev.nviHoy || 0} NVI · 🎯 {prev.efectividadHoy || 0}%
-                      <br />💰 ${Number(prev.vendidoHoy || 0).toLocaleString("es-AR")} vendido hoy
-                    </div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#2563eb" }}>{prev.paradasTotales || 0}</div>
-                    <div style={{ fontSize: "10px", color: "#94a3b8" }}>comercios</div>
-                  </div>
+                  <span style={{fontSize:"12px",fontWeight:"800",color:"#0f172a"}}>👤 {prev.nombre}</span>
+                  <span style={{fontSize:"10px",fontWeight:"800",color:estadoSenal.color}}>{estadoSenal.texto}</span>
+                  <span title={prev.ultimaSenal ? `Fecha y hora exactas: ${new Date(prev.ultimaSenal).toLocaleString("es-AR")}` : "Sin señal registrada"} style={{fontSize:"10px",color:"#64748b"}}>🕐 {textoUltimaSenal(prev.ultimaSenal)}</span>
+                  <span style={{fontSize:"10px",color:"#334155"}}>🏪 <b>{prev.paradasTotales || 0}</b> comercios</span>
+                  <span style={{fontSize:"10px",color:"#334155"}}>📍 <b>{prev.paradasHoy || 0}</b> visita{prev.paradasHoy === 1 ? "" : "s"}</span>
+                  <span style={{fontSize:"10px",color:"#334155"}}>🧾 <b>{prev.nviHoy || 0}</b> NVI</span>
+                  <span style={{fontSize:"10px",color:"#334155"}}>🎯 <b>{prev.efectividadHoy || 0}%</b></span>
+                  <span style={{fontSize:"10px",color:"#334155"}}>💰 <b>${Number(prev.vendidoHoy || 0).toLocaleString("es-AR")}</b> vendido hoy</span>
                 </div>
               );
             })}
