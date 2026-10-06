@@ -31,6 +31,16 @@ export default function MonitorPedidos() {
   const [stockActualEmpresa, setStockActualEmpresa] = useState([]);
   const [cargandoStockActual, setCargandoStockActual] = useState(false);
   const [busquedaStockActual, setBusquedaStockActual] = useState("");
+  const [stockManualValores, setStockManualValores] = useState({});
+  const [guardandoStockManual, setGuardandoStockManual] = useState(null);
+  const [stockAlertaPorcentajeActiva, setStockAlertaPorcentajeActiva] = useState(false);
+  const [stockAlertaPorcentaje, setStockAlertaPorcentaje] = useState(20);
+  const [stockAlertaUnidadesActiva, setStockAlertaUnidadesActiva] = useState(false);
+  const [stockAlertaUnidades, setStockAlertaUnidades] = useState(5);
+  const [guardandoAlertasStock, setGuardandoAlertasStock] = useState(false);
+  const [alertasProducto, setAlertasProducto] = useState({});
+  const [busquedaAlertasProducto, setBusquedaAlertasProducto] = useState("");
+  const [guardandoAlertaProducto, setGuardandoAlertaProducto] = useState(null);
 
   const cargarPedidosReales = async () => {
     try {
@@ -679,13 +689,18 @@ export default function MonitorPedidos() {
 
   useEffect(() => {
     if (!empresaIdActual) return;
+    const vistasStock = ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"];
+    if (!vistasStock.includes(vistaPedidos)) return;
+
     cargarCatalogoProductosStock();
     cargarStockActualEmpresa();
 
-    // Mantiene visible el stock actualizado mientras el Supervisor trabaja.
-    const timerStockActual = setInterval(cargarStockActualEmpresa, 5000);
+    const actualizarSiVisible = () => {
+      if (document.visibilityState === "visible") cargarStockActualEmpresa();
+    };
+    const timerStockActual = setInterval(actualizarSiVisible, 60000);
     return () => clearInterval(timerStockActual);
-  }, [empresaIdActual]);
+  }, [empresaIdActual, vistaPedidos]);
 
   const textoProductoStock = (p) => {
     if (!p) return "";
@@ -1486,6 +1501,178 @@ export default function MonitorPedidos() {
     window.location.href = "/";
   };
 
+  const guardarStockManual = async (fila) => {
+    if (!empresaIdActual || !fila?.id) return;
+    const nuevoStock = Number(stockManualValores[fila.id] ?? fila.stock_informado ?? 0);
+
+    if (!Number.isFinite(nuevoStock) || nuevoStock < 0) {
+      alert("Ingresá una cantidad válida, igual o mayor que 0.");
+      return;
+    }
+
+    const anterior = Number(fila.stock_informado ?? 0);
+    if (nuevoStock === anterior) {
+      alert("No hay cambios para guardar.");
+      return;
+    }
+
+    const producto = productosStockCatalogo.find(p => String(p.id) === String(fila.producto_id));
+    const nombre = producto?.nombre || fila.descripcion_archivo || "Artículo";
+    const variante = [fila.color, fila.talle ? `Talle ${fila.talle}` : ""].filter(Boolean).join(" · ");
+
+    if (!window.confirm(`¿Confirmás el ajuste manual?\n\n${nombre}${variante ? ` · ${variante}` : ""}\nStock anterior: ${anterior}\nStock nuevo: ${nuevoStock}`)) return;
+
+    setGuardandoStockManual(fila.id);
+    try {
+      const { error } = await supabase
+        .from("stock_informado")
+        .update({ stock_informado: nuevoStock, fecha_actualizacion: new Date().toISOString() })
+        .eq("id", fila.id)
+        .eq("empresa_id", empresaIdActual);
+
+      if (error) throw error;
+      setStockManualValores(prev => ({ ...prev, [fila.id]: nuevoStock }));
+      await cargarStockActualEmpresa();
+      alert("✅ Stock actualizado manualmente.");
+    } catch (error) {
+      console.error("Error modificando stock manual:", error);
+      alert("❌ No se pudo modificar el stock: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoStockManual(null);
+    }
+  };
+
+  const cargarAlertasStock = async () => {
+    if (!empresaIdActual) return;
+    try {
+      const { data, error } = await supabase
+        .from("stock_configuracion")
+        .select("empresa_id,tipo_alerta,valor_alerta,bloqueo_automatico")
+        .eq("empresa_id", empresaIdActual)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return;
+
+      if (data.tipo_alerta === "unidades") {
+        setStockAlertaUnidadesActiva(Number(data.valor_alerta || 0) > 0);
+        setStockAlertaUnidades(Number(data.valor_alerta || 5));
+        setStockAlertaPorcentajeActiva(false);
+      } else {
+        setStockAlertaPorcentajeActiva(Number(data.valor_alerta || 0) > 0);
+        setStockAlertaPorcentaje(Number(data.valor_alerta || 20));
+        setStockAlertaUnidadesActiva(false);
+      }
+    } catch (error) {
+      console.error("Error cargando configuración de alertas:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (vistaPedidos === "StockAlertas" && empresaIdActual) cargarAlertasStock();
+  }, [vistaPedidos, empresaIdActual]);
+
+  const guardarAlertasStock = async () => {
+    if (!empresaIdActual) return;
+
+    if (stockAlertaPorcentajeActiva && stockAlertaUnidadesActiva) {
+      alert("Por ahora la tabla actual permite guardar un criterio a la vez. Elegí porcentaje o unidades.");
+      return;
+    }
+
+    setGuardandoAlertasStock(true);
+    try {
+      const tipo_alerta = stockAlertaUnidadesActiva ? "unidades" : "porcentaje";
+      const valor_alerta = stockAlertaUnidadesActiva
+        ? Number(stockAlertaUnidades || 0)
+        : stockAlertaPorcentajeActiva ? Number(stockAlertaPorcentaje || 0) : 0;
+
+      const { error } = await supabase
+        .from("stock_configuracion")
+        .upsert([{
+          empresa_id: empresaIdActual,
+          tipo_alerta,
+          valor_alerta,
+          bloqueo_automatico: false,
+          actualizado_at: new Date().toISOString(),
+        }], { onConflict: "empresa_id" });
+
+      if (error) throw error;
+      alert("✅ Configuración de alertas guardada.");
+    } catch (error) {
+      console.error("Error guardando alertas de stock:", error);
+      alert("❌ No se pudo guardar la configuración: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoAlertasStock(false);
+    }
+  };
+
+  const cargarAlertasProducto = async () => {
+    if (!empresaIdActual) return;
+    try {
+      const { data, error } = await supabase
+        .from("stock_alertas_producto")
+        .select("producto_id,tipo_alerta,valor_alerta,activa")
+        .eq("empresa_id", empresaIdActual);
+      if (error) throw error;
+      const mapa = {};
+      (data || []).forEach(x => { mapa[String(x.producto_id)] = x; });
+      setAlertasProducto(mapa);
+    } catch (error) {
+      console.error("Error cargando alertas particulares:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (vistaPedidos === "StockAlertas" && empresaIdActual) cargarAlertasProducto();
+  }, [vistaPedidos, empresaIdActual]);
+
+  const guardarAlertaProducto = async (producto) => {
+    if (!empresaIdActual || !producto?.id) return;
+    const pid = String(producto.id);
+    const cfg = alertasProducto[pid] || { activa: false, tipo_alerta: "unidades", valor_alerta: 5 };
+    setGuardandoAlertaProducto(pid);
+    try {
+      const { error } = await supabase.from("stock_alertas_producto").upsert([{
+        empresa_id: empresaIdActual,
+        producto_id: producto.id,
+        activa: !!cfg.activa,
+        tipo_alerta: cfg.tipo_alerta || "unidades",
+        valor_alerta: Number(cfg.valor_alerta || 0),
+        actualizado_at: new Date().toISOString(),
+      }], { onConflict: "empresa_id,producto_id" });
+      if (error) throw error;
+      await cargarAlertasProducto();
+      alert("✅ Alerta particular guardada.");
+    } catch (error) {
+      console.error("Error guardando alerta particular:", error);
+      alert("❌ No se pudo guardar la alerta particular: " + (error.message || "Error desconocido"));
+    } finally {
+      setGuardandoAlertaProducto(null);
+    }
+  };
+
+  const StockSubnav = () => {
+    const opciones = [
+      ["StockFisico", "📥 Cargar / actualizar"],
+      ["StockVer", "📦 Ver stock"],
+      ["StockManual", "✏️ Modificar manualmente"],
+      ["Disponibilidad", "🔓 Disponibilidad"],
+      ["StockAlertas", "⚠️ Alertas"],
+    ];
+
+    return (
+      <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", marginBottom: "12px", padding: "8px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px" }}>
+        {opciones.map(([clave, etiqueta]) => (
+          <button key={clave} type="button" onClick={() => { setVistaPedidos(clave); setPedidoActivo(null); }}
+            style={{ padding: "9px 12px", borderRadius: "8px", border: vistaPedidos === clave ? "2px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === clave ? "#eff6ff" : "#fff", color: vistaPedidos === clave ? "#1d4ed8" : "#475569", fontSize: "11px", fontWeight: "900", cursor: "pointer" }}>
+            {etiqueta}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
@@ -1513,9 +1700,8 @@ export default function MonitorPedidos() {
       <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px", overflowX: "auto", whiteSpace: "nowrap" }}>
         <a href="/supervisor?seccion=monitoreo" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>📡 Monitoreo en Vivo</a>
         <a href="/supervisor?seccion=planificador" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🗓️ Diseñador Hojas de Ruta (Semanal)</a>
-        <button type="button" onClick={() => setVistaPedidos("Activos")} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: !["Disponibilidad", "StockFisico"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: !["Disponibilidad", "StockFisico"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Pedidos</button>
-        <button type="button" onClick={() => { setVistaPedidos("StockFisico"); setPedidoActivo(null); }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: vistaPedidos === "StockFisico" ? "2px solid #2563eb" : "2px solid transparent", color: vistaPedidos === "StockFisico" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📥 CARGAR STOCK</button>
-        <button type="button" onClick={() => { setVistaPedidos("Disponibilidad"); setPedidoActivo(null); }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: vistaPedidos === "Disponibilidad" ? "2px solid #2563eb" : "2px solid transparent", color: vistaPedidos === "Disponibilidad" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Disponibilidad</button>
+        <button type="button" onClick={() => setVistaPedidos("Activos")} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: !["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: !["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Pedidos</button>
+        <button type="button" onClick={() => { setVistaPedidos("StockFisico"); setPedidoActivo(null); }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Stock</button>
         <a href="/supervisor?seccion=clientes" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🏪 Clientes</a>
         <a href="/supervisor?seccion=estadoCuenta" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💳 Estado de Cuenta</a>
         <a href="/supervisor?seccion=listasPrecios" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💲 Listas de Precios</a>
@@ -1525,7 +1711,7 @@ export default function MonitorPedidos() {
       <div style={{ width: "100%" }}>
         <main style={{ padding: "16px 24px", maxWidth: "1500px", width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
           {/* Métricas Resumen */}
-          {vistaPedidos !== "Disponibilidad" && vistaPedidos !== "StockFisico" && (
+          {!["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: "8px", marginBottom: "12px" }}>
             <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
               <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>💰 VENDIDO HOY · {fechaCorta(hoyMetricas)}</div>
@@ -1555,12 +1741,13 @@ export default function MonitorPedidos() {
           )}
 
           <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
-            {["Activos", "Historial", "HistorialClientes", "Disponibilidad", "StockFisico"].map(v => (
-              <button key={v} type="button" onClick={() => { setVistaPedidos(v); setFiltroEstado("Todos"); setPedidoActivo(null); }}
-                style={{ padding: "8px 14px", borderRadius: "8px", border: vistaPedidos === v ? "1px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === v ? "#eff6ff" : "#fff", color: vistaPedidos === v ? "#1d4ed8" : "#475569", fontWeight: "800", cursor: "pointer" }}>
-                {v === "Activos" ? "🧾 Notas de Venta Activas (NVI)" : v === "Historial" ? "🧑‍💼 Historial Vendedores" : v === "HistorialClientes" ? "🏪 Historial Clientes" : v === "Disponibilidad" ? "📦 Stock relativo" : "📊 Stock físico"}
-              </button>
-            ))}
+            {!["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) &&
+              ["Activos", "Historial", "HistorialClientes"].map(v => (
+                <button key={v} type="button" onClick={() => { setVistaPedidos(v); setFiltroEstado("Todos"); setPedidoActivo(null); }}
+                  style={{ padding: "8px 14px", borderRadius: "8px", border: vistaPedidos === v ? "1px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === v ? "#eff6ff" : "#fff", color: vistaPedidos === v ? "#1d4ed8" : "#475569", fontWeight: "800", cursor: "pointer" }}>
+                  {v === "Activos" ? "🧾 Notas de Venta Activas (NVI)" : v === "Historial" ? "🧑‍💼 Historial Vendedores" : "🏪 Historial Clientes"}
+                </button>
+              ))}
           </div>
 
           {vistaPedidos === "HistorialClientes" ? (
@@ -1628,6 +1815,7 @@ export default function MonitorPedidos() {
             </div>
           ) : vistaPedidos === "StockFisico" ? (
             <div>
+              <StockSubnav />
               <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
                   <div>
@@ -2004,8 +2192,111 @@ export default function MonitorPedidos() {
                 )}
               </div>
             </div>
+          ) : vistaPedidos === "StockVer" ? (
+            <div>
+              <StockSubnav />
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap", marginBottom: "12px" }}>
+                  <div><div style={{ fontSize: "17px", fontWeight: "900" }}>📦 Ver stock</div><div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>Inventario físico actual, incluyendo color y talle cuando corresponda.</div></div>
+                  <button type="button" onClick={cargarStockActualEmpresa} style={{ padding: "9px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", fontWeight: "900", cursor: "pointer" }}>↻ Actualizar</button>
+                </div>
+                <input value={busquedaStockActual} onChange={e => setBusquedaStockActual(e.target.value)} placeholder="Buscar código, artículo, color o talle..." style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "12px", marginBottom: "12px" }} />
+                <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "9px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "680px", fontSize: "11px" }}>
+                    <thead><tr style={{ background: "#f8fafc" }}>{["Código","Artículo","Color","Talle","Stock","Actualizado"].map(h => <th key={h} style={{ padding: "9px", textAlign: h === "Stock" ? "right" : "left" }}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {(stockActualEmpresa || []).filter(f => {
+                        const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
+                        const q = busquedaStockActual.trim().toLowerCase();
+                        return !q || [p.codigo_cliente,p.nombre,f.descripcion_archivo,f.color,f.talle].some(v => String(v || "").toLowerCase().includes(q));
+                      }).map((f, idx) => {
+                        const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
+                        const cantidad = Number(f.stock_informado ?? 0);
+                        return <tr key={f.id || idx} style={{ borderTop: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "9px", fontWeight: "900" }}>{p.codigo_cliente || f.codigo_archivo || "—"}</td>
+                          <td style={{ padding: "9px" }}>{p.nombre || f.descripcion_archivo || "Artículo"}</td>
+                          <td style={{ padding: "9px" }}>{f.color || "—"}</td><td style={{ padding: "9px" }}>{f.talle || "—"}</td>
+                          <td style={{ padding: "9px", textAlign: "right", fontWeight: "900", color: cantidad <= 0 ? "#dc2626" : cantidad <= 5 ? "#d97706" : "#15803d" }}>{cantidad.toLocaleString("es-AR")}</td>
+                          <td style={{ padding: "9px", color: "#64748b" }}>{f.fecha_actualizacion ? new Date(f.fecha_actualizacion).toLocaleString("es-AR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "—"}</td>
+                        </tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : vistaPedidos === "StockManual" ? (
+            <div>
+              <StockSubnav />
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px" }}>
+                <div style={{ fontSize: "17px", fontWeight: "900" }}>✏️ Modificar stock manualmente</div>
+                <div style={{ fontSize: "11px", color: "#64748b", margin: "3px 0 12px" }}>Para correcciones puntuales. Las actualizaciones masivas siguen haciéndose desde Excel.</div>
+                <div style={{ padding: "9px 11px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px", color: "#9a3412", fontSize: "11px", marginBottom: "12px" }}>Cada modificación pide confirmación antes de guardar.</div>
+                <input value={busquedaStockActual} onChange={e => setBusquedaStockActual(e.target.value)} placeholder="Buscar producto o variante..." style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "12px", marginBottom: "12px" }} />
+                <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "9px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "720px", fontSize: "11px" }}>
+                    <thead><tr style={{ background: "#f8fafc" }}>{["Código","Artículo / variante","Actual","Nuevo stock",""].map((h,i) => <th key={`${h}-${i}`} style={{ padding: "9px", textAlign: "left" }}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {(stockActualEmpresa || []).filter(f => {
+                        const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
+                        const q = busquedaStockActual.trim().toLowerCase();
+                        return !q || [p.codigo_cliente,p.nombre,f.descripcion_archivo,f.color,f.talle].some(v => String(v || "").toLowerCase().includes(q));
+                      }).map((f, idx) => {
+                        const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
+                        return <tr key={f.id || idx} style={{ borderTop: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "9px", fontWeight: "900" }}>{p.codigo_cliente || f.codigo_archivo || "—"}</td>
+                          <td style={{ padding: "9px" }}><div style={{ fontWeight: "800" }}>{p.nombre || f.descripcion_archivo || "Artículo"}</div><div style={{ fontSize: "10px", color: "#64748b" }}>{[f.color, f.talle ? `Talle ${f.talle}` : ""].filter(Boolean).join(" · ") || "Sin variante"}</div></td>
+                          <td style={{ padding: "9px", fontWeight: "900" }}>{Number(f.stock_informado ?? 0)}</td>
+                          <td style={{ padding: "9px" }}><input type="number" min="0" value={stockManualValores[f.id] ?? f.stock_informado ?? 0} onChange={e => setStockManualValores(prev => ({ ...prev, [f.id]: e.target.value }))} style={{ width:"100px", padding:"7px", border:"1px solid #cbd5e1", borderRadius:"7px", fontWeight:"800" }} /></td>
+                          <td style={{ padding: "9px" }}><button type="button" disabled={guardandoStockManual === f.id} onClick={() => guardarStockManual(f)} style={{ padding:"8px 11px", border:"none", borderRadius:"7px", background:guardandoStockManual === f.id ? "#94a3b8" : "#16a34a", color:"#fff", fontWeight:"900", fontSize:"10px", cursor:"pointer" }}>{guardandoStockManual === f.id ? "Guardando..." : "Guardar"}</button></td>
+                        </tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : vistaPedidos === "StockAlertas" ? (
+            <div>
+              <StockSubnav />
+              <div style={{ display: "grid", gap: "12px" }}>
+                <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"16px" }}>
+                  <div style={{ fontSize:"17px", fontWeight:"900" }}>⚠️ Alerta general</div>
+                  <div style={{ fontSize:"11px", color:"#64748b", margin:"3px 0 14px" }}>Se aplica a todos los códigos que no tengan una alerta particular. Es informativa: nunca bloquea automáticamente.</div>
+                  <div style={{ display:"flex", gap:"12px", flexWrap:"wrap", alignItems:"center" }}>
+                    <label style={{ display:"flex", gap:"7px", alignItems:"center" }}><input type="checkbox" checked={stockAlertaPorcentajeActiva} onChange={e => { setStockAlertaPorcentajeActiva(e.target.checked); if(e.target.checked) setStockAlertaUnidadesActiva(false); }} /> Por porcentaje</label>
+                    <input type="number" min="0" max="100" disabled={!stockAlertaPorcentajeActiva} value={stockAlertaPorcentaje} onChange={e => setStockAlertaPorcentaje(e.target.value)} style={{ width:"75px", padding:"8px", border:"1px solid #cbd5e1", borderRadius:"7px" }} /><strong>%</strong>
+                    <label style={{ display:"flex", gap:"7px", alignItems:"center", marginLeft:"12px" }}><input type="checkbox" checked={stockAlertaUnidadesActiva} onChange={e => { setStockAlertaUnidadesActiva(e.target.checked); if(e.target.checked) setStockAlertaPorcentajeActiva(false); }} /> Por unidades</label>
+                    <input type="number" min="0" disabled={!stockAlertaUnidadesActiva} value={stockAlertaUnidades} onChange={e => setStockAlertaUnidades(e.target.value)} style={{ width:"75px", padding:"8px", border:"1px solid #cbd5e1", borderRadius:"7px" }} /><strong>u.</strong>
+                    <button type="button" disabled={guardandoAlertasStock} onClick={guardarAlertasStock} style={{ marginLeft:"auto", padding:"9px 14px", border:"none", borderRadius:"8px", background:"#2563eb", color:"#fff", fontWeight:"900", cursor:"pointer" }}>{guardandoAlertasStock ? "Guardando..." : "💾 Guardar general"}</button>
+                  </div>
+                </div>
+
+                <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"16px" }}>
+                  <div style={{ fontSize:"17px", fontWeight:"900" }}>🎯 Alertas particulares por código</div>
+                  <div style={{ fontSize:"11px", color:"#64748b", margin:"3px 0 12px" }}>Solo configurás excepciones. Si un código no tiene alerta particular activa, usa automáticamente la alerta general.</div>
+                  <input value={busquedaAlertasProducto} onChange={e => setBusquedaAlertasProducto(e.target.value)} placeholder="🔍 Buscar código, producto o marca..." style={{ width:"100%", boxSizing:"border-box", padding:"10px 12px", border:"1px solid #cbd5e1", borderRadius:"8px", marginBottom:"10px" }} />
+                  <div style={{ display:"grid", gap:"7px" }}>
+                    {(productosStockCatalogo || []).filter(p => {
+                      const q=busquedaAlertasProducto.trim().toLowerCase();
+                      return !q || [p.codigo_cliente,p.codigo_cge,p.nombre,p.marca].some(v => String(v||"").toLowerCase().includes(q));
+                    }).map(p => {
+                      const pid=String(p.id);
+                      const cfg=alertasProducto[pid] || { activa:false, tipo_alerta:"unidades", valor_alerta:5 };
+                      return <div key={pid} style={{ display:"grid", gridTemplateColumns: esMovil ? "1fr" : "minmax(260px,1fr) 150px 110px 105px", gap:"8px", alignItems:"center", padding:"10px", border:"1px solid #e2e8f0", borderRadius:"8px" }}>
+                        <div><div style={{ fontWeight:"900", fontSize:"12px" }}>{p.nombre}</div><div style={{ fontSize:"10px", color:"#64748b" }}>{p.codigo_cliente || p.codigo_cge || "Sin código"}{p.marca ? ` · ${p.marca}` : ""}</div></div>
+                        <label style={{ display:"flex", gap:"6px", alignItems:"center", fontSize:"11px", fontWeight:"800" }}><input type="checkbox" checked={!!cfg.activa} onChange={e => setAlertasProducto(prev => ({...prev,[pid]:{...cfg,activa:e.target.checked}}))} /> Alerta propia</label>
+                        <select disabled={!cfg.activa} value={cfg.tipo_alerta} onChange={e => setAlertasProducto(prev => ({...prev,[pid]:{...cfg,tipo_alerta:e.target.value}}))} style={{ padding:"7px", border:"1px solid #cbd5e1", borderRadius:"7px" }}><option value="unidades">Unidades</option><option value="porcentaje">Porcentaje</option></select>
+                        <div style={{ display:"flex", gap:"5px" }}><input disabled={!cfg.activa} type="number" min="0" value={cfg.valor_alerta} onChange={e => setAlertasProducto(prev => ({...prev,[pid]:{...cfg,valor_alerta:e.target.value}}))} style={{ width:"60px", padding:"7px", border:"1px solid #cbd5e1", borderRadius:"7px" }} /><button type="button" onClick={() => guardarAlertaProducto(p)} disabled={guardandoAlertaProducto===pid} style={{ padding:"7px 9px", border:"none", borderRadius:"7px", background:"#16a34a", color:"#fff", fontWeight:"900", cursor:"pointer" }}>💾</button></div>
+                      </div>;
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : vistaPedidos === "Disponibilidad" ? (
             <div>
+              <StockSubnav />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
                 <div style={{ background: "#fff", padding: "12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                   <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>ARTÍCULOS CON MOVIMIENTO</div>

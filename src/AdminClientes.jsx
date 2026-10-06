@@ -55,6 +55,20 @@ export default function AdminClientes() {
     "Mayorista San Martín Golosinas": { dia: "10", estado: "Por Vencer", color: "#f59e0b", cupo: 3 }
   });
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
+  const [planesCatalogo, setPlanesCatalogo] = useState([]);
+  const [variantesCatalogo, setVariantesCatalogo] = useState([]);
+  const [abonoEmpresaActual, setAbonoEmpresaActual] = useState(null);
+  const [planSeleccionadoId, setPlanSeleccionadoId] = useState("");
+  const [varianteSeleccionadaId, setVarianteSeleccionadaId] = useState("");
+  const [precioAcordado, setPrecioAcordado] = useState("");
+  const [monedaAcordada, setMonedaAcordada] = useState("ARS");
+  const [inicioAbono, setInicioAbono] = useState("");
+  const [vencimientoAbono, setVencimientoAbono] = useState("");
+  const [cupoAbono, setCupoAbono] = useState("");
+  const [diaCorteAbono, setDiaCorteAbono] = useState("");
+  const [notasContratoAbono, setNotasContratoAbono] = useState("");
+  const [editandoContratoAbono, setEditandoContratoAbono] = useState(false);
+  const [guardandoContratoAbono, setGuardandoContratoAbono] = useState(false);
   const [guardandoPago, setGuardandoPago] = useState(false);
   const guardandoPagoRef = useRef(false);
   const [empresaPago, setEmpresaPago] = useState("");
@@ -112,15 +126,21 @@ export default function AdminClientes() {
   const cargarDatos = async () => {
     setCargando(true);
     try {
-      const [perfilesResp, empresasResp, pagosResp] = await Promise.all([
+      const [perfilesResp, empresasResp, pagosResp, planesResp, variantesResp] = await Promise.all([
         supabase.from("perfiles").select("*"),
         supabase.from("empresas").select("*").order("nombre"),
-        supabase.from("pagos_empresas").select("*").order("fecha", { ascending: false })
+        supabase.from("pagos_empresas").select("*").order("fecha", { ascending: false }),
+        supabase.from("planes_abono").select("*").eq("activo", true).order("nombre"),
+        supabase.from("planes_abono_variantes").select("*").eq("activo", true).order("meses")
       ]);
 
       if (perfilesResp.error) throw perfilesResp.error;
       if (empresasResp.error) throw empresasResp.error;
       if (pagosResp.error) console.warn("No se pudo cargar pagos:", pagosResp.error.message);
+      if (planesResp.error) console.warn("No se pudo cargar catálogo de planes:", planesResp.error.message);
+      if (variantesResp.error) console.warn("No se pudo cargar catálogo de modalidades:", variantesResp.error.message);
+      setPlanesCatalogo(planesResp.data || []);
+      setVariantesCatalogo(variantesResp.data || []);
 
       const perfiles = perfilesResp.data || [];
       const empresasDB = empresasResp.data || [];
@@ -297,9 +317,10 @@ export default function AdminClientes() {
     }
   };
 
-  const abrirRegistrarPago = (emp) => {
+  const abrirRegistrarPago = async (emp) => {
     setEmpresaPago(emp);
     const t = tarifasMap[emp] || {};
+    const empresaDB = empresasRegistros.find(e => e.nombre === emp);
     setMonedaPago(t.moneda || "ARS");
     const cupoContratado = Number(t.cupo || 0);
     const val = Number(t.valor || t.tarifa || 10000);
@@ -316,7 +337,96 @@ export default function AdminClientes() {
     setCambioTemporalPago(false);
     setComprobantePago("");
     setNotasAbono("");
+
+    let contrato = null;
+    if (empresaDB?.id) {
+      const { data, error } = await supabase
+        .from("empresa_abonos")
+        .select("*")
+        .eq("empresa_id", empresaDB.id)
+        .eq("activo", true)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (!error) contrato = data?.[0] || null;
+      else console.warn("No se pudo cargar el abono contratado:", error.message);
+    }
+    setAbonoEmpresaActual(contrato);
+    setEditandoContratoAbono(!contrato);
+    setPlanSeleccionadoId(contrato?.plan_id || "");
+    setVarianteSeleccionadaId(contrato?.variante_id || "");
+    setPrecioAcordado(contrato?.precio_acordado == null ? "" : String(contrato.precio_acordado));
+    setMonedaAcordada(contrato?.moneda || t.moneda || "ARS");
+    setInicioAbono(contrato?.fecha_inicio || "");
+    setVencimientoAbono(contrato?.proximo_vencimiento || "");
+    setCupoAbono(contrato?.cupo_preventistas == null ? String(cupoContratado || "") : String(contrato.cupo_preventistas));
+    setDiaCorteAbono(contrato?.dia_corte == null ? String(t.diaCorte || "") : String(contrato.dia_corte));
+    setNotasContratoAbono(contrato?.notas || "");
     setMostrarModalPago(true);
+  };
+
+  const guardarContratoAbono = async () => {
+    const empresaDB = empresasRegistros.find(e => e.nombre === empresaPago);
+    if (!empresaDB?.id) return alert("No encontré la empresa en Supabase.");
+    if (!planSeleccionadoId || !varianteSeleccionadaId) return alert("Elegí el plan y la modalidad.");
+    if (!inicioAbono || !vencimientoAbono) return alert("Completá inicio y próximo vencimiento.");
+    if (!diaCorteAbono || Number(diaCorteAbono) < 1 || Number(diaCorteAbono) > 28) return alert("Elegí un día de corte entre 1 y 28.");
+    if (vencimientoAbono < inicioAbono) return alert("El vencimiento no puede ser anterior al inicio.");
+
+    const plan = planesCatalogo.find(p => p.id === planSeleccionadoId);
+    const variante = variantesCatalogo.find(v => v.id === varianteSeleccionadaId);
+    if (!plan || !variante) return alert("No pude encontrar el plan o la modalidad seleccionada.");
+
+    setGuardandoContratoAbono(true);
+    try {
+      if (abonoEmpresaActual?.id) {
+        const { error: cerrarError } = await supabase
+          .from("empresa_abonos")
+          .update({ activo: false, finalizado_at: new Date().toISOString() })
+          .eq("id", abonoEmpresaActual.id);
+        if (cerrarError) throw cerrarError;
+      }
+
+      const payload = {
+        empresa_id: empresaDB.id,
+        plan_id: plan.id,
+        variante_id: variante.id,
+        plan_nombre: plan.nombre,
+        modalidad: variante.modalidad,
+        meses: Number(variante.meses) || 1,
+        precio_catalogo: Number(variante.precio) || 0,
+        precio_acordado: Number(precioAcordado) || 0,
+        moneda: monedaAcordada,
+        fecha_inicio: inicioAbono,
+        proximo_vencimiento: vencimientoAbono,
+        cupo_preventistas: Number(cupoAbono) || 0,
+        dia_corte: Number(diaCorteAbono),
+        notas: notasContratoAbono.trim() || null,
+        activo: true
+      };
+      const { data, error } = await supabase.from("empresa_abonos").insert([payload]).select().single();
+      if (error) throw error;
+
+      const { error: empresaError } = await supabase.from("empresas").update({
+        cupo_preventistas: Number(cupoAbono) || 0,
+        moneda: monedaAcordada,
+        tarifa_pactada: Number(precioAcordado) || 0,
+        modelo_cobro: "plana",
+        abonado_hasta: vencimientoAbono,
+        dia_corte: Number(diaCorteAbono)
+      }).eq("id", empresaDB.id);
+      if (empresaError) throw empresaError;
+
+      setAbonoEmpresaActual(data);
+      setEditandoContratoAbono(false);
+      setMontoPago(String(Number(precioAcordado) || 0));
+      setMonedaPago(monedaAcordada);
+      await cargarDatos();
+      alert("✅ Abono contratado guardado. El precio acordado quedó congelado para esta empresa.");
+    } catch (err) {
+      alert("Error al guardar el abono: " + (err.message || "Error desconocido"));
+    } finally {
+      setGuardandoContratoAbono(false);
+    }
   };
 
   
@@ -1144,6 +1254,114 @@ export default function AdminClientes() {
                 </div>
               );
             })()}
+
+            <div style={{ backgroundColor: "#111827", border: "1px solid #475569", borderRadius: "12px", padding: "14px", marginBottom: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ color: "#a78bfa", fontSize: "11px", fontWeight: "900" }}>ABONO CONTRATADO</div>
+                  {abonoEmpresaActual && !editandoContratoAbono ? (
+                    <>
+                      <div style={{ color: "#fff", fontWeight: "900", marginTop: "4px" }}>
+                        {abonoEmpresaActual.plan_nombre} · <span style={{ textTransform: "capitalize" }}>{abonoEmpresaActual.modalidad}</span>
+                      </div>
+                      <div style={{ color: "#cbd5e1", fontSize: "12px", marginTop: "3px" }}>
+                        {abonoEmpresaActual.moneda} ${Number(abonoEmpresaActual.precio_acordado || 0).toLocaleString("es-AR")} · {abonoEmpresaActual.cupo_preventistas || 0} preventistas
+                      </div>
+                      <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "3px" }}>
+                        Vigente desde {abonoEmpresaActual.fecha_inicio || "—"} · Día de corte {abonoEmpresaActual.dia_corte || "—"} · próximo vencimiento {abonoEmpresaActual.proximo_vencimiento || "—"}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ color: "#94a3b8", fontSize: "12px", marginTop: "4px" }}>
+                      Elegí del catálogo qué plan contrató esta empresa. El precio acordado quedará guardado aunque después cambie el catálogo.
+                    </div>
+                  )}
+                </div>
+                {abonoEmpresaActual && !editandoContratoAbono && (
+                  <button type="button" onClick={() => setEditandoContratoAbono(true)} style={{ backgroundColor: "#7c3aed", color: "#fff", border: "none", padding: "8px 12px", borderRadius: "7px", cursor: "pointer", fontWeight: "800" }}>
+                    ✏️ Modificar abono
+                  </button>
+                )}
+              </div>
+
+              {editandoContratoAbono && (
+                <div style={{ marginTop: "14px", borderTop: "1px solid #334155", paddingTop: "14px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: "10px" }}>
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Plan
+                      <select value={planSeleccionadoId} onChange={(e) => {
+                        setPlanSeleccionadoId(e.target.value);
+                        setVarianteSeleccionadaId("");
+                        setPrecioAcordado("");
+                      }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="">Elegir plan...</option>
+                        {planesCatalogo.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Modalidad
+                      <select value={varianteSeleccionadaId} disabled={!planSeleccionadoId} onChange={(e) => {
+                        const id = e.target.value;
+                        setVarianteSeleccionadaId(id);
+                        const v = variantesCatalogo.find(x => x.id === id);
+                        if (v) {
+                          setPrecioAcordado(String(v.precio ?? ""));
+                          setMonedaAcordada(v.moneda || "ARS");
+                        }
+                      }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="">Elegir modalidad...</option>
+                        {variantesCatalogo.filter(v => v.plan_id === planSeleccionadoId).map(v => (
+                          <option key={v.id} value={v.id}>
+                            {String(v.modalidad || "").toUpperCase()} · {v.moneda} ${Number(v.precio || 0).toLocaleString("es-AR")}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Precio acordado
+                      <input type="number" min="0" step="any" value={precioAcordado} onChange={(e) => setPrecioAcordado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Moneda
+                      <select value={monedaAcordada} onChange={(e) => setMonedaAcordada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="ARS">ARS</option><option value="USD">USD</option><option value="USDT">USDT</option><option value="BCH">BCH</option>
+                      </select>
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Fecha de inicio
+                      <input type="date" value={inicioAbono} onChange={(e) => setInicioAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Próximo vencimiento
+                      <input type="date" value={vencimientoAbono} onChange={(e) => setVencimientoAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Día de corte
+                      <select value={diaCorteAbono} onChange={(e) => setDiaCorteAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="">Elegir día...</option>
+                        {Array.from({ length: 28 }, (_, i) => i + 1).map(d => <option key={d} value={d}>Día {d}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de preventistas
+                      <input type="number" min="0" value={cupoAbono} onChange={(e) => setCupoAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                    </label>
+                  </div>
+
+                  <label style={{ display: "block", color: "#94a3b8", fontSize: "12px", fontWeight: "700", marginTop: "10px" }}>Notas del acuerdo
+                    <textarea rows={2} value={notasContratoAbono} onChange={(e) => setNotasContratoAbono(e.target.value)} placeholder="Ej. precio especial primer año..." style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", resize: "vertical" }} />
+                  </label>
+
+                  <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "10px", flexWrap: "wrap" }}>
+                    {abonoEmpresaActual && <button type="button" onClick={() => setEditandoContratoAbono(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: "pointer" }}>Cancelar</button>}
+                    <button type="button" disabled={guardandoContratoAbono} onClick={guardarContratoAbono} style={{ backgroundColor: guardandoContratoAbono ? "#475569" : "#7c3aed", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: guardandoContratoAbono ? "not-allowed" : "pointer", fontWeight: "900" }}>
+                      {guardandoContratoAbono ? "Guardando..." : "💾 Guardar abono contratado"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ margin: "18px 0 10px", color: "#34d399", fontSize: "12px", fontWeight: "900" }}>💰 REGISTRAR COBRO / MOVIMIENTO</div>
 
             <form onSubmit={guardarPago}>
               <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Tipo de operación</label>

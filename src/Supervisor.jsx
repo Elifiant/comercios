@@ -572,12 +572,16 @@ const reactivarComercio = async (comercio) => {
   };
 
   useEffect(() => {
-    if (!perfilSupervisor?.empresa_id) return;
+    if (!perfilSupervisor?.empresa_id || seccionActiva !== "stock") return;
     cargarCatalogoProductosStock();
     cargarStockActualEmpresa();
-    const timerStockActual = setInterval(cargarStockActualEmpresa, 5000);
-    return () => clearInterval(timerStockActual);
-  }, [perfilSupervisor?.empresa_id]);
+
+    const alVolverStock = () => {
+      if (document.visibilityState === "visible") cargarStockActualEmpresa();
+    };
+    document.addEventListener("visibilitychange", alVolverStock);
+    return () => document.removeEventListener("visibilitychange", alVolverStock);
+  }, [perfilSupervisor?.empresa_id, seccionActiva]);
 
   const textoProductoStock = (p) => {
     if (!p) return "";
@@ -1165,145 +1169,158 @@ const reactivarComercio = async (comercio) => {
     }
   }, [seccionActiva, perfilSupervisor?.empresa_id]);
 
-    // 🔄 Mantener actualizada la actividad de los preventistas
-useEffect(() => {
-  if (!perfilSupervisor?.empresa_id) return;
+    // 🚦 EGRESS V2
+    // Solo Monitoreo/Planificador mantienen refrescos automáticos.
+    // En Clientes, Stock, Listas, etc. estas consultas quedan detenidas.
+    const supervisorEnVivo =
+      seccionActiva === "monitoreo" || seccionActiva === "planificador";
 
-  const actualizarPerfiles = async () => {
-    
-    const { data, error } = await supabase
-      .from("perfiles")
-      .select(
-        "id, nombre, email, empresa, empresa_id, rol, activo, latitud, longitud, ultima_posicion_at, ultima_conexion, activo_hoy"
-      )
-      .eq("empresa_id", perfilSupervisor.empresa_id);
+    // 🚗 GPS / actividad de preventistas: liviano y rápido.
+    useEffect(() => {
+      if (!perfilSupervisor?.empresa_id || !supervisorEnVivo) return;
 
-    if (error) {
-      console.error("Error actualizando actividad de preventistas:", error);
-      return;
-    }
+      const actualizarPerfiles = async () => {
+        if (document.visibilityState !== "visible") return;
 
-    setPerfiles(data || []);
-  };
+        const { data, error } = await supabase
+          .from("perfiles")
+          .select("id,nombre,empresa_id,rol,activo,latitud,longitud,ultima_posicion_at,ultima_conexion,activo_hoy")
+          .eq("empresa_id", perfilSupervisor.empresa_id);
 
-  actualizarPerfiles();
+        if (error) {
+          console.error("Error actualizando actividad de preventistas:", error);
+          return;
+        }
+        setPerfiles(data || []);
+      };
 
-  const timer = setInterval(actualizarPerfiles, 5000);
+      actualizarPerfiles();
+      const timer = setInterval(actualizarPerfiles, 10000);
+      return () => clearInterval(timer);
+    }, [perfilSupervisor?.empresa_id, supervisorEnVivo]);
 
-  return () => clearInterval(timer);
-}, [perfilSupervisor?.empresa_id]);
+    // 🏪 Comercios/capturas: solo en la vista operativa.
+    // Ya NO hacemos select("*") cada minuto: evitamos traer campos pesados/audios Base64.
+    useEffect(() => {
+      if (!perfilSupervisor?.empresa_id || !supervisorEnVivo) return;
 
-// 🏪 Mantener comercios/capturas sincronizados con Supabase.
-// Esto hace que altas, ediciones y eliminaciones hechas por el preventista
-// aparezcan en el Supervisor sin tener que refrescar la página.
-useEffect(() => {
-  if (!perfilSupervisor?.empresa_id) return;
+      let cancelado = false;
 
-  let cancelado = false;
+      const actualizarComerciosLiviano = async () => {
+        if (document.visibilityState !== "visible") return;
 
-  const actualizarComercios = async () => {
-    const { data, error } = await supabase
-      .from("comercios")
-      .select("*")
-      .eq("empresa_id", perfilSupervisor.empresa_id)
-      .order("id", { ascending: false });
+        const { data, error } = await supabase
+          .from("comercios")
+          .select("id,empresa_id,nombre,direccion,rubro,preventista,dia_visita,latitud,longitud,created_at,fecha_registro,fecha,no_visitar,estado_alta,orden_visita")
+          .eq("empresa_id", perfilSupervisor.empresa_id)
+          .order("id", { ascending: false });
 
-    if (error) {
-      console.error("Error actualizando comercios/capturas:", error);
-      return;
-    }
+        if (error) {
+          console.error("Error actualizando comercios/capturas:", error);
+          return;
+        }
 
-    if (!cancelado) setComercios(data || []);
-  };
+        if (!cancelado) {
+          setComercios((anteriores) => {
+            const completos = new Map((anteriores || []).map(c => [String(c.id), c]));
+            return (data || []).map(liviano => ({
+              ...(completos.get(String(liviano.id)) || {}),
+              ...liviano,
+            }));
+          });
+        }
+      };
 
-  // Sincroniza inmediatamente al entrar/cambiar de empresa.
-  actualizarComercios();
+      actualizarComerciosLiviano();
+      const timerComercios = setInterval(actualizarComerciosLiviano, 60000);
 
-  // Refuerzo confiable para Safari/iPhone y para eliminaciones hechas desde otro equipo.
-  const timerComercios = setInterval(actualizarComercios, 3000);
+      const alVolverALaPantalla = () => {
+        if (document.visibilityState === "visible") actualizarComerciosLiviano();
+      };
+      document.addEventListener("visibilitychange", alVolverALaPantalla);
 
-  // Al volver a la pestaña, sincroniza en el acto sin esperar al próximo intervalo.
-  const alVolverALaPantalla = () => {
-    if (document.visibilityState === "visible") actualizarComercios();
-  };
-  document.addEventListener("visibilitychange", alVolverALaPantalla);
+      return () => {
+        cancelado = true;
+        clearInterval(timerComercios);
+        document.removeEventListener("visibilitychange", alVolverALaPantalla);
+      };
+    }, [perfilSupervisor?.empresa_id, supervisorEnVivo]);
 
-  return () => {
-    cancelado = true;
-    clearInterval(timerComercios);
-    document.removeEventListener("visibilitychange", alVolverALaPantalla);
-  };
-}, [perfilSupervisor?.empresa_id]);
+    // 📦 Pedidos activos: solo mientras se usa Monitoreo/Planificador.
+    useEffect(() => {
+      if (!perfilSupervisor?.empresa_id || !supervisorEnVivo) return;
 
-  // 📦 Mantener pedidos activos sincronizados sin refrescar la pantalla
-  useEffect(() => {
-    if (!perfilSupervisor?.empresa_id) return;
+      const actualizar = () => {
+        if (document.visibilityState === "visible") cargarPedidosSupabase();
+      };
+      actualizar();
+      const timerPedidos = setInterval(actualizar, 30000);
+      return () => clearInterval(timerPedidos);
+    }, [perfilSupervisor?.empresa_id, supervisorEnVivo]);
 
-    cargarPedidosSupabase();
-    const timerPedidos = setInterval(cargarPedidosSupabase, 10000);
-    return () => clearInterval(timerPedidos);
-  }, [perfilSupervisor?.empresa_id]);
+    // 📍 Visitas de hoy: solo vista operativa y columnas necesarias.
+    useEffect(() => {
+      if (!perfilSupervisor?.empresa_id || !supervisorEnVivo) return;
 
-  // 📍 Cargar visitas reales de hoy y mantenerlas actualizadas
-  useEffect(() => {
-    if (!perfilSupervisor?.empresa_id) return;
+      const cargarVisitasHoy = async () => {
+        if (document.visibilityState !== "visible") return;
 
-    const cargarVisitasHoy = async () => {
-      const inicioHoy = new Date();
-      inicioHoy.setHours(0, 0, 0, 0);
-      const inicioManana = new Date(inicioHoy);
-      inicioManana.setDate(inicioManana.getDate() + 1);
+        const inicioHoy = new Date();
+        inicioHoy.setHours(0, 0, 0, 0);
+        const inicioManana = new Date(inicioHoy);
+        inicioManana.setDate(inicioManana.getDate() + 1);
 
-      const { data, error } = await supabase
-        .from("visitas")
-        .select("*")
-        .eq("empresa_id", perfilSupervisor.empresa_id)
-        .gte("fecha", inicioHoy.toISOString())
-        .lt("fecha", inicioManana.toISOString())
-        .order("fecha", { ascending: false });
+        const { data, error } = await supabase
+          .from("visitas")
+          .select("id,empresa_id,preventista,comercio_id,comercio_nombre,fecha,hora,resultado,tipo,observacion,observaciones,notas,created_at")
+          .eq("empresa_id", perfilSupervisor.empresa_id)
+          .gte("fecha", inicioHoy.toISOString())
+          .lt("fecha", inicioManana.toISOString())
+          .order("fecha", { ascending: false });
 
-      if (error) {
-        console.error("Error cargando visitas de hoy:", error);
-        return;
-      }
-      setVisitasHoy(data || []);
-    };
+        if (error) {
+          console.error("Error cargando visitas de hoy:", error);
+          return;
+        }
+        setVisitasHoy(data || []);
+      };
 
-    cargarVisitasHoy();
-    const timer = setInterval(cargarVisitasHoy, 15000);
-    return () => clearInterval(timer);
-  }, [perfilSupervisor?.empresa_id]);
+      cargarVisitasHoy();
+      const timer = setInterval(cargarVisitasHoy, 30000);
+      return () => clearInterval(timer);
+    }, [perfilSupervisor?.empresa_id, supervisorEnVivo]);
 
-  // 🧾 NVI de hoy para la cronología del Supervisor.
-  // Incluye activas + Historial/Depósito: una venta no deja de existir por cambiar de etapa.
-  useEffect(() => {
-    if (!perfilSupervisor?.empresa_id) return;
+    // 🧾 NVI de hoy: solo vista operativa y columnas necesarias.
+    useEffect(() => {
+      if (!perfilSupervisor?.empresa_id || !supervisorEnVivo) return;
 
-    const cargarNviHoyActividad = async () => {
-      const inicioHoy = new Date();
-      inicioHoy.setHours(0, 0, 0, 0);
-      const inicioManana = new Date(inicioHoy);
-      inicioManana.setDate(inicioManana.getDate() + 1);
+      const cargarNviHoyActividad = async () => {
+        if (document.visibilityState !== "visible") return;
 
-      const { data, error } = await supabase
-        .from("pedidos")
-        .select("*")
-        .eq("empresa_id", perfilSupervisor.empresa_id)
-        .gte("created_at", inicioHoy.toISOString())
-        .lt("created_at", inicioManana.toISOString())
-        .order("created_at", { ascending: false });
+        const inicioHoy = new Date();
+        inicioHoy.setHours(0, 0, 0, 0);
+        const inicioManana = new Date(inicioHoy);
+        inicioManana.setDate(inicioManana.getDate() + 1);
 
-      if (error) {
-        console.error("Error cargando NVI de hoy para actividad:", error);
-        return;
-      }
-      setNviHoyActividad(data || []);
-    };
+        const { data, error } = await supabase
+          .from("pedidos")
+          .select("id,empresa_id,numero_pedido,preventista,comercio_id,comercio_nombre,total,estado,created_at,fecha")
+          .eq("empresa_id", perfilSupervisor.empresa_id)
+          .gte("created_at", inicioHoy.toISOString())
+          .lt("created_at", inicioManana.toISOString())
+          .order("created_at", { ascending: false });
 
-    cargarNviHoyActividad();
-    const timerNviActividad = setInterval(cargarNviHoyActividad, 10000);
-    return () => clearInterval(timerNviActividad);
-  }, [perfilSupervisor?.empresa_id]);
+        if (error) {
+          console.error("Error cargando NVI de hoy para actividad:", error);
+          return;
+        }
+        setNviHoyActividad(data || []);
+      };
+
+      cargarNviHoyActividad();
+      const timerNviActividad = setInterval(cargarNviHoyActividad, 30000);
+      return () => clearInterval(timerNviActividad);
+    }, [perfilSupervisor?.empresa_id, supervisorEnVivo]);
 
   // 🚫 Cargar solicitudes pendientes de NO VISITAR MÁS
 useEffect(() => {
@@ -3318,15 +3335,9 @@ useEffect(() => {
         </button>
         <button
           onClick={() => window.location.href = "/pedidos?seccion=stock"}
-          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "stock" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "stock" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
-          📥 CARGAR STOCK
-        </button>
-        <button
-          onClick={() => setSeccionActiva("disponibilidad")}
-          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "disponibilidad" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "disponibilidad" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
-        >
-          📦 Disponibilidad
+          📦 STOCK
         </button>
         <button
           onClick={() => setSeccionActiva("clientes")}
