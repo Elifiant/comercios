@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase, supabaseRegistro } from "./supabase";
+import PlanesAbonos from "./PlanesAbonos";
 
 export default function AdminClientes() {
   const [empresas, setEmpresas] = useState([]);
@@ -9,6 +10,7 @@ export default function AdminClientes() {
   const [preventistas, setPreventistas] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [mostrarModalEmpresa, setMostrarModalEmpresa] = useState(false);
+  const [mostrarPlanesAbonos, setMostrarPlanesAbonos] = useState(false);
   
   const [modalResetClave, setModalResetClave] = useState(null); // { usuario, nuevoPass: "" }
   const [modalCambiarEmail, setModalCambiarEmail] = useState(null); // { usuario, nuevoEmail: "" }
@@ -33,6 +35,12 @@ export default function AdminClientes() {
   const [notasEmpresa, setNotasEmpresa] = useState("");
   const [notasAbono, setNotasAbono] = useState("");
   const [partnersDisponibles, setPartnersDisponibles] = useState([]);
+  const [comisionTipo, setComisionTipo] = useState("sin_comision");
+  const [comisionValor, setComisionValor] = useState("");
+  const [comisionDuracion, setComisionDuracion] = useState("sin_limite");
+  const [comisionMeses, setComisionMeses] = useState("");
+  const [comisionHasta, setComisionHasta] = useState("");
+  const [comisionNotas, setComisionNotas] = useState("");
   const [tarifasMap, setTarifasMap] = useState(() => {
     try {
       const guardado = localStorage.getItem("tarifas_empresas");
@@ -241,6 +249,12 @@ export default function AdminClientes() {
     setEmailEmpresa(e.email || "");
     setContactoEmpresa(e.contacto || "");
     setPartnerEmpresa(e.partner || "");
+    setComisionTipo(e.comision_tipo || "sin_comision");
+    setComisionValor(e.comision_valor == null ? "" : String(e.comision_valor));
+    setComisionDuracion(e.comision_duracion || "sin_limite");
+    setComisionMeses(e.comision_meses == null ? "" : String(e.comision_meses));
+    setComisionHasta(e.comision_hasta || "");
+    setComisionNotas(e.comision_notas || "");
     setNotasEmpresa(e.notas || "");
     setMostrarModalEditar(true);
   };
@@ -265,6 +279,12 @@ export default function AdminClientes() {
         email: emailEmpresa.trim() || null,
         contacto: contactoEmpresa.trim() || null,
         partner: partnerEmpresa || null,
+        comision_tipo: partnerEmpresa ? comisionTipo : "sin_comision",
+        comision_valor: partnerEmpresa && comisionTipo !== "sin_comision" ? (Number(comisionValor) || 0) : 0,
+        comision_duracion: partnerEmpresa && comisionTipo !== "sin_comision" ? comisionDuracion : "sin_limite",
+        comision_meses: partnerEmpresa && comisionDuracion === "meses" ? (Number(comisionMeses) || null) : null,
+        comision_hasta: partnerEmpresa && comisionDuracion === "hasta_fecha" ? (comisionHasta || null) : null,
+        comision_notas: partnerEmpresa ? (comisionNotas.trim() || null) : null,
         notas: notasEmpresa.trim() || null
       };
       const { error } = await supabase.from("empresas").update(cambios).eq("id", empresaDB.id);
@@ -402,6 +422,34 @@ export default function AdminClientes() {
           notas: notasAbono.trim() || null
         }]);
         if (error) throw error;
+      }
+
+      // Si esta empresa tiene Partner y acuerdo vigente, el cobro real genera una comisión histórica.
+      if (!esBonificado && Number(montoPago) > 0 && empresaDB.partner && empresaDB.comision_tipo && empresaDB.comision_tipo !== "sin_comision") {
+        const partnersGuardados = (() => { try { return JSON.parse(localStorage.getItem("rutacomercio_partners_v1") || "[]"); } catch { return []; } })();
+        const partner = partnersGuardados.find(p => p?.nombre === empresaDB.partner);
+        let acuerdoVigente = true;
+        if (empresaDB.comision_duracion === "hasta_fecha" && empresaDB.comision_hasta) {
+          acuerdoVigente = new Date().toISOString().slice(0,10) <= empresaDB.comision_hasta;
+        }
+        if (acuerdoVigente && empresaDB.comision_duracion === "meses" && Number(empresaDB.comision_meses) > 0) {
+          const { count } = await supabase.from("partner_comisiones").select("id", { count: "exact", head: true }).eq("empresa_id", empresaDB.id).eq("partner_nombre", empresaDB.partner);
+          acuerdoVigente = Number(count || 0) < Number(empresaDB.comision_meses);
+        }
+        if (acuerdoVigente) {
+          const base = Number(montoPago) || 0;
+          const valorAcuerdo = Number(empresaDB.comision_valor) || 0;
+          const importeComision = empresaDB.comision_tipo === "porcentaje" ? base * valorAcuerdo / 100 : valorAcuerdo;
+          if (importeComision > 0) {
+            const { error: errorComision } = await supabase.from("partner_comisiones").insert([{
+              partner_id: partner?.id || null, partner_nombre: empresaDB.partner, empresa_id: empresaDB.id, empresa: empresaPago,
+              fecha_generada: new Date().toISOString(), moneda: monedaPago, cobro_empresa: base,
+              tipo_comision: empresaDB.comision_tipo, valor_acuerdo: valorAcuerdo, importe_comision: importeComision,
+              estado: "pendiente", notas_acuerdo: empresaDB.comision_notas || null
+            }]);
+            if (errorComision) throw errorComision;
+          }
+        }
       }
 
       await cargarDatos();
@@ -542,6 +590,9 @@ export default function AdminClientes() {
           <p style={{ margin: "4px 0 0 0", color: "#94a3b8", fontSize: "13px" }}>Control financiero, gestión completa de empresas y bajas de preventistas</p>
         </div>
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setMostrarPlanesAbonos(true)} style={{ backgroundColor: "#7c3aed", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px", boxShadow: "0 4px 12px rgba(124,58,237,0.25)" }}>
+            📋 Planes y Abonos
+          </button>
           <button type="button" onClick={() => { window.location.href = "/promotores"; }} style={{ backgroundColor: "#b45309", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px", boxShadow: "0 4px 12px rgba(180,83,9,0.25)" }}>
             🤝 Promotores
           </button>
@@ -946,6 +997,7 @@ export default function AdminClientes() {
               <label style={{color:"#94a3b8",fontSize:"12px"}}>Email<input type="email" value={emailEmpresa} onChange={e=>setEmailEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
               <label style={{color:"#94a3b8",fontSize:"12px"}}>Responsable / Contacto<input value={contactoEmpresa} onChange={e=>setContactoEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
               <label style={{color:"#fbbf24",fontSize:"12px",fontWeight:"800",gridColumn:"1 / -1"}}>🤝 Partner<select value={partnerEmpresa} onChange={e=>setPartnerEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #b45309",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}}><option value="">Directo / Sin Partner</option>{partnersDisponibles.map(p=><option key={p.id || p.email || p.nombre} value={p.nombre}>{p.nombre}</option>)}</select></label>
+              {partnerEmpresa && (<div style={{gridColumn:"1 / -1",backgroundColor:"#111827",border:"1px solid #b45309",borderRadius:"10px",padding:"12px"}}><div style={{color:"#fbbf24",fontSize:"12px",fontWeight:"900",marginBottom:"10px"}}>💰 Acuerdo de comisión con este Partner</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:"10px"}}><label style={{color:"#94a3b8",fontSize:"12px"}}>Tipo<select value={comisionTipo} onChange={e=>setComisionTipo(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569"}}><option value="sin_comision">Sin comisión</option><option value="porcentaje">Porcentaje</option><option value="fijo">Monto fijo</option></select></label>{comisionTipo!=="sin_comision" && <label style={{color:"#94a3b8",fontSize:"12px"}}>{comisionTipo==="porcentaje"?"Porcentaje (%)":"Monto fijo"}<input type="number" min="0" step="0.01" value={comisionValor} onChange={e=>setComisionValor(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}{comisionTipo!=="sin_comision" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Duración<select value={comisionDuracion} onChange={e=>setComisionDuracion(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569"}}><option value="sin_limite">Sin límite</option><option value="meses">Cantidad de meses/cobros</option><option value="hasta_fecha">Hasta una fecha</option></select></label>}{comisionTipo!=="sin_comision" && comisionDuracion==="meses" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Meses / cobros<input type="number" min="1" value={comisionMeses} onChange={e=>setComisionMeses(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}{comisionTipo!=="sin_comision" && comisionDuracion==="hasta_fecha" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Hasta<input type="date" value={comisionHasta} onChange={e=>setComisionHasta(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}</div><label style={{display:"block",color:"#94a3b8",fontSize:"12px",marginTop:"10px"}}>Notas del acuerdo<textarea rows={2} value={comisionNotas} onChange={e=>setComisionNotas(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label></div>)}
               <label style={{color:"#94a3b8",fontSize:"12px",gridColumn:"1 / -1"}}>Notas de la empresa<textarea value={notasEmpresa} onChange={e=>setNotasEmpresa(e.target.value)} rows={3} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box",resize:"vertical"}} /></label>
             </div>
             <div style={{display:"flex",justifyContent:"flex-end",gap:"8px",marginTop:"20px"}}><button type="button" onClick={()=>setMostrarModalEditar(false)} style={{backgroundColor:"#475569",color:"#fff",border:"none",padding:"10px 18px",borderRadius:"6px",cursor:"pointer"}}>Cancelar</button><button type="button" onClick={guardarEdicionEmpresa} style={{backgroundColor:"#2563eb",color:"#fff",border:"none",padding:"10px 18px",borderRadius:"6px",cursor:"pointer",fontWeight:"bold"}}>Guardar cambios</button></div>
@@ -977,6 +1029,12 @@ export default function AdminClientes() {
                   email: emailEmpresa.trim() || null,
                   contacto: contactoEmpresa.trim() || null,
                   partner: partnerEmpresa.trim() || null,
+                  comision_tipo: partnerEmpresa ? comisionTipo : "sin_comision",
+                  comision_valor: partnerEmpresa && comisionTipo !== "sin_comision" ? (Number(comisionValor) || 0) : 0,
+                  comision_duracion: partnerEmpresa && comisionTipo !== "sin_comision" ? comisionDuracion : "sin_limite",
+                  comision_meses: partnerEmpresa && comisionDuracion === "meses" ? (Number(comisionMeses) || null) : null,
+                  comision_hasta: partnerEmpresa && comisionDuracion === "hasta_fecha" ? (comisionHasta || null) : null,
+                  comision_notas: partnerEmpresa ? (comisionNotas.trim() || null) : null,
                   notas: notasEmpresa.trim() || null,
                   activo: true
                 }]);
@@ -985,6 +1043,7 @@ export default function AdminClientes() {
                 setProvinciaEmpresa(""); setLocalidadEmpresa(""); setDomicilioEmpresa("");
                 setTelefonoEmpresa(""); setWhatsappEmpresa(""); setEmailEmpresa("");
                 setContactoEmpresa(""); setPartnerEmpresa(""); setNotasEmpresa("");
+                setComisionTipo("sin_comision"); setComisionValor(""); setComisionDuracion("sin_limite"); setComisionMeses(""); setComisionHasta(""); setComisionNotas("");
                 setMostrarModalEmpresa(false);
                 await cargarDatos();
                 alert("✅ Empresa creada. Ahora podés configurar su abono desde el botón 💳 Abonos.");
@@ -1005,6 +1064,7 @@ export default function AdminClientes() {
                 <label style={{ color: "#94a3b8", fontSize: "12px" }}>Email<input type="email" value={emailEmpresa} onChange={(e) => setEmailEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
                 <label style={{ color: "#94a3b8", fontSize: "12px" }}>Responsable / Contacto<input type="text" value={contactoEmpresa} onChange={(e) => setContactoEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
                 <label style={{ color: "#fbbf24", fontSize: "12px", fontWeight:"800", gridColumn:"1 / -1" }}>🤝 Partner<select value={partnerEmpresa} onChange={(e) => setPartnerEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #b45309", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}><option value="">Directo / Sin Partner</option>{partnersDisponibles.map(p => <option key={p.id || p.email || p.nombre} value={p.nombre}>{p.nombre}</option>)}</select></label>
+              {partnerEmpresa && (<div style={{gridColumn:"1 / -1",backgroundColor:"#111827",border:"1px solid #b45309",borderRadius:"10px",padding:"12px"}}><div style={{color:"#fbbf24",fontSize:"12px",fontWeight:"900",marginBottom:"10px"}}>💰 Acuerdo de comisión con este Partner</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:"10px"}}><label style={{color:"#94a3b8",fontSize:"12px"}}>Tipo<select value={comisionTipo} onChange={e=>setComisionTipo(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569"}}><option value="sin_comision">Sin comisión</option><option value="porcentaje">Porcentaje</option><option value="fijo">Monto fijo</option></select></label>{comisionTipo!=="sin_comision" && <label style={{color:"#94a3b8",fontSize:"12px"}}>{comisionTipo==="porcentaje"?"Porcentaje (%)":"Monto fijo"}<input type="number" min="0" step="0.01" value={comisionValor} onChange={e=>setComisionValor(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}{comisionTipo!=="sin_comision" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Duración<select value={comisionDuracion} onChange={e=>setComisionDuracion(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569"}}><option value="sin_limite">Sin límite</option><option value="meses">Cantidad de meses/cobros</option><option value="hasta_fecha">Hasta una fecha</option></select></label>}{comisionTipo!=="sin_comision" && comisionDuracion==="meses" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Meses / cobros<input type="number" min="1" value={comisionMeses} onChange={e=>setComisionMeses(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}{comisionTipo!=="sin_comision" && comisionDuracion==="hasta_fecha" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Hasta<input type="date" value={comisionHasta} onChange={e=>setComisionHasta(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}</div><label style={{display:"block",color:"#94a3b8",fontSize:"12px",marginTop:"10px"}}>Notas del acuerdo<textarea rows={2} value={comisionNotas} onChange={e=>setComisionNotas(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label></div>)}
                 <label style={{ color: "#94a3b8", fontSize: "12px", gridColumn:"1 / -1" }}>Notas de la empresa<textarea value={notasEmpresa} onChange={(e) => setNotasEmpresa(e.target.value)} rows={3} placeholder="Observaciones administrativas o comerciales de la empresa..." style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box", resize:"vertical" }}/></label>
               </div>
               <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px", marginTop:"18px" }}><button type="button" onClick={() => setMostrarModalEmpresa(false)} style={{ backgroundColor:"#475569", color:"#fff", border:"none", padding:"10px 18px", borderRadius:"6px", cursor:"pointer" }}>Cancelar</button><button type="submit" style={{ backgroundColor:"#059669", color:"#fff", border:"none", padding:"10px 18px", borderRadius:"6px", cursor:"pointer", fontWeight:"bold" }}>Crear Empresa</button></div>
@@ -1226,6 +1286,10 @@ export default function AdminClientes() {
             </form>
           </div>
         </div>
+      )}
+
+      {mostrarPlanesAbonos && (
+        <PlanesAbonos onClose={() => setMostrarPlanesAbonos(false)} />
       )}
     </main>
   );
