@@ -38,6 +38,10 @@ export default function MonitorPedidos() {
   const [cargandoStockMatriz, setCargandoStockMatriz] = useState(false);
   const [stockManualValores, setStockManualValores] = useState({});
   const [guardandoStockManual, setGuardandoStockManual] = useState(null);
+  // Anchos de la matriz de stock. Se redimensionan con un tirador, estilo Excel.
+  const [stockAnchosColumnas, setStockAnchosColumnas] = useState({
+    codigo: 110, articulo: 260, color: 110, talle: 85, total: 95, ubicacion: 145,
+  });
   const [stockAlertaPorcentajeActiva, setStockAlertaPorcentajeActiva] = useState(false);
   const [stockAlertaPorcentaje, setStockAlertaPorcentaje] = useState(20);
   const [stockAlertaUnidadesActiva, setStockAlertaUnidadesActiva] = useState(false);
@@ -818,6 +822,40 @@ export default function MonitorPedidos() {
     const timerStockActual = setInterval(actualizarSiVisible, 60000);
     return () => clearInterval(timerStockActual);
   }, [empresaIdActual, vistaPedidos]);
+
+  const iniciarResizeStock = (clave, anchoActual, min, max) => (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const inicioX = event.clientX;
+    const inicioAncho = Number(anchoActual || min);
+
+    const mover = (e) => {
+      const nuevo = Math.max(min, Math.min(max, inicioAncho + (e.clientX - inicioX)));
+      setStockAnchosColumnas(prev => ({ ...prev, [clave]: nuevo }));
+    };
+    const soltar = () => {
+      document.removeEventListener("mousemove", mover);
+      document.removeEventListener("mouseup", soltar);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", mover);
+    document.addEventListener("mouseup", soltar);
+  };
+
+  const TiradorColumnaStock = ({ onMouseDown }) => (
+    <span
+      onMouseDown={onMouseDown}
+      aria-hidden="true"
+      style={{
+        position:"absolute", top:0, right:"-4px", width:"8px", height:"100%",
+        cursor:"col-resize", zIndex:20, userSelect:"none"
+      }}
+    />
+  );
 
   const textoProductoStock = (p) => {
     if (!p) return "";
@@ -3551,25 +3589,44 @@ export default function MonitorPedidos() {
                   <div style={{ padding:"18px", color:"#64748b", fontWeight:"800" }}>Cargando stock...</div>
                 ) : (
                   <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "9px", maxWidth:"100%" }}>
-                    <table style={{ width: "max-content", minWidth:"100%", borderCollapse: "separate", borderSpacing:0, fontSize: "11px" }}>
+                    <table style={{ width: "max-content", minWidth:"100%", borderCollapse: "separate", borderSpacing:0, fontSize: "11px", tableLayout:"fixed" }}>
                       <thead>
                         <tr style={{ background: "#f8fafc" }}>
-                          {["Código","Artículo","Color","Talle"].map((h, i) => (
-                            <th key={h} style={{
-                              padding:"10px", textAlign:"left", whiteSpace:"nowrap",
-                              position:"sticky", left:[0,90,310,400][i], zIndex:4,
-                              background:"#f8fafc", borderBottom:"1px solid #e2e8f0",
-                              resize:"horizontal", overflow:"hidden", minWidth:i===1?"160px":"70px", maxWidth:"520px"
-                            }} title="Arrastrá el borde derecho para cambiar el ancho">{h}</th>
-                          ))}
-                          <th title="Arrastrá el borde derecho para cambiar el ancho" style={{ padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", fontSize:"12px", fontWeight:"950", background:"#ecfdf5", color:"#166534", borderBottom:"1px solid #bbf7d0", resize:"horizontal", overflow:"hidden", minWidth:"80px", maxWidth:"300px" }}>📦 TOTAL</th>
+                          {[
+                            ["Código","codigo",stockAnchosColumnas.codigo,80,260],
+                            ["Artículo","articulo",stockAnchosColumnas.articulo,160,520],
+                            ["Color","color",stockAnchosColumnas.color,75,260],
+                            ["Talle","talle",stockAnchosColumnas.talle,65,180],
+                          ].map(([h, clave, ancho, min, max], i) => {
+                            const lefts = [
+                              0,
+                              stockAnchosColumnas.codigo,
+                              stockAnchosColumnas.codigo + stockAnchosColumnas.articulo,
+                              stockAnchosColumnas.codigo + stockAnchosColumnas.articulo + stockAnchosColumnas.color,
+                            ];
+                            return (
+                              <th key={clave} style={{
+                                boxSizing:"border-box", width:ancho, minWidth:ancho, maxWidth:ancho,
+                                padding:"10px", textAlign:"left", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis",
+                                position:"sticky", left:lefts[i], zIndex:6,
+                                background:"#f8fafc", borderBottom:"1px solid #e2e8f0", borderRight:"1px solid #e2e8f0"
+                              }}>
+                                {h}
+                                <TiradorColumnaStock onMouseDown={iniciarResizeStock(clave, ancho, min, max)} />
+                              </th>
+                            );
+                          })}
+                          <th style={{ boxSizing:"border-box", width:stockAnchosColumnas.total, minWidth:stockAnchosColumnas.total, maxWidth:stockAnchosColumnas.total, padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", fontSize:"12px", fontWeight:"950", background:"#ecfdf5", color:"#166534", borderBottom:"1px solid #bbf7d0", position:"relative", overflow:"hidden" }}>
+                            📦 TOTAL
+                            <TiradorColumnaStock onMouseDown={iniciarResizeStock("total", stockAnchosColumnas.total, 80, 220)} />
+                          </th>
                           {stockMatrizDepositos.map(d => (
-                            <th key={`dep-${d.id}`} title="Arrastrá el borde derecho para cambiar el ancho" style={{ padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", background:"#eff6ff", color:"#1d4ed8", borderBottom:"1px solid #bfdbfe", resize:"horizontal", overflow:"hidden", minWidth:"120px", maxWidth:"420px" }}>
+                            <th key={`dep-${d.id}`} style={{ boxSizing:"border-box", width:stockAnchosColumnas.ubicacion, minWidth:stockAnchosColumnas.ubicacion, maxWidth:stockAnchosColumnas.ubicacion, padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", background:"#eff6ff", color:"#1d4ed8", borderBottom:"1px solid #bfdbfe", overflow:"hidden", textOverflow:"ellipsis" }}>
                               🏭 {d.nombre}{d.es_principal ? " ⭐" : ""}
                             </th>
                           ))}
                           {stockMatrizVendedores.map(v => (
-                            <th key={`vend-${v.id}`} title="Arrastrá el borde derecho para cambiar el ancho" style={{ padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", background:"#fff7ed", color:"#9a3412", borderBottom:"1px solid #fed7aa", resize:"horizontal", overflow:"hidden", minWidth:"120px", maxWidth:"420px" }}>
+                            <th key={`vend-${v.id}`} style={{ boxSizing:"border-box", width:stockAnchosColumnas.ubicacion, minWidth:stockAnchosColumnas.ubicacion, maxWidth:stockAnchosColumnas.ubicacion, padding:"10px 14px", textAlign:"right", whiteSpace:"nowrap", background:"#fff7ed", color:"#9a3412", borderBottom:"1px solid #fed7aa", overflow:"hidden", textOverflow:"ellipsis" }}>
                               👤 {v.nombre}
                             </th>
                           ))}
@@ -3604,18 +3661,18 @@ export default function MonitorPedidos() {
                           const stickyBase = { position:"sticky", zIndex:2, background:"#fff", borderTop:"1px solid #f1f5f9" };
                           return (
                             <tr key={f.id || idx}>
-                              <td style={{ ...stickyBase, left:0, padding:"9px", minWidth:"90px", fontWeight:"900", whiteSpace:"nowrap" }}>{p.codigo_cliente || f.codigo_archivo || "—"}</td>
-                              <td style={{ ...stickyBase, left:90, padding:"9px", minWidth:"220px", fontWeight:"800", whiteSpace:"nowrap" }}>{p.nombre || f.descripcion_archivo || "Artículo"}</td>
-                              <td style={{ ...stickyBase, left:310, padding:"9px", minWidth:"90px", whiteSpace:"nowrap" }}>{f.color || "—"}</td>
-                              <td style={{ ...stickyBase, left:400, padding:"9px", minWidth:"70px", whiteSpace:"nowrap" }}>{f.talle || "—"}</td>
-                              <td style={{ padding:"9px 14px", textAlign:"right", fontWeight:"950", fontSize:"12px", background:"#f0fdf4", color: total <= 0 ? "#dc2626" : "#166534", borderTop:"1px solid #dcfce7" }}>{total.toLocaleString("es-AR")}</td>
+                              <td style={{ ...stickyBase, boxSizing:"border-box", left:0, width:stockAnchosColumnas.codigo, minWidth:stockAnchosColumnas.codigo, maxWidth:stockAnchosColumnas.codigo, padding:"9px", fontWeight:"900", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", borderRight:"1px solid #f1f5f9" }}>{p.codigo_cliente || f.codigo_archivo || "—"}</td>
+                              <td style={{ ...stickyBase, boxSizing:"border-box", left:stockAnchosColumnas.codigo, width:stockAnchosColumnas.articulo, minWidth:stockAnchosColumnas.articulo, maxWidth:stockAnchosColumnas.articulo, padding:"9px", fontWeight:"800", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", borderRight:"1px solid #f1f5f9" }}>{p.nombre || f.descripcion_archivo || "Artículo"}</td>
+                              <td style={{ ...stickyBase, boxSizing:"border-box", left:stockAnchosColumnas.codigo + stockAnchosColumnas.articulo, width:stockAnchosColumnas.color, minWidth:stockAnchosColumnas.color, maxWidth:stockAnchosColumnas.color, padding:"9px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", borderRight:"1px solid #f1f5f9" }}>{f.color || "—"}</td>
+                              <td style={{ ...stickyBase, boxSizing:"border-box", left:stockAnchosColumnas.codigo + stockAnchosColumnas.articulo + stockAnchosColumnas.color, width:stockAnchosColumnas.talle, minWidth:stockAnchosColumnas.talle, maxWidth:stockAnchosColumnas.talle, padding:"9px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", borderRight:"1px solid #e2e8f0" }}>{f.talle || "—"}</td>
+                              <td style={{ boxSizing:"border-box", width:stockAnchosColumnas.total, minWidth:stockAnchosColumnas.total, maxWidth:stockAnchosColumnas.total, padding:"9px 14px", textAlign:"right", fontWeight:"950", fontSize:"12px", background:"#f0fdf4", color: total <= 0 ? "#dc2626" : "#166534", borderTop:"1px solid #dcfce7" }}>{total.toLocaleString("es-AR")}</td>
                               {stockMatrizDepositos.map(d => {
                                 const n=cantDep(d.id);
-                                return <td key={`dep-${d.id}`} style={{ padding:"9px 14px", textAlign:"right", fontWeight:n ? "900":"600", color:n ? "#1d4ed8":"#94a3b8", borderTop:"1px solid #f1f5f9" }}>{n.toLocaleString("es-AR")}</td>;
+                                return <td key={`dep-${d.id}`} style={{ boxSizing:"border-box", width:stockAnchosColumnas.ubicacion, minWidth:stockAnchosColumnas.ubicacion, maxWidth:stockAnchosColumnas.ubicacion, padding:"9px 14px", textAlign:"right", fontWeight:n ? "900":"600", color:n ? "#1d4ed8":"#94a3b8", borderTop:"1px solid #f1f5f9" }}>{n.toLocaleString("es-AR")}</td>;
                               })}
                               {stockMatrizVendedores.map(v => {
                                 const n=cantVend(v.id);
-                                return <td key={`vend-${v.id}`} style={{ padding:"9px 14px", textAlign:"right", fontWeight:n ? "900":"600", color:n ? "#9a3412":"#94a3b8", borderTop:"1px solid #f1f5f9" }}>{n.toLocaleString("es-AR")}</td>;
+                                return <td key={`vend-${v.id}`} style={{ boxSizing:"border-box", width:stockAnchosColumnas.ubicacion, minWidth:stockAnchosColumnas.ubicacion, maxWidth:stockAnchosColumnas.ubicacion, padding:"9px 14px", textAlign:"right", fontWeight:n ? "900":"600", color:n ? "#9a3412":"#94a3b8", borderTop:"1px solid #f1f5f9" }}>{n.toLocaleString("es-AR")}</td>;
                               })}
                             </tr>
                           );
@@ -3625,7 +3682,7 @@ export default function MonitorPedidos() {
                   </div>
                 )}
                 <div style={{ marginTop:"9px", fontSize:"10px", color:"#64748b" }}>
-                  Si hay muchos depósitos o vendedores, desplazá la tabla horizontalmente. El depósito principal aparece primero y marcado con ⭐. Podés arrastrar el borde derecho de los encabezados para achicar o agrandar las columnas.
+                  Si hay muchos depósitos o vendedores, desplazá la tabla horizontalmente. El depósito principal aparece primero y marcado con ⭐. Para cambiar el ancho, arrastrá la línea divisoria del encabezado como en Excel. Las columnas principales quedan fijas y nunca se superponen.
                 </div>
               </div>
             </div>
