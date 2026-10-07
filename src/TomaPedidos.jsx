@@ -353,7 +353,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
         subtotal: subtotalBruto,
         descuento_porcentaje: descuentoPorcentaje,
         total: totalFinal,
-        estado: 'Confirmado',
+        estado: 'Pendiente de stock',
         notas: notasPartes.join(' | ')
       };
 
@@ -427,12 +427,34 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
       const { error: errorStock } = await supabase.rpc('sincronizar_stock_pedido', {
         p_pedido_id: pedidoId
       });
-      if (errorStock) {
-        throw new Error(`La NVI se guardó, pero no se pudo sincronizar el stock: ${errorStock.message}`);
+
+      let estadoFinal = 'Pendiente de stock';
+      if (!errorStock) {
+        // Solo una NVI cuyo stock quedó físicamente aplicado es una venta confirmada.
+        const { error: errorConfirmacion } = await supabase
+          .from('pedidos')
+          .update({ estado: 'Confirmado' })
+          .eq('id', pedidoId)
+          .eq('empresa_id', empresaId);
+        if (errorConfirmacion) {
+          throw new Error(`El stock se aplicó, pero no se pudo confirmar la NVI: ${errorConfirmacion.message}`);
+        }
+        estadoFinal = 'Confirmado';
+      } else {
+        // La NVI queda guardada para que el Supervisor decida si continúa desde
+        // otro depósito o la elimina. No se contabiliza como venta mientras tanto.
+        await supabase
+          .from('pedidos')
+          .update({ estado: 'Pendiente de stock', deposito_stock_id: null })
+          .eq('id', pedidoId)
+          .eq('empresa_id', empresaId);
+
+        alert('⚠️ NVI guardada como PENDIENTE DE STOCK. El Supervisor deberá elegir otro depósito o eliminarla. Todavía no suma como venta.');
       }
 
-      // Respaldo local solamente DESPUÉS de que Supabase confirmó cabecera + artículos + stock.
-      const respaldoLocal = { id: pedidoId, ...pedidoPayload, items: itemsPedido };
+      // Respaldo local después de guardar la NVI.
+      const pedidoPayloadFinal = { ...pedidoPayload, estado: estadoFinal };
+      const respaldoLocal = { id: pedidoId, ...pedidoPayloadFinal, items: itemsPedido };
       const historico = JSON.parse(localStorage.getItem('pedidos_guardados') || '[]');
       const historicoActualizado = pedidoExistente?.id
         ? [respaldoLocal, ...historico.filter(p => p.id !== pedidoExistente.id)]

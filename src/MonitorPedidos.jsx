@@ -475,14 +475,21 @@ export default function MonitorPedidos() {
       d.getDate() === h.getDate();
   };
 
+  // Una NVI pendiente de stock existe operativamente, pero todavía NO es venta confirmada.
+  // También inferimos como pendiente las NVI nuevas sin depósito físico aplicado,
+  // para cubrir las que se guardaron antes de incorporar el estado explícito.
+  const esVentaConfirmada = (p) =>
+    p?.estado !== "Pendiente de stock" &&
+    !(!p?.deposito_stock_id && !p?.stock_legacy);
+
   const totalVendidoHoyTodos = pedidos
-    .filter(p => esDeHoy(p.fechaCreacion))
+    .filter(p => esDeHoy(p.fechaCreacion) && esVentaConfirmada(p))
     .reduce((acc, p) => acc + Number(p.total || 0), 0);
 
   const totalVendidoHoyVendedor = filtroPreventista === "Todos"
     ? totalVendidoHoyTodos
     : pedidos
-        .filter(p => p.preventista === filtroPreventista && esDeHoy(p.fechaCreacion))
+        .filter(p => p.preventista === filtroPreventista && esDeHoy(p.fechaCreacion) && esVentaConfirmada(p))
         .reduce((acc, p) => acc + Number(p.total || 0), 0);
 
   const porcentajeVendedorHoy = totalVendidoHoyTodos > 0
@@ -556,9 +563,10 @@ export default function MonitorPedidos() {
     .map(p => ({ ...p, _fechaNvi: p.fechaCreacion ? new Date(p.fechaCreacion) : null }))
     .filter(p => p._fechaNvi && !Number.isNaN(p._fechaNvi.getTime()));
 
-  const nviHoy = pedidosConFecha.filter(p => mismaFecha(p._fechaNvi, hoyMetricas));
-  const nviAyer = pedidosConFecha.filter(p => mismaFecha(p._fechaNvi, ayerMetricas));
+  const nviHoy = pedidosConFecha.filter(p => mismaFecha(p._fechaNvi, hoyMetricas) && esVentaConfirmada(p));
+  const nviAyer = pedidosConFecha.filter(p => mismaFecha(p._fechaNvi, ayerMetricas) && esVentaConfirmada(p));
   const nviMes = pedidosConFecha.filter(p =>
+    esVentaConfirmada(p) &&
     p._fechaNvi.getFullYear() === ahoraMetricas.getFullYear() &&
     p._fechaNvi.getMonth() === ahoraMetricas.getMonth()
   );
@@ -1426,6 +1434,10 @@ export default function MonitorPedidos() {
 
   const marcarPasadoDeposito = async (pedido) => {
     if (!pedido?.id) return;
+    if (pedido.estado === "Pendiente de stock" || (!pedido.deposito_stock_id && !pedido.stock_legacy)) {
+      alert("⚠️ Primero hay que resolver el depósito de salida y aplicar el stock de esta NVI.");
+      return;
+    }
     const confirmar = window.confirm(`¿Confirmás que la NVI #${pedido.numeroVisible} ya fue pasada a depósito?\n\nSeguirá disponible en Historial para consultar, imprimir o reenviar.`);
     if (!confirmar) return;
 
@@ -2128,11 +2140,20 @@ export default function MonitorPedidos() {
         throw errorStock;
       }
 
+      // Recién después de que el stock fue aplicado físicamente, la NVI se convierte
+      // en venta confirmada y empieza a participar de los totales comerciales.
+      const { error: errorConfirmacion } = await supabase
+        .from("pedidos")
+        .update({ estado: "Confirmado" })
+        .eq("id", pedido.id)
+        .eq("empresa_id", pedido.empresa_id || empresaIdActual);
+      if (errorConfirmacion) throw errorConfirmacion;
+
       setPedidos(prev => prev.map(p => String(p.id) === String(pedido.id)
-        ? { ...p, deposito_stock_id: nuevoDepositoId, stock_legacy: false }
+        ? { ...p, deposito_stock_id: nuevoDepositoId, stock_legacy: false, estado: "Confirmado" }
         : p));
       setPedidoActivo(prev => prev && String(prev.id) === String(pedido.id)
-        ? { ...prev, deposito_stock_id: nuevoDepositoId, stock_legacy: false }
+        ? { ...prev, deposito_stock_id: nuevoDepositoId, stock_legacy: false, estado: "Confirmado" }
         : prev);
       setDepositosConStockNvi([]);
 
@@ -4282,6 +4303,7 @@ export default function MonitorPedidos() {
                         ⚠️ ATENCIÓN — STOCK PENDIENTE
                         <div style={{ marginTop: "4px", fontWeight: "700" }}>
                           El depósito principal no pudo cubrir esta NVI. El stock todavía NO fue descontado.
+                          <div style={{ marginTop: "5px", color: "#b91c1c" }}>Esta NVI NO suma a las ventas hasta que el Supervisor confirme otro depósito.</div>
                         </div>
                       </div>
                       {cargandoStockNvi ? (
