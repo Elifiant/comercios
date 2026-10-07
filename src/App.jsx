@@ -678,7 +678,7 @@ useEffect(() => {
 
        let query = supabase
          .from("pedidos")
-         .select("total, fecha")
+         .select("id, total, fecha, estado, deposito_stock_id, stock_pedido_aplicado(deposito_id,cantidad_aplicada)")
          .gte("fecha", inicioHoy.toISOString())
          .lt("fecha", inicioManana.toISOString())
          .eq("preventista", pActivo.nombre);
@@ -692,7 +692,24 @@ useEffect(() => {
        const { data, error } = await query;
        if (error) throw error;
 
-       const totalHoy = (data || []).reduce(
+       // Una NVI guardada pero todavía sin stock físico resuelto NO cuenta como venta.
+       // Misma regla operativa que usa MonitorPedidos: las NVI nuevas necesitan
+       // un depósito físico aplicado; las NVI antiguas (legacy) conservan compatibilidad.
+       const ventasConfirmadas = (data || []).filter((pedido) => {
+         if (pedido?.estado === "Pendiente de stock") return false;
+
+         const aplicaciones = Array.isArray(pedido?.stock_pedido_aplicado)
+           ? pedido.stock_pedido_aplicado
+           : [];
+         const tieneAplicacionFisica = aplicaciones.some((a) =>
+           a?.deposito_id && Number(a?.cantidad_aplicada || 0) > 0
+         );
+         const esLegacy = aplicaciones.some((a) => !a?.deposito_id);
+
+         return tieneAplicacionFisica || esLegacy;
+       });
+
+       const totalHoy = ventasConfirmadas.reduce(
          (acum, pedido) => acum + Number(pedido.total || 0),
          0
        );
