@@ -95,6 +95,9 @@ export default function MonitorPedidos() {
   const [depositoEditDescripcion, setDepositoEditDescripcion] = useState("");
   const [depositoEditActivo, setDepositoEditActivo] = useState(true);
   const [guardandoEdicionDeposito, setGuardandoEdicionDeposito] = useState(false);
+  // 📋 Historial / auditoría de movimientos de stock
+  const [historialStockMovimientos, setHistorialStockMovimientos] = useState([]);
+  const [cargandoHistorialStock, setCargandoHistorialStock] = useState(false);
 
   const cargarPedidosReales = async () => {
     try {
@@ -806,7 +809,7 @@ export default function MonitorPedidos() {
 
   useEffect(() => {
     if (!empresaIdActual) return;
-    const vistasStock = ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas", "StockMovimientos"];
+    const vistasStock = ["StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas", "StockMovimientos", "StockHistorial"];
     if (!vistasStock.includes(vistaPedidos)) return;
 
     cargarCatalogoProductosStock();
@@ -1232,6 +1235,21 @@ export default function MonitorPedidos() {
             }]);
           if (errorInsDep) throw errorInsDep;
         }
+
+        // 📋 Auditoría: el ingreso AUMENTA el stock físico de la empresa.
+        const { error: errorMovIngreso } = await supabase.from("stock_movimientos").insert([{
+          empresa_id: empresaIdActual,
+          producto_id: productoId,
+          variante_id: null,
+          color: color || null,
+          talle: talle || null,
+          cantidad: Number(item.stock),
+          tipo: "ingreso_mercaderia",
+          deposito_destino_id: depositoCarga.id,
+          observacion: `Ingreso Excel · ${archivoStockNombre}`,
+          creado_at: new Date().toISOString(),
+        }]);
+        if (errorMovIngreso) throw errorMovIngreso;
       }
 
       setStockMensaje(
@@ -1249,6 +1267,7 @@ export default function MonitorPedidos() {
 
       await cargarCatalogoProductosStock();
       await Promise.all([cargarStockActualEmpresa(), cargarStockMatriz()]);
+      await cargarHistorialStock();
 
       // No usamos los contadores del RPC para informar esta operación porque el RPC
       // fue creado para la importación anterior y puede devolver 0 aunque el ingreso
@@ -1809,8 +1828,26 @@ export default function MonitorPedidos() {
       const { error } = await ajuste;
       if (error) throw error;
 
+      // 📋 Auditoría: guardamos la DIFERENCIA, no el stock final.
+      // Ej.: 5 → 3 = -2 / 3 → 7 = +4.
+      const diferencia = nuevoStock - anterior;
+      const { error: errorMovAjuste } = await supabase.from("stock_movimientos").insert([{
+        empresa_id: empresaIdActual,
+        producto_id: fila.producto_id,
+        variante_id: fila.variante_id || null,
+        color: fila.color || null,
+        talle: fila.talle || null,
+        cantidad: diferencia,
+        tipo: "ajuste_manual",
+        deposito_destino_id: fila.deposito_id,
+        observacion: `Ajuste manual · ${anterior} → ${nuevoStock}`,
+        creado_at: new Date().toISOString(),
+      }]);
+      if (errorMovAjuste) throw errorMovAjuste;
+
       setStockManualValores(prev => ({ ...prev, [clave]: nuevoStock }));
       await cargarStockMatriz();
+      await cargarHistorialStock();
       setStockMensaje(`✅ Ajuste manual guardado en ${nombreDeposito}: ${nombre} ${variante ? `· ${variante} ` : ""}${anterior} → ${nuevoStock}.`);
     } catch (error) {
       console.error("Error modificando stock manual:", error);
@@ -2064,6 +2101,26 @@ export default function MonitorPedidos() {
     }
   };
 
+  const cargarHistorialStock = async () => {
+    if (!empresaIdActual) return;
+    try {
+      setCargandoHistorialStock(true);
+      const { data, error } = await supabase
+        .from("stock_movimientos")
+        .select("id,empresa_id,producto_id,variante_id,cantidad,tipo,deposito_origen_id,deposito_destino_id,preventista_origen_id,preventista_destino_id,observacion,creado_at,creado_por,color,talle")
+        .eq("empresa_id", empresaIdActual)
+        .order("creado_at", { ascending: false })
+        .limit(300);
+      if (error) throw error;
+      setHistorialStockMovimientos(data || []);
+    } catch (error) {
+      console.error("Error cargando historial de stock:", error);
+      setHistorialStockMovimientos([]);
+    } finally {
+      setCargandoHistorialStock(false);
+    }
+  };
+
   const cargarDatosMovimientosStock = async () => {
     if (!empresaIdActual) return;
     try {
@@ -2078,6 +2135,7 @@ export default function MonitorPedidos() {
         .order("nombre", { ascending: true });
       if (error) throw error;
       setMovPreventistas(data || []);
+      await cargarHistorialStock();
     } catch (error) {
       console.error("Error cargando datos para movimientos:", error);
       alert("❌ No se pudieron cargar los datos para Movimientos: " + (error.message || "Error desconocido"));
@@ -2085,7 +2143,7 @@ export default function MonitorPedidos() {
   };
 
   useEffect(() => {
-    if (vistaPedidos === "StockMovimientos" && empresaIdActual) cargarDatosMovimientosStock();
+    if (["StockMovimientos", "StockHistorial"].includes(vistaPedidos) && empresaIdActual) cargarDatosMovimientosStock();
   }, [vistaPedidos, empresaIdActual]);
 
   useEffect(() => {
@@ -2422,6 +2480,7 @@ export default function MonitorPedidos() {
       setTrasCantidad("1");
       setTrasObservacion("Transferencia");
       await cargarStockMatriz();
+      await cargarHistorialStock();
 
       alert(`✅ ${cantidad} unidad${cantidad === 1 ? "" : "es"} transferida${cantidad === 1 ? "" : "s"} de ${origen.nombre} a ${destino.nombre}.`);
     } catch (error) {
@@ -2529,6 +2588,7 @@ export default function MonitorPedidos() {
       setDevCantidad("1");
       setDevObservacion("Devolución");
       await cargarStockMatriz();
+      await cargarHistorialStock();
 
       alert(`✅ ${cantidad} unidad${cantidad === 1 ? "" : "es"} devuelta${cantidad === 1 ? "" : "s"} por ${vendedor.nombre} a ${deposito.nombre}.`);
     } catch (error) {
@@ -2644,6 +2704,7 @@ export default function MonitorPedidos() {
 
       setMovCantidad("1");
       setMovObservacion("Muestra");
+      await cargarHistorialStock();
       alert(`✅ ${cantidad} unidad${cantidad === 1 ? "" : "es"} asignada${cantidad === 1 ? "" : "s"} a ${vendedor.nombre}.`);
     } catch (error) {
       console.error("Error asignando stock al vendedor:", error);
@@ -2657,6 +2718,7 @@ export default function MonitorPedidos() {
     const opciones = [
       ["StockDepositos", "🏭 Depósitos"],
       ["StockMovimientos", "🔄 Movimientos"],
+      ["StockHistorial", "📋 Historial"],
       ["StockFisico", "📥 Ingreso de mercadería"],
       ["StockVer", "📦 Ver stock"],
       ["StockManual", "✏️ Modificar manualmente"],
@@ -2703,8 +2765,8 @@ export default function MonitorPedidos() {
       <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px", overflowX: "auto", whiteSpace: "nowrap" }}>
         <a href="/supervisor?seccion=monitoreo" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>📡 Monitoreo en Vivo</a>
         <a href="/supervisor?seccion=planificador" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🗓️ Diseñador Hojas de Ruta (Semanal)</a>
-        <button type="button" onClick={() => setVistaPedidos("Activos")} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: !["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: !["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Pedidos</button>
-        <button type="button" onClick={() => { setVistaPedidos("StockDepositos"); setPedidoActivo(null); }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: ["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: ["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Stock</button>
+        <button type="button" onClick={() => setVistaPedidos("Activos")} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: !["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: !["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Pedidos</button>
+        <button type="button" onClick={() => { setVistaPedidos("StockDepositos"); setPedidoActivo(null); }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: ["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: ["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Stock</button>
         <a href="/supervisor?seccion=clientes" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🏪 Clientes</a>
         <a href="/supervisor?seccion=estadoCuenta" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💳 Estado de Cuenta</a>
         <a href="/supervisor?seccion=listasPrecios" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💲 Listas de Precios</a>
@@ -2714,7 +2776,7 @@ export default function MonitorPedidos() {
       <div style={{ width: "100%" }}>
         <main style={{ padding: "16px 24px", maxWidth: "1500px", width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
           {/* Métricas Resumen */}
-          {!["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) && (
+          {!["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: "8px", marginBottom: "12px" }}>
             <div style={{ background: "#fff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
               <div style={{ fontSize: "10px", color: "#64748b", fontWeight: "800" }}>💰 VENDIDO HOY · {fechaCorta(hoyMetricas)}</div>
@@ -2744,7 +2806,7 @@ export default function MonitorPedidos() {
           )}
 
           <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
-            {!["StockDepositos", "StockMovimientos", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) &&
+            {!["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) &&
               ["Activos", "Historial", "HistorialClientes"].map(v => (
                 <button key={v} type="button" onClick={() => { setVistaPedidos(v); setFiltroEstado("Todos"); setPedidoActivo(null); }}
                   style={{ padding: "8px 14px", borderRadius: "8px", border: vistaPedidos === v ? "1px solid #2563eb" : "1px solid #cbd5e1", background: vistaPedidos === v ? "#eff6ff" : "#fff", color: vistaPedidos === v ? "#1d4ed8" : "#475569", fontWeight: "800", cursor: "pointer" }}>
@@ -3109,6 +3171,85 @@ export default function MonitorPedidos() {
                   <div style={{fontSize:"10px",color:"#64748b",marginTop:"8px"}}>
                     La transferencia resta del depósito de origen y suma al de destino. El TOTAL de la empresa no cambia.
                   </div>
+                </div>
+
+              </div>
+            </div>
+          ) : vistaPedidos === "StockHistorial" ? (
+            <div>
+              <StockSubnav />
+              <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"16px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", flexWrap:"wrap", marginBottom:"12px" }}>
+                  <div>
+                    <div style={{ fontSize:"17px", fontWeight:"900", color:"#0f172a" }}>📋 Historial</div>
+                    <div style={{ fontSize:"11px", color:"#64748b", marginTop:"3px" }}>
+                      Registro completo del stock: ingresos, egresos, transferencias, entregas, devoluciones y ajustes manuales.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={cargarHistorialStock}
+                    disabled={cargandoHistorialStock}
+                    style={{padding:"8px 11px",border:"1px solid #cbd5e1",borderRadius:"7px",background:"#fff",color:"#334155",fontSize:"10px",fontWeight:"900",cursor:"pointer"}}
+                  >
+                    {cargandoHistorialStock ? "Actualizando..." : "🔄 Actualizar"}
+                  </button>
+                </div>
+
+                <div style={{ overflowX:"auto", border:"1px solid #e2e8f0", borderRadius:"9px" }}>
+                  <table style={{ width:"100%", minWidth:"1050px", borderCollapse:"collapse", fontSize:"10px" }}>
+                    <thead>
+                      <tr style={{ background:"#f8fafc", color:"#475569" }}>
+                        {["FECHA / HORA","TIPO","ARTÍCULO","VARIANTE","CANT.","ORIGEN","DESTINO","OBSERVACIÓN"].map(h => (
+                          <th key={h} style={{padding:"9px",textAlign:"left",borderBottom:"1px solid #e2e8f0",whiteSpace:"nowrap"}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cargandoHistorialStock ? (
+                        <tr><td colSpan="8" style={{padding:"18px",textAlign:"center",color:"#64748b"}}>Cargando historial...</td></tr>
+                      ) : historialStockMovimientos.length === 0 ? (
+                        <tr><td colSpan="8" style={{padding:"18px",textAlign:"center",color:"#64748b"}}>Todavía no hay registros de stock.</td></tr>
+                      ) : historialStockMovimientos.map(m => {
+                        const producto = productosStockCatalogo.find(p => String(p.id) === String(m.producto_id));
+                        const depOrigen = stockDepositos.find(d => String(d.id) === String(m.deposito_origen_id));
+                        const depDestino = stockDepositos.find(d => String(d.id) === String(m.deposito_destino_id));
+                        const vendOrigen = movPreventistas.find(v => String(v.id) === String(m.preventista_origen_id));
+                        const vendDestino = movPreventistas.find(v => String(v.id) === String(m.preventista_destino_id));
+
+                        const tipos = {
+                          deposito_a_vendedor: "🏭 → 👤 Entrega",
+                          vendedor_a_deposito: "👤 → 🏭 Devolución",
+                          deposito_a_deposito: "🏭 → 🏭 Transferencia",
+                          ingreso_mercaderia: "📥 Ingreso",
+                          ajuste_manual: "🛠️ Ajuste manual",
+                        };
+                        const origen = depOrigen?.nombre || vendOrigen?.nombre || (m.tipo === "ingreso_mercaderia" ? "Ingreso externo" : "—");
+                        const destino = depDestino?.nombre || vendDestino?.nombre || "—";
+                        const fecha = m.creado_at ? new Date(m.creado_at).toLocaleString("es-AR", {day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
+                        const codigo = producto?.codigo_cliente || producto?.codigo_cge || "";
+                        const articulo = [codigo, producto?.nombre || "Artículo"].filter(Boolean).join(" · ");
+                        const variante = [m.color, m.talle ? `Talle ${m.talle}` : ""].filter(Boolean).join(" · ") || "—";
+                        const cant = Number(m.cantidad || 0);
+                        const cantidadVisible = m.tipo === "ajuste_manual"
+                          ? `${cant > 0 ? "+" : ""}${cant.toLocaleString("es-AR")}`
+                          : cant.toLocaleString("es-AR");
+
+                        return (
+                          <tr key={m.id} style={{borderBottom:"1px solid #f1f5f9"}}>
+                            <td style={{padding:"9px",whiteSpace:"nowrap"}}>{fecha}</td>
+                            <td style={{padding:"9px",fontWeight:"900",whiteSpace:"nowrap"}}>{tipos[m.tipo] || m.tipo || "Movimiento"}</td>
+                            <td style={{padding:"9px",fontWeight:"700"}}>{articulo}</td>
+                            <td style={{padding:"9px",whiteSpace:"nowrap"}}>{variante}</td>
+                            <td style={{padding:"9px",fontWeight:"900",textAlign:"right"}}>{cantidadVisible}</td>
+                            <td style={{padding:"9px"}}>{origen}</td>
+                            <td style={{padding:"9px"}}>{destino}</td>
+                            <td style={{padding:"9px",color:"#475569"}}>{m.observacion || "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
