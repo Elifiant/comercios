@@ -475,12 +475,11 @@ export default function MonitorPedidos() {
       d.getDate() === h.getDate();
   };
 
-  // Una NVI pendiente de stock existe operativamente, pero todavía NO es venta confirmada.
-  // También inferimos como pendiente las NVI nuevas sin depósito físico aplicado,
-  // para cubrir las que se guardaron antes de incorporar el estado explícito.
+  // El estado de la NVI es ahora la única fuente de verdad comercial.
+  // Las NVI históricas conservan su estado original y no se reinterpretan por
+  // tener o no deposito_stock_id / registros del sistema anterior.
   const esPendienteStock = (p) =>
-    p?.estado === "Pendiente de stock" ||
-    (!p?.deposito_stock_id && !p?.stock_legacy);
+    normalizarEstado(p?.estado) === "PENDIENTE DE STOCK";
 
   const esVentaConfirmada = (p) => !esPendienteStock(p);
 
@@ -1700,7 +1699,9 @@ export default function MonitorPedidos() {
         .update({
           subtotal: Number(subtotalBruto.toFixed(2)),
           descuento_porcentaje: descuentoPorcentaje,
-          total: Number(totalNuevo.toFixed(2))
+          total: Number(totalNuevo.toFixed(2)),
+          // Mientras se resincroniza el stock, la NVI no debe computar como venta.
+          estado: "Pendiente de stock"
         })
         .eq("id", pedidoActivo.id)
         .eq("empresa_id", pedidoActivo.empresa_id || empresaIdActual);
@@ -1710,7 +1711,24 @@ export default function MonitorPedidos() {
       const { error: stockError } = await supabase.rpc("sincronizar_stock_pedido", {
         p_pedido_id: pedidoActivo.id
       });
-      if (stockError) throw stockError;
+
+      if (stockError) {
+        // Los cambios de la NVI quedan guardados, pero comercialmente permanece
+        // pendiente hasta que el Supervisor pueda resolver el stock.
+        await supabase
+          .from("pedidos")
+          .update({ estado: "Pendiente de stock" })
+          .eq("id", pedidoActivo.id)
+          .eq("empresa_id", pedidoActivo.empresa_id || empresaIdActual);
+        throw stockError;
+      }
+
+      const { error: confirmarError } = await supabase
+        .from("pedidos")
+        .update({ estado: "Confirmado" })
+        .eq("id", pedidoActivo.id)
+        .eq("empresa_id", pedidoActivo.empresa_id || empresaIdActual);
+      if (confirmarError) throw confirmarError;
 
       setEditandoNvi(false);
       setItemsEdicion([]);
