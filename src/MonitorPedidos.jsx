@@ -478,9 +478,11 @@ export default function MonitorPedidos() {
   // Una NVI pendiente de stock existe operativamente, pero todavía NO es venta confirmada.
   // También inferimos como pendiente las NVI nuevas sin depósito físico aplicado,
   // para cubrir las que se guardaron antes de incorporar el estado explícito.
-  const esVentaConfirmada = (p) =>
-    p?.estado !== "Pendiente de stock" &&
-    !(!p?.deposito_stock_id && !p?.stock_legacy);
+  const esPendienteStock = (p) =>
+    p?.estado === "Pendiente de stock" ||
+    (!p?.deposito_stock_id && !p?.stock_legacy);
+
+  const esVentaConfirmada = (p) => !esPendienteStock(p);
 
   const totalVendidoHoyTodos = pedidos
     .filter(p => esDeHoy(p.fechaCreacion) && esVentaConfirmada(p))
@@ -1323,6 +1325,7 @@ export default function MonitorPedidos() {
     switch(estado) {
       case "Ingresado": return { bg: "#dcfce7", text: "#15803d", border: "#bbf7d0" };
       case "En Preparación": return { bg: "#fef3c7", text: "#b45309", border: "#fde68a" };
+      case "Pendiente de stock": return { bg: "#fff7ed", text: "#c2410c", border: "#fdba74" };
       case "Pasado a Depósito":
       case "En Depósito": return { bg: "#e0e7ff", text: "#4338ca", border: "#c7d2fe" };
       default: return { bg: "#f1f5f9", text: "#475569", border: "#e2e8f0" };
@@ -4228,7 +4231,8 @@ export default function MonitorPedidos() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                 {listaFiltrada.map(p => {
-                  const b = getBadgeColor(p.estado);
+                  const estadoVisible = esPendienteStock(p) ? "Pendiente de stock" : p.estado;
+                  const b = getBadgeColor(estadoVisible);
                   const activo = pedidoActivo && pedidoActivo.id === p.id;
                   return (
                     <div key={p.id} onClick={() => setPedidoActivo(p)} style={{ background: activo ? "#eff6ff" : "#fff", border: activo ? "2px solid #2563eb" : "1px solid #dbe3ee", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}>
@@ -4240,7 +4244,7 @@ export default function MonitorPedidos() {
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: "7px", flexShrink: 0 }}>
                             <span style={{ fontSize: "15px", fontWeight: "900", color: "#0f172a" }}>${p.total.toLocaleString("es-AR")}</span>
-                            <span style={{ background: b.bg, color: b.text, border: "1px solid " + b.border, fontSize: "10px", fontWeight: "900", padding: "2px 6px", borderRadius: "8px" }}>{p.estado}</span>
+                            <span style={{ background: b.bg, color: b.text, border: "1px solid " + b.border, fontSize: "10px", fontWeight: "900", padding: "2px 6px", borderRadius: "8px" }}>{estadoVisible === "Pendiente de stock" ? "⚠️ Pendiente de stock" : estadoVisible}</span>
                           </div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "7px", fontSize: "12px", fontWeight: "800", color: "#334155", whiteSpace: "nowrap", overflow: "hidden" }}>
