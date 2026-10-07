@@ -3402,15 +3402,25 @@ export default function MonitorPedidos() {
                           deposito_a_deposito: "🏭 → 🏭 Transferencia",
                           ingreso_mercaderia: "📥 Ingreso",
                           ajuste_manual: "🛠️ Ajuste manual",
+                          venta_nvi: "🧾 Venta NVI",
+                          reversion_nvi: "↩️ Reversión NVI",
                         };
-                        const origen = depOrigen?.nombre || vendOrigen?.nombre || (m.tipo === "ingreso_mercaderia" ? "Ingreso externo" : "—");
-                        const destino = depDestino?.nombre || vendDestino?.nombre || "—";
+                        const origen =
+                          depOrigen?.nombre ||
+                          vendOrigen?.nombre ||
+                          (m.tipo === "ingreso_mercaderia" ? "Ingreso externo" :
+                           m.tipo === "reversion_nvi" ? "Cliente / NVI" : "—");
+                        const destino =
+                          depDestino?.nombre ||
+                          vendDestino?.nombre ||
+                          (m.tipo === "venta_nvi" ? "Cliente / NVI" : "—");
                         const fecha = m.creado_at ? new Date(m.creado_at).toLocaleString("es-AR", {day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
                         const codigo = producto?.codigo_cliente || producto?.codigo_cge || "";
                         const articulo = [codigo, producto?.nombre || "Artículo"].filter(Boolean).join(" · ");
                         const variante = [m.color, m.talle ? `Talle ${m.talle}` : ""].filter(Boolean).join(" · ") || "—";
                         const cant = Number(m.cantidad || 0);
-                        const cantidadVisible = m.tipo === "ajuste_manual"
+                        const cantidadConSigno = ["ajuste_manual", "venta_nvi", "reversion_nvi"].includes(m.tipo);
+                        const cantidadVisible = cantidadConSigno
                           ? `${cant > 0 ? "+" : ""}${cant.toLocaleString("es-AR")}`
                           : cant.toLocaleString("es-AR");
 
