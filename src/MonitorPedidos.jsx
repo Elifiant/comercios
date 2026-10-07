@@ -37,6 +37,8 @@ export default function MonitorPedidos() {
   const [stockMatrizFilasVendedor, setStockMatrizFilasVendedor] = useState([]);
   const [cargandoStockMatriz, setCargandoStockMatriz] = useState(false);
   const [stockManualValores, setStockManualValores] = useState({});
+  const [stockManualMotivos, setStockManualMotivos] = useState({});
+  const [stockManualObservaciones, setStockManualObservaciones] = useState({});
   const [guardandoStockManual, setGuardandoStockManual] = useState(null);
   // Anchos de la matriz de stock. Se redimensionan con un tirador, estilo Excel.
   const [stockAnchosColumnas, setStockAnchosColumnas] = useState({
@@ -1789,6 +1791,14 @@ export default function MonitorPedidos() {
       return;
     }
 
+    const motivo = String(stockManualMotivos[clave] || "").trim();
+    const observacionAjuste = String(stockManualObservaciones[clave] || "").trim();
+
+    if (!motivo) {
+      alert("Elegí el motivo del ajuste.");
+      return;
+    }
+
     const producto = productosStockCatalogo.find(p => String(p.id) === String(fila.producto_id));
     const deposito = stockMatrizDepositos.find(d => String(d.id) === String(fila.deposito_id));
     const nombre = producto?.nombre || "Artículo";
@@ -1796,7 +1806,7 @@ export default function MonitorPedidos() {
     const nombreDeposito = deposito?.nombre || "Depósito";
 
     if (!window.confirm(
-      `¿Confirmás el ajuste manual?\n\n${nombre}${variante ? ` · ${variante}` : ""}\nDepósito: ${nombreDeposito}\nStock anterior: ${anterior}\nStock nuevo: ${nuevoStock}`
+      `¿Confirmás el ajuste manual?\n\n${nombre}${variante ? ` · ${variante}` : ""}\nDepósito: ${nombreDeposito}\nStock anterior: ${anterior}\nStock nuevo: ${nuevoStock}\nMotivo: ${motivo}${observacionAjuste ? `\nObservación: ${observacionAjuste}` : ""}`
     )) return;
 
     setGuardandoStockManual(clave);
@@ -1840,12 +1850,14 @@ export default function MonitorPedidos() {
         cantidad: diferencia,
         tipo: "ajuste_manual",
         deposito_destino_id: fila.deposito_id,
-        observacion: `Ajuste manual · ${anterior} → ${nuevoStock}`,
+        observacion: `Ajuste manual · ${motivo} · ${anterior} → ${nuevoStock}${observacionAjuste ? ` · ${observacionAjuste}` : ""}`,
         creado_at: new Date().toISOString(),
       }]);
       if (errorMovAjuste) throw errorMovAjuste;
 
       setStockManualValores(prev => ({ ...prev, [clave]: nuevoStock }));
+      setStockManualMotivos(prev => ({ ...prev, [clave]: "" }));
+      setStockManualObservaciones(prev => ({ ...prev, [clave]: "" }));
       await cargarStockMatriz();
       await cargarHistorialStock();
       setStockMensaje(`✅ Ajuste manual guardado en ${nombreDeposito}: ${nombre} ${variante ? `· ${variante} ` : ""}${anterior} → ${nuevoStock}.`);
@@ -3841,8 +3853,8 @@ export default function MonitorPedidos() {
                 {stockMensaje && <div style={{ marginBottom:"10px", padding:"9px 11px", background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:"8px", color:"#166534", fontSize:"11px", fontWeight:"800" }}>{stockMensaje}</div>}
                 <input value={busquedaStockActual} onChange={e => setBusquedaStockActual(e.target.value)} placeholder="Buscar código, producto, color, talle o depósito..." style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "12px", marginBottom: "12px" }} />
                 <div style={{ overflowX: "auto", border: "1px solid #e2e8f0", borderRadius: "9px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "820px", fontSize: "11px" }}>
-                    <thead><tr style={{ background: "#f8fafc" }}>{["Código","Artículo / variante","Depósito","Actual","Nuevo stock",""].map((h,i) => <th key={`${h}-${i}`} style={{ padding: "9px", textAlign: "left" }}>{h}</th>)}</tr></thead>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "1180px", fontSize: "11px" }}>
+                    <thead><tr style={{ background: "#f8fafc" }}>{["Código","Artículo / variante","Depósito","Actual","Nuevo stock","Motivo","Observación",""].map((h,i) => <th key={`${h}-${i}`} style={{ padding: "9px", textAlign: "left" }}>{h}</th>)}</tr></thead>
                     <tbody>
                       {(stockMatrizFilasDeposito || []).filter(f => {
                         const p = productosStockCatalogo.find(x => String(x.id) === String(f.producto_id)) || {};
@@ -3860,6 +3872,30 @@ export default function MonitorPedidos() {
                           <td style={{ padding:"9px", fontWeight:"900", color:"#1d4ed8" }}>🏭 {d.nombre || "Depósito"}{d.es_principal ? " ⭐" : ""}</td>
                           <td style={{ padding: "9px", fontWeight: "950", fontSize:"12px" }}>{actual}</td>
                           <td style={{ padding: "9px" }}><input type="number" min="0" value={stockManualValores[clave] ?? actual} onChange={e => setStockManualValores(prev => ({ ...prev, [clave]: e.target.value }))} style={{ width:"100px", padding:"7px", border:"1px solid #cbd5e1", borderRadius:"7px", fontWeight:"800" }} /></td>
+                          <td style={{ padding: "9px" }}>
+                            <select
+                              value={stockManualMotivos[clave] || ""}
+                              onChange={e => setStockManualMotivos(prev => ({ ...prev, [clave]: e.target.value }))}
+                              style={{ width:"155px", padding:"7px", border:"1px solid #cbd5e1", borderRadius:"7px", background:"#fff", fontSize:"10px", fontWeight:"700" }}
+                            >
+                              <option value="">Elegir motivo...</option>
+                              <option value="Ajuste de inventario">Ajuste de inventario</option>
+                              <option value="Rotura">Rotura</option>
+                              <option value="Pérdida / robo">Pérdida / robo</option>
+                              <option value="Mercadería encontrada">Mercadería encontrada</option>
+                              <option value="Otro">Otro</option>
+                            </select>
+                          </td>
+                          <td style={{ padding: "9px" }}>
+                            <input
+                              type="text"
+                              value={stockManualObservaciones[clave] || ""}
+                              onChange={e => setStockManualObservaciones(prev => ({ ...prev, [clave]: e.target.value }))}
+                              placeholder="Opcional..."
+                              maxLength={180}
+                              style={{ width:"210px", padding:"7px", border:"1px solid #cbd5e1", borderRadius:"7px", fontSize:"10px" }}
+                            />
+                          </td>
                           <td style={{ padding: "9px" }}><button type="button" disabled={guardandoStockManual === clave} onClick={() => guardarStockManual(f)} style={{ padding:"8px 11px", border:"none", borderRadius:"7px", background:guardandoStockManual === clave ? "#94a3b8" : "#16a34a", color:"#fff", fontWeight:"900", fontSize:"10px", cursor:"pointer" }}>{guardandoStockManual === clave ? "Guardando..." : "Guardar"}</button></td>
                         </tr>;
                       })}
