@@ -100,6 +100,10 @@ export default function MonitorPedidos() {
   // 📋 Historial / auditoría de movimientos de stock
   const [historialStockMovimientos, setHistorialStockMovimientos] = useState([]);
   const [cargandoHistorialStock, setCargandoHistorialStock] = useState(false);
+  // 📦 Depósito físico asociado a cada NVI
+  const [guardandoDepositoNvi, setGuardandoDepositoNvi] = useState(null);
+  const [depositosConStockNvi, setDepositosConStockNvi] = useState([]);
+  const [cargandoStockNvi, setCargandoStockNvi] = useState(false);
 
   const cargarPedidosReales = async () => {
     try {
@@ -152,8 +156,24 @@ export default function MonitorPedidos() {
         // Los renglones reales están en pedido_items y se relacionan por pedido_id.
         const idsPedidos = data.map(p => p.id).filter(Boolean);
         let itemsPorPedido = {};
+        let stockAplicadoPorPedido = {};
 
         if (idsPedidos.length > 0) {
+          const { data: aplicadoData, error: errorAplicado } = await supabase
+            .from("stock_pedido_aplicado")
+            .select("pedido_id,deposito_id,cantidad_aplicada")
+            .in("pedido_id", idsPedidos);
+
+          if (errorAplicado) {
+            console.error("Error cargando aplicación de stock de las NVI:", errorAplicado);
+          } else {
+            (aplicadoData || []).forEach(a => {
+              const clave = String(a.pedido_id);
+              if (!stockAplicadoPorPedido[clave]) stockAplicadoPorPedido[clave] = [];
+              stockAplicadoPorPedido[clave].push(a);
+            });
+          }
+
           const { data: itemsData, error: errorItems } = await supabase
             .from("pedido_items")
             .select("pedido_id, producto_id, producto_nombre, codigo, color, talle, cantidad, precio_unitario, subtotal")
@@ -240,6 +260,9 @@ export default function MonitorPedidos() {
             total: Number(p.total || p.total_pedido || 0),
             estado: p.estado || "Ingresado",
             pasado_deposito_at: p.pasado_deposito_at || null,
+            deposito_stock_id: p.deposito_stock_id || null,
+            stock_aplicado: stockAplicadoPorPedido[String(p.id)] || [],
+            stock_legacy: (stockAplicadoPorPedido[String(p.id)] || []).some(a => !a.deposito_id),
             items: itemsReales,
             nota: p.notas || p.nota || "Pedido registrado desde app móvil"
           };
@@ -2000,8 +2023,128 @@ export default function MonitorPedidos() {
   };
 
   useEffect(() => {
-    if (["StockDepositos", "StockFisico"].includes(vistaPedidos) && empresaIdActual) cargarDepositosStock();
+    // Los depósitos también se necesitan en Activos/Historial para elegir
+    // de qué depósito físico descuenta cada NVI.
+    if (["StockDepositos", "StockFisico", "Activos", "Historial"].includes(vistaPedidos) && empresaIdActual) cargarDepositosStock();
   }, [vistaPedidos, empresaIdActual]);
+
+  const buscarDepositosConStockParaNvi = async (pedido) => {
+    if (!pedido?.id || !empresaIdActual || pedido.stock_legacy || pedido.deposito_stock_id) {
+      setDepositosConStockNvi([]);
+      return;
+    }
+
+    const items = (pedido.items || []).filter(it => it.producto_id && Number(it.cant || 0) > 0);
+    if (!items.length) {
+      setDepositosConStockNvi([]);
+      return;
+    }
+
+    try {
+      setCargandoStockNvi(true);
+      const productoIds = [...new Set(items.map(it => it.producto_id))];
+      const { data, error } = await supabase
+        .from("stock_por_deposito")
+        .select("deposito_id,producto_id,color,talle,cantidad")
+        .eq("empresa_id", empresaIdActual)
+        .in("producto_id", productoIds);
+      if (error) throw error;
+
+      const norm = v => String(v ?? "").trim().toLowerCase();
+      const requerido = new Map();
+      items.forEach(it => {
+        const k = `${it.producto_id}|${norm(it.color)}|${norm(it.talle)}`;
+        requerido.set(k, (requerido.get(k) || 0) + Number(it.cant || 0));
+      });
+
+      const disponible = new Map();
+      (data || []).forEach(r => {
+        const k = `${r.deposito_id}|${r.producto_id}|${norm(r.color)}|${norm(r.talle)}`;
+        disponible.set(k, (disponible.get(k) || 0) + Number(r.cantidad || 0));
+      });
+
+      const aptos = stockDepositos
+        .filter(d => d.activo !== false)
+        .filter(d => [...requerido.entries()].every(([itemKey, cant]) =>
+          (disponible.get(`${d.id}|${itemKey}`) || 0) >= cant
+        ));
+      setDepositosConStockNvi(aptos);
+    } catch (error) {
+      console.error("Error buscando depósitos con stock para NVI:", error);
+      setDepositosConStockNvi([]);
+    } finally {
+      setCargandoStockNvi(false);
+    }
+  };
+
+  useEffect(() => {
+    if (pedidoActivo && !pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy && stockDepositos.length) {
+      buscarDepositosConStockParaNvi(pedidoActivo);
+    } else {
+      setDepositosConStockNvi([]);
+    }
+  }, [pedidoActivo?.id, pedidoActivo?.deposito_stock_id, pedidoActivo?.stock_legacy, stockDepositos]);
+
+  const cambiarDepositoNvi = async (pedido, nuevoDepositoId) => {
+    if (!pedido?.id || !nuevoDepositoId || guardandoDepositoNvi) return;
+
+    const depositoAnteriorId = pedido.deposito_stock_id || null;
+    if (pedido.stock_legacy) {
+      alert("Esta NVI pertenece al sistema anterior de stock y no registra un depósito físico de origen. No se cambiará automáticamente para evitar alterar el stock histórico.");
+      return;
+    }
+    if (depositoAnteriorId && String(depositoAnteriorId) === String(nuevoDepositoId)) return;
+
+    const anterior = stockDepositos.find(d => String(d.id) === String(depositoAnteriorId));
+    const nuevo = stockDepositos.find(d => String(d.id) === String(nuevoDepositoId));
+    if (!nuevo) return;
+
+    const confirmar = window.confirm(
+      depositoAnteriorId
+        ? `¿Cambiar el depósito de salida de la NVI #${pedido.numeroVisible}?\n\n${anterior?.nombre || "Depósito actual"} → ${nuevo.nombre}\n\nRutaComercio devolverá el stock al depósito anterior y descontará la NVI del nuevo depósito.`
+        : `⚠️ El depósito principal no pudo cubrir la NVI #${pedido.numeroVisible}.\n\n¿CONTINUAR LA VENTA y descontar el stock de ${nuevo.nombre}?\n\nSi no querés continuar, cancelá y podés ELIMINAR LA NVI.`
+    );
+    if (!confirmar) return;
+
+    try {
+      setGuardandoDepositoNvi(String(pedido.id));
+
+      const { error: errorPedido } = await supabase
+        .from("pedidos")
+        .update({ deposito_stock_id: nuevoDepositoId })
+        .eq("id", pedido.id)
+        .eq("empresa_id", pedido.empresa_id || empresaIdActual);
+      if (errorPedido) throw errorPedido;
+
+      const { error: errorStock } = await supabase.rpc("sincronizar_stock_pedido", {
+        p_pedido_id: pedido.id
+      });
+      if (errorStock) {
+        await supabase
+          .from("pedidos")
+          .update({ deposito_stock_id: depositoAnteriorId })
+          .eq("id", pedido.id)
+          .eq("empresa_id", pedido.empresa_id || empresaIdActual);
+        throw errorStock;
+      }
+
+      setPedidos(prev => prev.map(p => String(p.id) === String(pedido.id)
+        ? { ...p, deposito_stock_id: nuevoDepositoId, stock_legacy: false }
+        : p));
+      setPedidoActivo(prev => prev && String(prev.id) === String(pedido.id)
+        ? { ...prev, deposito_stock_id: nuevoDepositoId, stock_legacy: false }
+        : prev);
+      setDepositosConStockNvi([]);
+
+      alert(`✓ NVI #${pedido.numeroVisible}: venta confirmada. El stock se descontó de ${nuevo.nombre}.`);
+    } catch (error) {
+      console.error("Error cambiando depósito de la NVI:", error);
+      alert("❌ No se pudo aplicar el stock de la NVI: " + (error.message || "Error desconocido"));
+      await cargarPedidosReales();
+    } finally {
+      setGuardandoDepositoNvi(null);
+    }
+  };
 
   const agregarDepositoStock = async () => {
     if (!empresaIdActual) return;
@@ -4109,6 +4252,69 @@ export default function MonitorPedidos() {
                   <div>📝 <strong>Nota:</strong> <em>"{pedidoActivo.nota}"</em></div>
                 </div>
 
+                <div style={{ marginBottom: "10px", padding: "10px", border: pedidoActivo.stock_legacy ? "1px solid #fde68a" : (!pedidoActivo.deposito_stock_id ? "2px solid #f59e0b" : "1px solid #bfdbfe"), borderRadius: "8px", background: pedidoActivo.stock_legacy ? "#fffbeb" : (!pedidoActivo.deposito_stock_id ? "#fff7ed" : "#eff6ff") }}>
+                  <div style={{ fontSize: "11px", fontWeight: "900", color: !pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy ? "#9a3412" : "#1e40af", marginBottom: "5px" }}>📦 DEPÓSITO DE SALIDA</div>
+                  {pedidoActivo.stock_legacy ? (
+                    <div style={{ fontSize: "11px", color: "#92400e", fontWeight: "700", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "6px", padding: "8px" }}>
+                      ⚠️ NVI anterior al stock físico por depósito. No se reasigna automáticamente para no alterar el histórico.
+                    </div>
+                  ) : pedidoActivo.deposito_stock_id ? (
+                    <>
+                      <select
+                        value={pedidoActivo.deposito_stock_id}
+                        disabled={guardandoDepositoNvi === String(pedidoActivo.id)}
+                        onChange={(e) => cambiarDepositoNvi(pedidoActivo, e.target.value)}
+                        style={{ width: "100%", padding: "9px 10px", borderRadius: "6px", border: "1px solid #93c5fd", background: "#fff", color: "#0f172a", fontSize: "12px", fontWeight: "800", cursor: guardandoDepositoNvi === String(pedidoActivo.id) ? "wait" : "pointer" }}
+                      >
+                        {stockDepositos.filter(d => d.activo !== false).map(d => (
+                          <option key={d.id} value={d.id}>{d.nombre}{d.es_principal ? " ⭐ PRINCIPAL" : ""}</option>
+                        ))}
+                      </select>
+                      <div style={{ marginTop: "5px", fontSize: "10px", color: "#475569" }}>
+                        {guardandoDepositoNvi === String(pedidoActivo.id)
+                          ? "⏳ Moviendo la aplicación de stock..."
+                          : "Stock aplicado. Podés cambiar el depósito; RutaComercio devolverá y descontará automáticamente."}
+                      </div>
+                    </>
+                  ) : (
+                    <div>
+                      <div style={{ padding: "10px", borderRadius: "7px", background: "#ffedd5", border: "1px solid #fb923c", color: "#9a3412", fontSize: "12px", fontWeight: "900", lineHeight: 1.45, marginBottom: "8px" }}>
+                        ⚠️ ATENCIÓN — STOCK PENDIENTE
+                        <div style={{ marginTop: "4px", fontWeight: "700" }}>
+                          El depósito principal no pudo cubrir esta NVI. El stock todavía NO fue descontado.
+                        </div>
+                      </div>
+                      {cargandoStockNvi ? (
+                        <div style={{ fontSize: "11px", fontWeight: "800", color: "#475569" }}>⏳ Buscando stock en otros depósitos...</div>
+                      ) : depositosConStockNvi.length > 0 ? (
+                        <>
+                          <div style={{ fontSize: "11px", fontWeight: "900", color: "#166534", marginBottom: "6px" }}>
+                            ✓ Hay stock suficiente en otro depósito. Elegí de dónde saldrá la mercadería:
+                          </div>
+                          <select
+                            defaultValue=""
+                            disabled={guardandoDepositoNvi === String(pedidoActivo.id)}
+                            onChange={(e) => { if (e.target.value) cambiarDepositoNvi(pedidoActivo, e.target.value); e.target.value = ""; }}
+                            style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "2px solid #22c55e", background: "#fff", color: "#0f172a", fontSize: "12px", fontWeight: "900" }}
+                          >
+                            <option value="">Seleccionar depósito y continuar venta...</option>
+                            {depositosConStockNvi.map(d => (
+                              <option key={d.id} value={d.id}>{d.nombre}{d.es_principal ? " ⭐ PRINCIPAL" : ""}</option>
+                            ))}
+                          </select>
+                          <div style={{ marginTop: "7px", fontSize: "10px", color: "#7c2d12", fontWeight: "800" }}>
+                            El Supervisor decide: continuar descontando de ese depósito o usar 🗑️ ELIMINAR NVI.
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ padding: "8px", borderRadius: "6px", background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: "11px", fontWeight: "800" }}>
+                          ❌ No hay un depósito con stock suficiente para cubrir la NVI completa. Podés eliminarla o reponer stock antes de continuar.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div style={{ fontSize: "11px", fontWeight: "800", color: "#0f172a", marginBottom: "6px" }}>MERCADERÍA ({pedidoActivo.items.length} ítems)</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "12px" }}>
                   {pedidoActivo.items.map((it, idx) => (
@@ -4300,10 +4506,10 @@ export default function MonitorPedidos() {
                   <button
                     type="button"
                     onClick={() => marcarPasadoDeposito(pedidoActivo)}
-                    disabled={procesandoDeposito}
-                    style={{ width: "100%", marginTop: "10px", background: "#16a34a", color: "#fff", border: "none", padding: "11px", borderRadius: "6px", fontSize: "12px", fontWeight: "900", cursor: procesandoDeposito ? "wait" : "pointer" }}
+                    disabled={procesandoDeposito || (!pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy)}
+                    style={{ width: "100%", marginTop: "10px", background: (!pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy) ? "#94a3b8" : "#16a34a", color: "#fff", border: "none", padding: "11px", borderRadius: "6px", fontSize: "12px", fontWeight: "900", cursor: procesandoDeposito ? "wait" : "pointer" }}
                   >
-                    {procesandoDeposito ? "Procesando..." : "✅ PASADO A DEPÓSITO"}
+                    {procesandoDeposito ? "Procesando..." : ((!pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy) ? "⚠️ RESOLVER STOCK ANTES DE PASAR A DEPÓSITO" : "✅ PASADO A DEPÓSITO")}
                   </button>
                 ) : (
                   <div style={{ marginTop: "10px", padding: "9px 10px", borderRadius: "7px", background: "#eef2ff", color: "#3730a3", fontSize: "11px", fontWeight: "700" }}>
