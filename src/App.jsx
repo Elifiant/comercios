@@ -2574,6 +2574,36 @@ if (modoManejo) {
           </div>
         </button>
       </div>
+
+      {/* Salida permanente, fuera del mapa y del botón arrastrable. */}
+      <div style={{
+        flexShrink: 0,
+        position: "relative",
+        zIndex: 1100,
+        backgroundColor: "#111827",
+        borderTop: "1px solid #334155",
+        padding: "10px 12px calc(10px + env(safe-area-inset-bottom, 0px))",
+      }}>
+        <button
+          type="button"
+          onClick={() => setModoManejo(false)}
+          style={{
+            display: "block",
+            width: "100%",
+            minHeight: "54px",
+            backgroundColor: "#334155",
+            color: "#ffffff",
+            border: "2px solid #94a3b8",
+            borderRadius: "12px",
+            fontSize: "16px",
+            fontWeight: "900",
+            cursor: "pointer",
+            touchAction: "manipulation",
+          }}
+        >
+          ⬅ VOLVER AL MODO NORMAL
+        </button>
+      </div>
     </div>
   );
 }
