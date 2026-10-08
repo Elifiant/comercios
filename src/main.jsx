@@ -9,6 +9,8 @@ import AdminClientes from "./AdminClientes";
 import AdminPromotores from "./AdminPromotores";
 import WebComercial from "./WebComercial";
 import MonitorPedidos from "./MonitorPedidos";
+import Despacho from "./Despacho";
+import Repartidor from "./Repartidor";
 import { supabase } from "./supabase";
 
 function EnrutadorSeguro() {
@@ -16,6 +18,7 @@ function EnrutadorSeguro() {
   const ruta = window.location.pathname;
   const [sesion, setSesion] = useState(null);
   const [perfil, setPerfil] = useState(null);
+  const [rolesExtra, setRolesExtra] = useState([]);
   const [cargando, setCargando] = useState(true);
   console.log("🔎 ESTADO:", { cargando, sesion, perfil });
   const [emailLogin, setEmailLogin] = useState("");
@@ -36,6 +39,19 @@ function EnrutadorSeguro() {
         .eq("id", userId)
         .maybeSingle();
       setPerfil(data || null);
+
+      const { data: rolesData, error: rolesError } = await supabase
+        .from("perfiles_roles")
+        .select("rol, activo")
+        .eq("perfil_id", userId)
+        .eq("activo", true);
+
+      if (rolesError) {
+        console.error("Error cargando roles adicionales:", rolesError);
+        setRolesExtra([]);
+      } else {
+        setRolesExtra((rolesData || []).map(r => String(r.rol || "").toLowerCase()));
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -59,6 +75,7 @@ function EnrutadorSeguro() {
         cargarPerfil(session.user.id);
       } else {
         setPerfil(null);
+        setRolesExtra([]);
         setCargando(false);
       }
     });
@@ -160,6 +177,31 @@ if (ruta.startsWith("/promotores")) {
   window.location.replace("/");
   return null;
 }
+  if (ruta.startsWith("/repartos")) {
+    const puedeRepartir = rolesExtra.includes("repartidor");
+
+    if (puedeRepartir) {
+      return <Repartidor sesion={sesion} perfil={perfil} />;
+    }
+
+    window.location.replace("/");
+    return null;
+  }
+
+  if (ruta.startsWith("/despacho")) {
+    const puedeDespacho =
+      rol === "superadmin" ||
+      rol === "supervisor" ||
+      rolesExtra.includes("despacho");
+
+    if (puedeDespacho) {
+      return <Despacho sesion={sesion} perfil={perfil} />;
+    }
+
+    window.location.replace("/");
+    return null;
+  }
+
   if (ruta.startsWith("/pedidos")) return <MonitorPedidos />;
   if (ruta.startsWith("/pagos")) {
     if (typeof PortalPagos !== "undefined") return <PortalPagos />;
@@ -180,6 +222,28 @@ if (ruta.startsWith("/promotores")) {
 
   if (rol === "simplex") {
     return <Simplex sesion={sesion} perfil={perfil} />;
+  }
+
+  // Un usuario puede conservar su rol principal y sumar la función Repartidor.
+  // En la raíz le damos a elegir sin obligarlo a tener dos cuentas.
+  if (rol === "preventista" && rolesExtra.includes("repartidor") && ruta === "/") {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif" }}>
+        <div style={{ width: "100%", maxWidth: "430px", background: "#1e293b", border: "1px solid #334155", borderRadius: "16px", padding: "26px", color: "#fff", textAlign: "center" }}>
+          <img src="/logo.svg" alt="RutaComercio" style={{ width: "150px", margin: "0 auto 14px", display: "block" }} />
+          <h2 style={{ margin: "0 0 6px" }}>Hola, {perfil?.nombre || "usuario"}</h2>
+          <p style={{ margin: "0 0 22px", color: "#94a3b8", fontSize: "13px" }}>Elegí con qué función vas a trabajar.</p>
+          <div style={{ display: "grid", gap: "10px" }}>
+            <button onClick={() => window.location.assign("/ventas")} style={{ minHeight: "58px", border: "none", borderRadius: "10px", background: "#2563eb", color: "#fff", fontWeight: "900", fontSize: "15px", cursor: "pointer" }}>
+              🧑‍💼 VENTAS / PREVENTISTA
+            </button>
+            <button onClick={() => window.location.assign("/repartos")} style={{ minHeight: "58px", border: "none", borderRadius: "10px", background: "#16a34a", color: "#fff", fontWeight: "900", fontSize: "15px", cursor: "pointer" }}>
+              🚚 REPARTOS
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return <App sesion={sesion} perfil={perfil} />;

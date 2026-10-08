@@ -696,7 +696,7 @@ useEffect(() => {
        // confirmación es que el Supervisor ya haya definido el depósito de salida.
        // Las NVI guardadas sin depósito quedan pendientes y NO cuentan como venta.
        const ventasConfirmadas = (data || []).filter((pedido) => {
-         if (pedido?.estado === "Pendiente de stock") return false;
+         if (["pendiente de stock", "anulado", "anulada", "cancelado", "cancelada"].includes(String(pedido?.estado || "").trim().toLowerCase())) return false;
          return Boolean(pedido?.deposito_stock_id);
        });
 
@@ -710,6 +710,125 @@ useEffect(() => {
        setVentasHoy(0);
      }
    };
+   // 🔔 Anulaciones comunicadas al preventista desde Repartos.
+   // Se consultan siempre dentro de la empresa y para el vendedor conectado.
+   const [avisosAnulacion, setAvisosAnulacion] = useState([]);
+   const [avisosLeidos, setAvisosLeidos] = useState([]);
+   const [avisosAbiertos, setAvisosAbiertos] = useState(false);
+    const [serviciosAbiertos, setServiciosAbiertos] = useState(false);
+    const [rutaChatAbierto, setRutaChatAbierto] = useState(false);
+   const claveAvisos = `rutacomercio_anulaciones_leidas_${perfil?.empresa_id || perfilProp?.empresa_id || ""}_${sesion?.user?.id || sesionProp?.user?.id || ""}`;
+
+   useEffect(() => {
+     try { setAvisosLeidos(JSON.parse(localStorage.getItem(claveAvisos) || "[]")); }
+     catch { setAvisosLeidos([]); }
+   }, [claveAvisos]);
+
+   useEffect(() => {
+     const pActivo = perfil || perfilProp;
+     if (!pActivo?.empresa_id || !pActivo?.nombre) return;
+     let cancelado = false;
+     const cargarAvisos = async () => {
+       try {
+         const { data: ventas, error: errorVentas } = await supabase.from("pedidos")
+           .select("id,numero_pedido,comercio_nombre,preventista,total,estado")
+           .eq("empresa_id", pActivo.empresa_id)
+           .eq("preventista", pActivo.nombre)
+           .ilike("estado", "anulado")
+           .order("created_at", { ascending: false })
+           .limit(100);
+         if (errorVentas) throw errorVentas;
+         if (!ventas?.length) { if (!cancelado) setAvisosAnulacion([]); return; }
+         const { data: entregas, error: errorEntregas } = await supabase.from("repartos_entregas")
+           .select("pedido_id,estado,motivo_solicitud_anulacion,decision_anulacion_at")
+           .eq("empresa_id", pActivo.empresa_id)
+           .eq("estado", "anulacion_aprobada")
+           .in("pedido_id", ventas.map(v => v.id));
+         if (errorEntregas) throw errorEntregas;
+         const porPedido = new Map((entregas || []).map(e => [String(e.pedido_id), e]));
+         const avisos = ventas.filter(v => porPedido.has(String(v.id))).map(v => ({
+           ...v, entrega: porPedido.get(String(v.id)), clave: String(v.id)
+         }));
+         if (!cancelado) setAvisosAnulacion(avisos);
+       } catch (error) { console.warn("No se pudieron consultar avisos de anulación:", error); }
+     };
+     cargarAvisos();
+     const intervalo = setInterval(cargarAvisos, 30000);
+     return () => { cancelado = true; clearInterval(intervalo); };
+   }, [perfil?.empresa_id, perfil?.nombre, perfilProp?.empresa_id, perfilProp?.nombre]);
+
+   const marcarAvisosLeidos = () => {
+     const nuevos = [...new Set([...avisosLeidos, ...avisosAnulacion.map(a => a.clave)])];
+     setAvisosLeidos(nuevos);
+     localStorage.setItem(claveAvisos, JSON.stringify(nuevos));
+   };
+   const avisosSinLeer = avisosAnulacion.filter(a => !avisosLeidos.includes(a.clave));
+  // Mensajes operativos persistentes. El servidor limita acceso por empresa y usuario.
+  const [mensajesOperativos, setMensajesOperativos] = useState([]);
+  const [respuestaRutaChat, setRespuestaRutaChat] = useState("");
+  const [enviandoRespuestaRutaChat, setEnviandoRespuestaRutaChat] = useState(false);
+  useEffect(() => {
+    const usuarioId = sesion?.user?.id || sesionProp?.user?.id;
+    const empresaId = perfil?.empresa_id || perfilProp?.empresa_id;
+    if (!usuarioId || !empresaId) return;
+    let activo = true;
+    const cargar = async () => {
+      const { data, error } = await supabase.from('mensajes_operativos')
+        .select('id,contenido,creado_at,leido_at,remitente_id,destinatario_id')
+        .eq('empresa_id', empresaId).or(`destinatario_id.eq.${usuarioId},remitente_id.eq.${usuarioId}`)
+        .order('creado_at', { ascending: false }).limit(100);
+      if (!error && activo) setMensajesOperativos(prev => {
+        const pendientes = prev.filter(m => String(m.id).startsWith('local-') && !(data || []).some(d => d.remitente_id === m.remitente_id && d.contenido === m.contenido && Math.abs(new Date(d.creado_at) - new Date(m.creado_at)) < 60000));
+        return [...(data || []), ...pendientes];
+      });
+      else if (error) console.warn('Mensajes operativos:', error.message);
+    };
+    cargar();
+    const intervalo = setInterval(cargar, 30000);
+    return () => { activo = false; clearInterval(intervalo); };
+  }, [sesion?.user?.id, sesionProp?.user?.id, perfil?.empresa_id, perfilProp?.empresa_id]);
+
+  const leerMensajeOperativo = async (mensaje) => {
+    if (mensaje.leido_at) return;
+    // Solo registramos posición si está disponible; no pedimos permisos nuevos.
+    const lat = Array.isArray(posicionActual) ? Number(posicionActual[0]) : null;
+    const lng = Array.isArray(posicionActual) ? Number(posicionActual[1]) : null;
+    const gpsValido = Number.isFinite(lat) && Number.isFinite(lng);
+    const { error } = await supabase.rpc('leer_mensaje_operativo', {
+      p_mensaje_id: mensaje.id,
+      p_lat: gpsValido ? lat : null,
+      p_lng: gpsValido ? lng : null,
+      // Sin marca de tiempo fiable para la coordenada, no atribuimos hora de lectura al GPS.
+      p_gps_at: null
+    });
+    if (error) { alert('No se pudo marcar como leído: ' + error.message); return; }
+    setMensajesOperativos(prev => prev.map(m => m.id === mensaje.id ? { ...m, leido_at: new Date().toISOString() } : m));
+  };
+  const miIdRutaChat = sesion?.user?.id || sesionProp?.user?.id;
+  const mensajesSinLeer = mensajesOperativos.filter(m => m.destinatario_id === miIdRutaChat && !m.leido_at);
+  const supervisorRutaChatId = [...mensajesOperativos].reverse().find(m => m.remitente_id && m.remitente_id !== miIdRutaChat)?.remitente_id;
+  const enviarRespuestaRutaChat = async () => {
+    const contenido = respuestaRutaChat.trim();
+    if (!contenido || enviandoRespuestaRutaChat) return;
+    if (!supervisorRutaChatId) { alert("Primero necesitás recibir un mensaje del Supervisor para responderle."); return; }
+    setEnviandoRespuestaRutaChat(true);
+    try {
+      const { error } = await supabase.rpc('enviar_mensaje_operativo', {
+        p_destinatario: supervisorRutaChatId, p_contenido: contenido
+      });
+      if (error) throw error;
+      setMensajesOperativos(prev => [...prev, {
+        id: `local-${Date.now()}`, remitente_id: miIdRutaChat,
+        destinatario_id: supervisorRutaChatId, contenido,
+        creado_at: new Date().toISOString(), leido_at: null
+      }]);
+      setRespuestaRutaChat("");
+    } catch (e) {
+      alert("No se pudo enviar la respuesta. Hay que verificar los permisos de RutaChat en Supabase: " + e.message);
+    } finally { setEnviandoRespuestaRutaChat(false); }
+  };
+
+
   const cargarComercios = async (perfilOverride) => {
     try {
       setCargando(true);
@@ -1432,12 +1551,12 @@ obtenerUbicacionFresca()
       try {
         const { data, error } = await supabase
           .from("pedidos")
-          .select("fecha, total")
+          .select("fecha, total, estado")
           .eq("comercio_id", String(comercioSeleccionado.id))
           .order("fecha", { ascending: false });
         if (error) throw error;
         if (cancelado) return;
-        const ventas = data || [];
+        const ventas = (data || []).filter(v => !["anulado", "anulada", "cancelado", "cancelada", "pendiente de stock"].includes(String(v.estado || "").trim().toLowerCase()));
         setResumenComprasCliente({
           cargando: false,
           cantidad: ventas.length,
@@ -3386,50 +3505,19 @@ onChange={(e) =>
             ✕ Salir
           </button>
         </header>
-        <div
-          style={{
-            display: "flex",
-            gap: "8px",
-            margin: "9px 16px 0",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setModoManejo(true)}
-            style={{
-              flex: 1,
-              padding: "11px 6px",
-              backgroundColor: "#f59e0b",
-              color: "#111827",
-              border: "none",
-              borderRadius: "10px",
-              fontSize: "13px",
-              fontWeight: "800",
-              cursor: "pointer",
-            }}
-          >
-            🚗 MODO MANEJO
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"7px",margin:"9px 13px 0"}}>
+          <button type="button" onClick={abrirConsultaPrecios}
+            style={{minWidth:0,minHeight:"49px",padding:"7px 2px",background:"#0369a1",color:"#fff",border:0,borderRadius:"10px",fontSize:"12px",fontWeight:900,cursor:"pointer"}}>
+            🔎 PRECIOS
           </button>
-
-          <button
-            type="button"
-            onClick={abrirConsultaPrecios}
-            style={{
-              flex: 1,
-              padding: "11px 6px",
-              backgroundColor: "#0369a1",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "10px",
-              fontSize: "13px",
-              fontWeight: "900",
-              cursor: "pointer",
-            }}
-          >
-            🔎 CONSULTAR PRECIOS
+          <button type="button" onClick={() => setServiciosAbiertos(v => !v)} aria-expanded={serviciosAbiertos}
+            style={{minWidth:0,minHeight:"49px",padding:"7px 2px",background:"#334155",color:"#fff",border:"1px solid #64748b",borderRadius:"10px",fontSize:"12px",fontWeight:900,cursor:"pointer"}}>
+            ☰ SERVICIOS {avisosSinLeer.length + mensajesSinLeer.length > 0 ? `(${avisosSinLeer.length + mensajesSinLeer.length})` : ""} {serviciosAbiertos ? "▲" : "▼"}
           </button>
         </div>
-        {/* FRANJA DE MÉTRICAS DIARIAS DEL PREVENTISTA */}
+        {serviciosAbiertos && (
+          <div style={{margin:"7px 13px 0",background:"#172033",border:"1px solid #475569",borderRadius:"10px",padding:"9px",display:"grid",gap:"7px"}}>
+            {/* ESTADÍSTICAS DIARIAS: visibles directamente al abrir SERVICIOS */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px", marginTop: "7px" }}>
           <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
             <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Visitas</div>
@@ -3453,6 +3541,47 @@ onChange={(e) =>
           </div>
         </div>
 
+            <button type="button" onClick={() => {setServiciosAbiertos(false);setModoManejo(true);}}
+              style={{textAlign:"left",background:"#f59e0b",color:"#111827",border:0,borderRadius:"8px",padding:"12px",fontWeight:900,cursor:"pointer"}}>🚗 MODO MANEJO</button>
+            <button type="button" onClick={() => {setRutaChatAbierto(v => !v);setAvisosAbiertos(false);}} aria-expanded={rutaChatAbierto}
+              style={{textAlign:"left",background:"#166534",color:"#fff",border:0,borderRadius:"8px",padding:"12px",fontWeight:900,cursor:"pointer"}}>💬 RUTACHAT {mensajesSinLeer.length > 0 ? `(${mensajesSinLeer.length})` : ""} {rutaChatAbierto ? "▲" : "▼"}</button>
+            {rutaChatAbierto && <div style={{background:"#0b141a",color:"#fff",padding:"8px",borderRadius:"9px",border:"1px solid #263744"}}>
+              <div style={{fontSize:"12px",fontWeight:800,color:"#a7f3d0",padding:"2px 4px 7px"}}>💬 RutaChat · Supervisor</div>
+              {mensajesOperativos.length === 0 && <div style={{padding:"10px",fontSize:"12px",color:"#cbd5e1"}}>Todavía no tenés mensajes.</div>}
+              <div style={{display:"flex",flexDirection:"column",gap:"5px",maxHeight:"280px",overflowY:"auto",padding:"3px 2px"}}>
+                {[...mensajesOperativos].reverse().map(m => (
+                  <div key={m.id} style={{alignSelf:m.remitente_id === miIdRutaChat ? "flex-end" : "flex-start",maxWidth:"88%",width:"fit-content",minWidth:"90px",background:m.remitente_id === miIdRutaChat ? "#005c4b" : "#202c33",borderRadius:m.remitente_id === miIdRutaChat ? "10px 3px 10px 10px" : "3px 10px 10px 10px",padding:"6px 8px 5px",boxShadow:"0 1px 2px #0004",overflowWrap:"anywhere"}}>
+                    <div style={{fontSize:"10px",fontWeight:800,color:"#86efac",marginBottom:"2px"}}>{m.remitente_id === miIdRutaChat ? "Vos" : "Supervisor"} {m.destinatario_id === miIdRutaChat && !m.leido_at ? "· Nuevo" : ""}</div>
+                    <div style={{fontSize:"12px",lineHeight:1.35,whiteSpace:"pre-wrap"}}>{m.contenido}</div>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:"7px",marginTop:"2px"}}>
+                      <span style={{fontSize:"9px",color:"#aebac1"}}>{new Date(m.creado_at).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</span>
+                      {m.remitente_id === miIdRutaChat && <span style={{fontSize:"10px",color:"#a7f3d0"}}>{m.leido_at ? "✓✓" : "✓"}</span>}
+                      {m.destinatario_id === miIdRutaChat && !m.leido_at && <button type="button" onClick={() => leerMensajeOperativo(m)} style={{fontSize:"10px",padding:"2px 6px",border:"1px solid #86efac",borderRadius:"5px",background:"transparent",color:"#86efac",fontWeight:700,cursor:"pointer"}}>✓ Leído</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <form onSubmit={e => {e.preventDefault();enviarRespuestaRutaChat();}} style={{display:"flex",gap:"5px",marginTop:"8px"}}>
+                <input aria-label="Responder en RutaChat" value={respuestaRutaChat} onChange={e => setRespuestaRutaChat(e.target.value)} placeholder={supervisorRutaChatId ? "Escribí tu respuesta…" : "Esperando mensaje del Supervisor"} disabled={!supervisorRutaChatId || enviandoRespuestaRutaChat} maxLength={2000} style={{flex:1,minWidth:0,background:"#202c33",color:"white",border:"1px solid #334155",borderRadius:"18px",padding:"8px 10px",fontSize:"12px"}} />
+                <button type="submit" disabled={!supervisorRutaChatId || !respuestaRutaChat.trim() || enviandoRespuestaRutaChat} style={{border:0,borderRadius:"50%",background:"#16a34a",color:"white",width:"34px",height:"34px",cursor:"pointer",opacity:!supervisorRutaChatId || !respuestaRutaChat.trim() ? .5 : 1}} aria-label="Enviar respuesta">➤</button>
+              </form>
+            </div>}
+            <button type="button" onClick={() => {setAvisosAbiertos(v => !v);setRutaChatAbierto(false);}} aria-expanded={avisosAbiertos}
+              style={{textAlign:"left",background:"#78350f",color:"#fde68a",border:"1px solid #d97706",borderRadius:"8px",padding:"12px",fontWeight:900,cursor:"pointer"}}>🔔 AVISOS Y ANULACIONES {avisosSinLeer.length > 0 ? `(${avisosSinLeer.length})` : ""} {avisosAbiertos ? "▲" : "▼"}</button>
+            {avisosAbiertos && <div style={{background:"#451a03",border:"1px solid #f59e0b",borderRadius:"8px",padding:"10px",color:"#fff"}}>
+              {avisosAnulacion.length === 0 && <div style={{fontSize:"12px"}}>No tenés avisos por ahora.</div>}
+              {avisosAnulacion.map(a => <div key={a.clave} style={{borderTop:"1px solid #92400e",padding:"10px 2px",fontSize:"12px"}}>
+                <div style={{fontWeight:900,color:"#fca5a5"}}>🚫 NVI #{String(a.numero_pedido || "").padStart(6,"0")} ANULADA {avisosLeidos.includes(a.clave) ? "" : "· NUEVA"}</div>
+                <div>{a.comercio_nombre || "Comercio"} · ${Number(a.total || 0).toLocaleString("es-AR")}</div>
+                <div>Motivo: {a.entrega?.motivo_solicitud_anulacion || "No informado"}</div>
+                <div style={{color:"#cbd5e1"}}>Autorizada por Supervisor{a.entrega?.decision_anulacion_at ? ` · ${new Date(a.entrega.decision_anulacion_at).toLocaleString("es-AR")}` : ""}</div>
+                <div style={{color:"#fcd34d"}}>No integra las ventas efectivas.</div>
+              </div>)}
+              {avisosSinLeer.length > 0 && <button type="button" onClick={marcarAvisosLeidos}
+                style={{background:"#f59e0b",border:0,borderRadius:"7px",padding:"9px 12px",fontWeight:800,cursor:"pointer"}}>✓ MARCAR COMO LEÍDAS</button>}
+            </div>}
+          </div>
+        )}
         {/* BUSCADOR */}
         <div style={{ marginTop: "7px", position: "relative" }}>
           <input

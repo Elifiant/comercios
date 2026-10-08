@@ -412,7 +412,7 @@ export default function MonitorPedidos() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const esPasadoDeposito = (p) => ["PASADO A DEPOSITO", "EN DEPOSITO"].includes(normalizarEstado(p.estado));
+  const esPasadoDeposito = (p) => ["PASADO A DEPOSITO", "EN DEPOSITO", "ANULADO", "ANULADA", "CANCELADO", "CANCELADA"].includes(normalizarEstado(p.estado));
 
   function normalizarEstado(valor) {
     return String(valor || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -481,7 +481,7 @@ export default function MonitorPedidos() {
   const esPendienteStock = (p) =>
     normalizarEstado(p?.estado) === "PENDIENTE DE STOCK";
 
-  const esVentaConfirmada = (p) => !esPendienteStock(p);
+  const esVentaConfirmada = (p) => !esPendienteStock(p) && !["ANULADO", "ANULADA", "CANCELADO", "CANCELADA"].includes(normalizarEstado(p?.estado));
 
   const totalVendidoHoyTodos = pedidos
     .filter(p => esDeHoy(p.fechaCreacion) && esVentaConfirmada(p))
@@ -1449,7 +1449,7 @@ export default function MonitorPedidos() {
       // Usamos el campo estado que ya existe. No dependemos de columnas nuevas.
       const { error } = await supabase
         .from("pedidos")
-        .update({ estado: "Pasado a Depósito" })
+        .update({ estado: "Pasado a Depósito", pasado_deposito_at: ahora })
         .eq("id", pedido.id);
       if (error) throw error;
 
@@ -1561,10 +1561,31 @@ export default function MonitorPedidos() {
 
       const { data: productos, error: e3 } = await supabase
         .from("productos")
-        .select("id, codigo_cge, nombre, marca, activo")
+        .select("id, codigo_cge, nombre, marca, activo, usa_color, usa_talle")
         .in("id", productoIds);
 
       if (e3) throw e3;
+
+      // La variante se determina por el producto y por su stock físico real,
+      // nunca por una marca concreta.
+      const { data: stockVariantes, error: e4 } = await supabase
+        .from("stock_por_deposito")
+        .select("producto_id,color,talle,cantidad")
+        .eq("empresa_id", empresaId)
+        .in("producto_id", productoIds);
+      if (e4) throw e4;
+
+      const variantesPorProducto = new Map();
+      (stockVariantes || []).forEach(v => {
+        const pid = String(v.producto_id || "");
+        if (!pid) return;
+        const actual = variantesPorProducto.get(pid) || { colores: new Set(), talles: new Set() };
+        const color = String(v.color || "").trim();
+        const talle = String(v.talle || "").trim();
+        if (color) actual.colores.add(color);
+        if (talle) actual.talles.add(talle);
+        variantesPorProducto.set(pid, actual);
+      });
 
       const porId = new Map((productos || []).map(p => [String(p.id), p]));
       const normalizados = (renglones || []).map(r => {
@@ -1575,7 +1596,13 @@ export default function MonitorPedidos() {
           codigo: r.codigo_lista || p.codigo_cge || "",
           nombreBase: r.detalle_en_lista || p.nombre || "Artículo",
           marca: p.marca || "",
-          precioLista: Number(r.precio || 0)
+          precioLista: Number(r.precio || 0),
+          usaColor: p.usa_color === true || (variantesPorProducto.get(String(r.producto_id))?.colores.size || 0) > 0,
+          usaTalle: p.usa_talle === true || (variantesPorProducto.get(String(r.producto_id))?.talles.size || 0) > 0,
+          coloresDisponibles: [...(variantesPorProducto.get(String(r.producto_id))?.colores || [])]
+            .sort((a,b) => a.localeCompare(b, "es", { numeric:true })),
+          tallesDisponibles: [...(variantesPorProducto.get(String(r.producto_id))?.talles || [])]
+            .sort((a,b) => a.localeCompare(b, "es", { numeric:true }))
         };
       }).filter(Boolean);
 
@@ -1595,6 +1622,23 @@ export default function MonitorPedidos() {
     setEditandoNvi(true);
     await cargarCatalogoParaEdicion(pedido);
   };
+
+  // Al cargar el catálogo, completar la metadata de variantes de los renglones
+  // que ya existían en la NVI.
+  useEffect(() => {
+    if (!editandoNvi || !catalogoEdicion.length) return;
+    setItemsEdicion(prev => prev.map(it => {
+      const prod = catalogoEdicion.find(p => String(p.producto_id) === String(it.producto_id));
+      if (!prod) return it;
+      return {
+        ...it,
+        usaColor: prod.usaColor === true,
+        usaTalle: prod.usaTalle === true,
+        coloresDisponibles: prod.coloresDisponibles || [],
+        tallesDisponibles: prod.tallesDisponibles || [],
+      };
+    }));
+  }, [catalogoEdicion, editandoNvi]);
 
   const actualizarItemEdicion = (key, cambios) => {
     setItemsEdicion(prev => prev.map(it => it._key === key ? { ...it, ...cambios } : it));
@@ -1616,7 +1660,11 @@ export default function MonitorPedidos() {
       ajusteTipo: "normal",
       ajustePct: 0,
       color: "",
-      talle: ""
+      talle: "",
+      usaColor: prod.usaColor === true,
+      usaTalle: prod.usaTalle === true,
+      coloresDisponibles: prod.coloresDisponibles || [],
+      tallesDisponibles: prod.tallesDisponibles || []
     }, ...prev]);
     setBusquedaEdicion("");
   };
@@ -1642,12 +1690,12 @@ export default function MonitorPedidos() {
       return;
     }
 
-    const weltIncompletos = itemsEdicion.filter(it => {
-      const esWelt = String(it.codigo || "").toUpperCase().startsWith("WELT") || String(it.marca || "").toUpperCase().includes("WELT");
-      return esWelt && (!String(it.color || "").trim() || !String(it.talle || "").trim());
-    });
-    if (weltIncompletos.length) {
-      alert("Hay artículos WELT sin color o talle.");
+    const variantesIncompletas = itemsEdicion.filter(it =>
+      (it.usaColor === true && !String(it.color || "").trim()) ||
+      (it.usaTalle === true && !String(it.talle || "").trim())
+    );
+    if (variantesIncompletas.length) {
+      alert("Hay artículos con variante incompleta. Elegí el color y/o talle requerido antes de guardar.");
       return;
     }
 
@@ -2959,15 +3007,19 @@ export default function MonitorPedidos() {
         </div>
       </header>
 
-      <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px", overflowX: "auto", whiteSpace: "nowrap" }}>
-        <a href="/supervisor?seccion=monitoreo" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>📡 Monitoreo en Vivo</a>
-        <a href="/supervisor?seccion=planificador" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🗓️ Diseñador Hojas de Ruta (Semanal)</a>
-        <button type="button" onClick={() => setVistaPedidos("Activos")} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: !["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: !["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Pedidos</button>
-        <button type="button" onClick={() => { setVistaPedidos("StockDepositos"); setPedidoActivo(null); }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: ["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: ["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}>📦 Stock</button>
-        <a href="/supervisor?seccion=clientes" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🏪 Clientes</a>
-        <a href="/supervisor?seccion=estadoCuenta" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💳 Estado de Cuenta</a>
-        <a href="/supervisor?seccion=listasPrecios" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>💲 Listas de Precios</a>
-        <a href="/supervisor?seccion=solicitudes" style={{ padding: "12px 0", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "13px", textDecoration: "none" }}>🚫 Solicitudes</a>
+<div style={{ width: "100%", overflowX: "auto" }}>
+      <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 8px", display: "grid", gridTemplateColumns: "repeat(10, minmax(0, 1fr))", alignItems: "stretch", gap: "2px", minWidth: "980px" }}>
+        <a href="/supervisor?seccion=monitoreo" style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>📡 Monitoreo en Vivo</a>
+        <a href="/supervisor?seccion=planificador" style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>🗓️ Diseñador Hojas de Ruta (Semanal)</a>
+        <button type="button" onClick={() => setVistaPedidos("Activos")} style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", borderBottom: !["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: !["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>📦 Pedidos</button>
+        <button type="button" onClick={() => { setVistaPedidos("StockDepositos"); setPedidoActivo(null); }} style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", borderBottom: ["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "2px solid #2563eb" : "2px solid transparent", color: ["StockDepositos", "StockMovimientos", "StockHistorial", "StockFisico", "StockVer", "StockManual", "Disponibilidad", "StockAlertas"].includes(vistaPedidos) ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}>📦 Stock</button>
+        <a href="/supervisor?seccion=clientes" style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>🏪 Clientes</a>
+        <a href="/supervisor?seccion=estadoCuenta" style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>💳 Estado de Cuenta</a>
+        <a href="/supervisor?seccion=listasPrecios" style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>💲 Listas de Precios</a>
+        <a href="/supervisor?seccion=mensajes" style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>📬 Mensajes</a>
+        <a href="/supervisor?seccion=repartos" style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>🚚 Repartos</a>
+        <a href="/supervisor?seccion=solicitudes" style={{ padding: "10px 2px", minHeight: "70px", minWidth: 0, whiteSpace: "normal", textAlign: "center", lineHeight: "1.35", display: "flex", alignItems: "center", justifyContent: "center", borderBottom: "2px solid transparent", color: "#64748b", fontWeight: "700", fontSize: "12px", textDecoration: "none" }}>🚫 Solicitudes</a>
+      </div>
       </div>
 
       <div style={{ width: "100%" }}>
@@ -4259,7 +4311,7 @@ export default function MonitorPedidos() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                 {listaFiltrada.map(p => {
-                  const estadoVisible = esPendienteStock(p) ? "Pendiente de stock" : p.estado;
+                  const estadoVisible = !esVentaConfirmada(p) && !esPendienteStock(p) ? "🚫 ANULADA POR SUPERVISOR" : esPendienteStock(p) ? "Pendiente de stock" : p.estado;
                   const b = getBadgeColor(estadoVisible);
                   const activo = pedidoActivo && pedidoActivo.id === p.id;
                   return (
@@ -4432,7 +4484,8 @@ export default function MonitorPedidos() {
                     )}
 
                     {itemsEdicion.map((it) => {
-                      const esWelt = String(it.codigo || "").toUpperCase().startsWith("WELT") || String(it.marca || "").toUpperCase().includes("WELT");
+                      const usaColor = it.usaColor === true;
+                      const usaTalle = it.usaTalle === true;
                       const calc = calcularItemEdicion(it);
                       return (
                         <div key={it._key} style={{ background: "#fff", border: "1px solid #fed7aa", borderRadius: "7px", padding: "7px", marginBottom: "6px" }}>
@@ -4443,31 +4496,28 @@ export default function MonitorPedidos() {
                             <button type="button" onClick={() => quitarItemEdicion(it._key)} style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontSize: "16px" }}>🗑️</button>
                           </div>
 
-                          <div style={{ display: "grid", gridTemplateColumns: esWelt ? "62px 1fr 64px 78px 52px" : "62px 1fr 78px 52px", gap: "4px", alignItems: "end", marginTop: "6px" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: (usaColor || usaTalle) ? "62px 1fr 64px 78px 52px" : "62px 1fr 78px 52px", gap: "4px", alignItems: "end", marginTop: "6px" }}>
                             <label style={{ fontSize: "9px", color: "#64748b" }}>
                               Cant.
                               <input type="number" min="1" value={it.cant} onChange={(e) => actualizarItemEdicion(it._key, { cant: Math.max(1, Number(e.target.value || 1)) })} style={{ width: "100%", boxSizing: "border-box", padding: "5px 3px" }} />
                             </label>
 
-                            {esWelt && (
+                            {usaColor && (
                               <label style={{ fontSize: "9px", color: "#64748b" }}>
                                 Color
                                 <select value={it.color || ""} onChange={(e) => actualizarItemEdicion(it._key, { color: e.target.value })} style={{ width: "100%", boxSizing: "border-box", padding: "5px 2px" }}>
                                   <option value="">Elegir</option>
-                                  <option value="Negro">Negro</option>
-                                  <option value="Marrón">Marrón</option>
-                                  <option value="Blanco">Blanco</option>
-                                  <option value="Gris Fresno">Gris Fresno</option>
+                                  {(it.coloresDisponibles?.length ? it.coloresDisponibles : ["Negro","Marrón","Blanco","Gris Fresno"]).map(c => <option key={c} value={c}>{c}</option>)}
                                 </select>
                               </label>
                             )}
 
-                            {esWelt && (
+                            {usaTalle && (
                               <label style={{ fontSize: "9px", color: "#64748b" }}>
                                 Talle
                                 <select value={it.talle || ""} onChange={(e) => actualizarItemEdicion(it._key, { talle: e.target.value })} style={{ width: "100%", boxSizing: "border-box", padding: "5px 2px" }}>
                                   <option value="">--</option>
-                                  {Array.from({ length: 18 }, (_, i) => 33 + i).map(t => <option key={t} value={t}>{t}</option>)}
+                                  {(it.tallesDisponibles?.length ? it.tallesDisponibles : Array.from({ length: 18 }, (_, i) => String(33 + i))).map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
                               </label>
                             )}
@@ -4563,7 +4613,7 @@ export default function MonitorPedidos() {
                     disabled={procesandoDeposito || (!pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy)}
                     style={{ width: "100%", marginTop: "10px", background: (!pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy) ? "#94a3b8" : "#16a34a", color: "#fff", border: "none", padding: "11px", borderRadius: "6px", fontSize: "12px", fontWeight: "900", cursor: procesandoDeposito ? "wait" : "pointer" }}
                   >
-                    {procesandoDeposito ? "Procesando..." : ((!pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy) ? "⚠️ RESOLVER STOCK ANTES DE PASAR A DEPÓSITO" : "✅ PASADO A DEPÓSITO")}
+                    {procesandoDeposito ? "Procesando..." : ((!pedidoActivo.deposito_stock_id && !pedidoActivo.stock_legacy) ? "⚠️ RESOLVER STOCK ANTES DE PASAR A DEPÓSITO" : "📦 ENVIAR A DEPÓSITO")}
                   </button>
                 ) : (
                   <div style={{ marginTop: "10px", padding: "9px 10px", borderRadius: "7px", background: "#eef2ff", color: "#3730a3", fontSize: "11px", fontWeight: "700" }}>

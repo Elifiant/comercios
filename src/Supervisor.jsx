@@ -278,7 +278,7 @@ const reactivarComercio = async (comercio) => {
   const [busquedaDisponibilidad, setBusquedaDisponibilidad] = useState("");
   const [seccionActiva, setSeccionActiva] = useState(() => {
     const seccionUrl = new URLSearchParams(window.location.search).get("seccion");
-    const seccionesValidas = ["monitoreo", "planificador", "stock", "disponibilidad", "clientes", "estadoCuenta", "listasPrecios", "solicitudes"];
+    const seccionesValidas = ["monitoreo", "planificador", "stock", "disponibilidad", "clientes", "estadoCuenta", "listasPrecios", "repartos", "mensajes", "solicitudes"];
     return seccionesValidas.includes(seccionUrl) ? seccionUrl : "monitoreo";
   });
   const [cargando, setCargando] = useState(true);
@@ -286,6 +286,116 @@ const reactivarComercio = async (comercio) => {
   const [perfilSupervisor, setPerfilSupervisor] = useState(null);
   const [solicitudesNoVisitar, setSolicitudesNoVisitar] = useState([]);
   const [sesionSupervisor, setSesionSupervisor] = useState(null);
+
+  // 🚚 Centro de Control Repartos del Supervisor
+  const [repartosEntregasSupervisor, setRepartosEntregasSupervisor] = useState([]);
+  const [repartosPedidosPorId, setRepartosPedidosPorId] = useState({});
+  const [repartosVista, setRepartosVista] = useState("envios");
+  const [repartosFiltro, setRepartosFiltro] = useState("pendientes");
+  const [cargandoRepartosSupervisor, setCargandoRepartosSupervisor] = useState(false);
+  const [procesandoAnulacionSupervisor, setProcesandoAnulacionSupervisor] = useState(false);
+  const [destinatariosMensaje, setDestinatariosMensaje] = useState([]);
+  const [destinatarioMensaje, setDestinatarioMensaje] = useState('');
+  const [textoMensajeOperativo, setTextoMensajeOperativo] = useState('');
+  const [enviandoMensajeOperativo, setEnviandoMensajeOperativo] = useState(false);
+  const [historialRutaChat, setHistorialRutaChat] = useState([]);
+  const [cargandoRutaChat, setCargandoRutaChat] = useState(false);
+  const [errorRutaChat, setErrorRutaChat] = useState('');
+  const rutaChatFinalRef = useRef(null);
+  const lecturasRutaChatEnCurso = useRef(new Set());
+  const [errorLecturaRutaChat, setErrorLecturaRutaChat] = useState('');
+  const miIdSupervisorChat = sesionSupervisor?.user?.id;
+  const mensajesConversacion = historialRutaChat.filter(m =>
+    (m.remitente_id === miIdSupervisorChat && m.destinatario_id === destinatarioMensaje) ||
+    (m.remitente_id === destinatarioMensaje && m.destinatario_id === miIdSupervisorChat)
+  );
+  const cargarHistorialRutaChat = async () => {
+    if (!perfilSupervisor?.empresa_id || !miIdSupervisorChat) return;
+    const { data, error } = await supabase.from('mensajes_operativos')
+      .select('id,empresa_id,remitente_id,destinatario_id,contenido,creado_at,leido_at')
+      .eq('empresa_id', perfilSupervisor.empresa_id)
+      .or(`remitente_id.eq.${miIdSupervisorChat},destinatario_id.eq.${miIdSupervisorChat}`)
+      .order('creado_at', { ascending: true }).limit(500);
+    if (error) { setErrorRutaChat(error.message); return; }
+    setErrorRutaChat('');
+    setHistorialRutaChat(data || []);
+  };
+  useEffect(() => {
+    if (seccionActiva !== 'mensajes' || !perfilSupervisor?.empresa_id || !miIdSupervisorChat) return;
+    let activo = true;
+    const actualizar = async () => { if (activo) await cargarHistorialRutaChat(); };
+    setCargandoRutaChat(true);
+    actualizar().finally(() => { if (activo) setCargandoRutaChat(false); });
+    const intervalo = setInterval(actualizar, 10000);
+    return () => { activo = false; clearInterval(intervalo); };
+  }, [seccionActiva, perfilSupervisor?.empresa_id, miIdSupervisorChat]);
+  useEffect(() => {
+    if (seccionActiva === 'mensajes' && destinatarioMensaje) {
+      rutaChatFinalRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [destinatarioMensaje, historialRutaChat.length, seccionActiva]);
+  // Al abrir una conversación, confirmar lectura solo de los mensajes recibidos.
+  // La RPC comprueba destinatario y empresa; no se altera el estado de otros chats.
+  useEffect(() => {
+    if (seccionActiva !== 'mensajes' || !destinatarioMensaje || !miIdSupervisorChat) return;
+    const pendientes = historialRutaChat.filter(m =>
+      m.remitente_id === destinatarioMensaje &&
+      m.destinatario_id === miIdSupervisorChat &&
+      !m.leido_at && !lecturasRutaChatEnCurso.current.has(m.id)
+    );
+    if (!pendientes.length) return;
+    const confirmarLecturas = async () => {
+      for (const mensaje of pendientes) {
+        lecturasRutaChatEnCurso.current.add(mensaje.id);
+        try {
+          const { error } = await supabase.rpc('leer_mensaje_operativo', {
+            p_mensaje_id: mensaje.id, p_lat: null, p_lng: null, p_gps_at: null
+          });
+          if (error) throw error;
+          {
+            setErrorLecturaRutaChat('');
+            setHistorialRutaChat(prev => prev.map(m =>
+              m.id === mensaje.id ? { ...m, leido_at: m.leido_at || new Date().toISOString() } : m
+            ));
+          }
+        } catch (error) {
+          setErrorLecturaRutaChat(error.message || 'No se pudo confirmar la lectura.');
+          console.warn('RutaChat: error al marcar leído:', error);
+        } finally {
+          // No reintentamos indefinidamente en cada render si Supabase devuelve error.
+          // Al cambiar de conversación o recargar la página podrá intentarse otra vez.
+        }
+      }
+    };
+    confirmarLecturas();
+  }, [seccionActiva, destinatarioMensaje, miIdSupervisorChat, historialRutaChat]);
+  useEffect(() => {
+    lecturasRutaChatEnCurso.current.clear();
+    setErrorLecturaRutaChat('');
+  }, [destinatarioMensaje]);
+  const horaRutaChat = fecha => fecha ? new Date(fecha).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'}) : '';
+
+  useEffect(() => {
+    if (seccionActiva !== 'mensajes' || !perfilSupervisor?.empresa_id) return;
+    let activo = true;
+    supabase.from('perfiles').select('id,nombre,email,rol').eq('empresa_id',perfilSupervisor.empresa_id).in('rol',['preventista','deposito','despacho'])
+      .then(({data,error}) => { if (!error && activo) setDestinatariosMensaje(data || []); });
+    return () => { activo = false; };
+  }, [seccionActiva,perfilSupervisor?.empresa_id]);
+  const enviarMensajePreventista = async () => {
+    if (!destinatarioMensaje || !textoMensajeOperativo.trim()) { alert('Elegí un destinatario y escribí el mensaje.'); return; }
+    setEnviandoMensajeOperativo(true);
+    try {
+      const {error} = await supabase.rpc('enviar_mensaje_operativo', {
+        p_destinatario: destinatarioMensaje, p_contenido: textoMensajeOperativo.trim()
+      });
+      if (error) throw error;
+      setTextoMensajeOperativo('');
+      await cargarHistorialRutaChat();
+    } catch(e) { alert('❌ No se pudo enviar: ' + e.message); }
+    finally { setEnviandoMensajeOperativo(false); }
+  };
+
   const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
   const diaSemana = filtroDiaMapa || "TODOS";
   const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
@@ -1019,6 +1129,112 @@ const reactivarComercio = async (comercio) => {
 
 
 
+
+  // 🚚 Repartos · envíos a Despacho, anulaciones e histórico
+  const cargarRepartosSupervisor = async () => {
+    if (!perfilSupervisor?.empresa_id) return;
+    try {
+      setCargandoRepartosSupervisor(true);
+
+      const { data: entregas, error: errorEntregas } = await supabase
+        .from("repartos_entregas")
+        .select("*")
+        .eq("empresa_id", perfilSupervisor.empresa_id)
+        .order("creado_at", { ascending: false });
+
+      if (errorEntregas) throw errorEntregas;
+
+      const idsPedidos = [...new Set((entregas || []).map(e => e.pedido_id).filter(Boolean))];
+      let pedidos = [];
+      if (idsPedidos.length > 0) {
+        const { data, error } = await supabase
+          .from("pedidos")
+          .select("id,numero_pedido,comercio_nombre,preventista,total,estado,created_at")
+          .in("id", idsPedidos)
+          .eq("empresa_id", perfilSupervisor.empresa_id);
+        if (error) throw error;
+        pedidos = data || [];
+      }
+
+      setRepartosEntregasSupervisor(entregas || []);
+      setRepartosPedidosPorId(
+        Object.fromEntries((pedidos || []).map(p => [String(p.id), p]))
+      );
+    } catch (error) {
+      console.error("Error cargando Centro de Control Repartos:", error);
+      alert("❌ No se pudo cargar Repartos: " + (error.message || "Error desconocido"));
+    } finally {
+      setCargandoRepartosSupervisor(false);
+    }
+  };
+
+  useEffect(() => {
+    if (seccionActiva === "repartos" && perfilSupervisor?.empresa_id) {
+      cargarRepartosSupervisor();
+    }
+  }, [seccionActiva, perfilSupervisor?.empresa_id]);
+
+  const aprobarAnulacionDespacho = async (entrega) => {
+    if (!entrega?.id || !entrega?.pedido_id || procesandoAnulacionSupervisor) return;
+    const pedido = repartosPedidosPorId[String(entrega.pedido_id)] || {};
+    const numero = String(pedido.numero_pedido ?? "").padStart(6, "0");
+    const cliente = pedido.comercio_nombre || "Cliente";
+    const motivo = entrega.motivo_solicitud_anulacion || "Sin motivo informado";
+
+    const ok = window.confirm(
+      `¿APROBAR ANULACIÓN de la NVI #${numero}?\n\n` +
+      `${cliente}\nVendedor: ${pedido.preventista || "-"}\nImporte: $${Number(pedido.total || 0).toLocaleString("es-AR")}\n` +
+      `Motivo de Depósito: ${motivo}\n\n` +
+      `Se devolverá al stock la mercadería descontada por esta NVI y la venta quedará ANULADA.`
+    );
+    if (!ok) return;
+
+    setProcesandoAnulacionSupervisor(true);
+    try {
+      const { error } = await supabase.rpc("resolver_anulacion_reparto", {
+        p_entrega_id: entrega.id,
+        p_aprobar: true,
+      });
+      if (error) throw error;
+
+      alert(`✅ NVI #${numero} ANULADA.\n\nSe revirtió el stock aplicado, si existía.`);
+      await cargarRepartosSupervisor();
+    } catch (error) {
+      console.error("Error aprobando anulación:", error);
+      alert("❌ No se pudo aprobar la anulación: " + (error.message || "Error desconocido"));
+    } finally {
+      setProcesandoAnulacionSupervisor(false);
+    }
+  };
+
+  const rechazarAnulacionDespacho = async (entrega) => {
+    if (!entrega?.id || procesandoAnulacionSupervisor) return;
+    const pedido = repartosPedidosPorId[String(entrega.pedido_id)] || {};
+    const numero = String(pedido.numero_pedido ?? "").padStart(6, "0");
+
+    const ok = window.confirm(
+      `¿RECHAZAR la solicitud de anulación de la NVI #${numero}?\n\n` +
+      `La NVI seguirá vigente y volverá a quedar disponible en Depósito para reprogramarla.`
+    );
+    if (!ok) return;
+
+    setProcesandoAnulacionSupervisor(true);
+    try {
+      const { error } = await supabase.rpc("resolver_anulacion_reparto", {
+        p_entrega_id: entrega.id,
+        p_aprobar: false,
+      });
+      if (error) throw error;
+
+      alert(`↩️ Solicitud rechazada. La NVI #${numero} continúa vigente.`);
+      await cargarRepartosSupervisor();
+    } catch (error) {
+      console.error("Error rechazando anulación:", error);
+      alert("❌ No se pudo rechazar la solicitud: " + (error.message || "Error desconocido"));
+    } finally {
+      setProcesandoAnulacionSupervisor(false);
+    }
+  };
 
   // Inicialización de supervisor y datos
   useEffect(() => {
@@ -3350,6 +3566,18 @@ useEffect(() => {
           💲 Listas de Precios
         </button>
         <button
+          onClick={() => setSeccionActiva("mensajes")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "mensajes" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "mensajes" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          📬 Mensajes
+        </button>
+        <button
+          onClick={() => setSeccionActiva("repartos")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "repartos" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "repartos" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          🚚 Repartos{repartosEntregasSupervisor.filter(e => e.estado === "anulacion_solicitada").length > 0 ? ` (${repartosEntregasSupervisor.filter(e => e.estado === "anulacion_solicitada").length})` : ""}
+        </button>
+        <button
           onClick={() => setSeccionActiva("solicitudes")}
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "solicitudes" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "solicitudes" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
@@ -4456,6 +4684,179 @@ useEffect(() => {
                 </div>
               )}
             </div>
+          </div>
+         ) : seccionActiva === "mensajes" ? (
+          <div style={{display:'grid',gap:'12px',maxWidth:'850px'}}>
+            <h2 style={{margin:0,color:'#0f172a'}}>💬 RutaChat · Supervisor</h2>
+            <p style={{margin:0,color:'#64748b'}}>Conversaciones con los preventistas de tu empresa.</p>
+            <div style={{background:'#eff6ff',border:'1px solid #93c5fd',borderRadius:'12px',padding:'12px',display:'grid',gap:'10px'}}>
+              <select value={destinatarioMensaje} onChange={e=>setDestinatarioMensaje(e.target.value)} style={{padding:'10px',borderRadius:'8px',border:'1px solid #cbd5e1'}}>
+                <option value="">Elegí una conversación...</option>
+                {destinatariosMensaje.map(p=><option key={p.id} value={p.id}>{`${p.nombre || p.email} · ${['deposito','despacho'].includes(String(p.rol).toLowerCase()) ? 'Depósito / Despacho' : 'Preventista'}${historialRutaChat.filter(m=>m.remitente_id===p.id && m.destinatario_id===miIdSupervisorChat && !m.leido_at).length ? ' · 🔴 Nuevo' : ''}`}</option>)}
+              </select>
+              {errorRutaChat && <div style={{color:'#b91c1c',fontSize:'12px'}}>No se pudo cargar RutaChat: {errorRutaChat}. Revisá los permisos de lectura en Supabase.</div>}
+              {errorLecturaRutaChat && <div style={{color:'#b91c1c',fontSize:'12px'}}>No se pudo marcar como leído: {errorLecturaRutaChat}</div>}
+              {destinatarioMensaje ? <>
+                <div style={{background:'#e8eef4',border:'1px solid #cbd5e1',borderRadius:'10px',padding:'10px',height:'310px',overflowY:'auto',display:'flex',flexDirection:'column',gap:'8px'}}>
+                  {cargandoRutaChat && <span style={{fontSize:'12px',color:'#64748b'}}>Cargando conversación...</span>}
+                  {!cargandoRutaChat && !mensajesConversacion.length && <span style={{fontSize:'12px',color:'#64748b',textAlign:'center'}}>Todavía no hay mensajes en esta conversación.</span>}
+                  {mensajesConversacion.map(m=>{
+                    const propio = m.remitente_id === miIdSupervisorChat;
+                    return <div key={m.id} style={{alignSelf:propio?'flex-end':'flex-start',maxWidth:'78%',width:'fit-content',background:propio?'#d1fae5':'#fff',borderRadius:'11px',padding:'7px 10px',boxShadow:'0 1px 2px #0001',overflowWrap:'anywhere'}}>
+                      <div style={{fontSize:'12px',color:'#0f172a',whiteSpace:'pre-wrap'}}>{m.contenido}</div>
+                      <div style={{fontSize:'10px',color:'#64748b',textAlign:'right',marginTop:'3px'}}>{horaRutaChat(m.creado_at)} {propio ? (m.leido_at?'✓✓':'✓') : ''}</div>
+                    </div>;
+                  })}
+                  <div ref={rutaChatFinalRef} />
+                </div>
+                <div style={{display:'flex',gap:'7px',alignItems:'flex-end'}}>
+                  <textarea maxLength={1000} rows={2} placeholder="Escribí un mensaje..." value={textoMensajeOperativo} onChange={e=>setTextoMensajeOperativo(e.target.value)} style={{flex:1,minWidth:0,padding:'9px',borderRadius:'10px',border:'1px solid #cbd5e1',resize:'vertical'}} />
+                  <button type="button" disabled={enviandoMensajeOperativo || !textoMensajeOperativo.trim()} onClick={enviarMensajePreventista} style={{background:'#2563eb',color:'white',padding:'12px',border:0,borderRadius:'10px',fontWeight:800,cursor:'pointer',opacity:enviandoMensajeOperativo?0.6:1}}>{enviandoMensajeOperativo?'...':'➤ Enviar'}</button>
+                </div>
+              </> : <div style={{color:'#64748b',fontSize:'13px'}}>Seleccioná un preventista para ver los mensajes enviados y recibidos.</div>}
+            </div>
+          </div>
+         ) : seccionActiva === "repartos" ? (
+          <div style={{ display: "grid", gap: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "21px", color: "#0f172a" }}>🚚 Repartos · Centro de Control</h2>
+                <div style={{ marginTop: "4px", fontSize: "12px", color: "#64748b" }}>
+                  Seguimiento entre Supervisor y Despacho. La operación física sigue realizándose en Despacho.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => window.location.href = "/despacho"}
+                style={{ border: "1px solid #2563eb", background: "#2563eb", color: "#fff", borderRadius: "9px", padding: "10px 14px", fontWeight: "800", cursor: "pointer" }}
+              >
+                📦 ABRIR DESPACHO
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: "10px" }}>
+              <button type="button" onClick={() => { setRepartosVista("envios"); setRepartosFiltro("pendientes"); }}
+                style={{ textAlign: "left", border: repartosVista === "envios" ? "2px solid #2563eb" : "1px solid #cbd5e1", background: repartosVista === "envios" ? "#eff6ff" : "#fff", borderRadius: "12px", padding: "14px", cursor: "pointer" }}>
+                <div style={{ fontWeight: "900", color: "#0f172a" }}>📦 ENVÍOS A DESPACHO</div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>Estado e histórico de las NVI enviadas.</div>
+              </button>
+              <button type="button" onClick={() => { setRepartosVista("anulaciones"); setRepartosFiltro("pendientes"); }}
+                style={{ textAlign: "left", border: repartosVista === "anulaciones" ? "2px solid #dc2626" : "1px solid #cbd5e1", background: repartosVista === "anulaciones" ? "#fef2f2" : "#fff", borderRadius: "12px", padding: "14px", cursor: "pointer" }}>
+                <div style={{ fontWeight: "900", color: "#0f172a" }}>
+                  ⚠️ ANULACIONES DE DESPACHO
+                  {repartosEntregasSupervisor.filter(e => e.estado === "anulacion_solicitada").length > 0
+                    ? ` (${repartosEntregasSupervisor.filter(e => e.estado === "anulacion_solicitada").length})`
+                    : ""}
+                </div>
+                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>Solicitudes pendientes y decisiones históricas.</div>
+              </button>
+            </div>
+
+            {repartosVista === "anulaciones" && (
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button type="button" onClick={() => setRepartosFiltro("pendientes")}
+                  style={{ border: "none", borderRadius: "8px", padding: "9px 13px", fontWeight: "800", cursor: "pointer", background: repartosFiltro === "pendientes" ? "#0f172a" : "#e2e8f0", color: repartosFiltro === "pendientes" ? "#fff" : "#334155" }}>
+                  ⏳ PENDIENTES ({repartosEntregasSupervisor.filter(e => e.estado === "anulacion_solicitada").length})
+                </button>
+                <button type="button" onClick={() => setRepartosFiltro("historial")}
+                  style={{ border: "none", borderRadius: "8px", padding: "9px 13px", fontWeight: "800", cursor: "pointer", background: repartosFiltro === "historial" ? "#0f172a" : "#e2e8f0", color: repartosFiltro === "historial" ? "#fff" : "#334155" }}>
+                  🕘 HISTORIAL
+                </button>
+              </div>
+            )}
+
+            {cargandoRepartosSupervisor ? (
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "28px", textAlign: "center", color: "#64748b" }}>Cargando Repartos...</div>
+            ) : repartosVista === "anulaciones" ? (
+              <div style={{ display: "grid", gap: "10px" }}>
+                {repartosEntregasSupervisor
+                  .filter(e => repartosFiltro === "pendientes"
+                    ? e.estado === "anulacion_solicitada"
+                    : Boolean(e.decision_anulacion))
+                  .map(e => {
+                    const p = repartosPedidosPorId[String(e.pedido_id)] || {};
+                    const num = String(p.numero_pedido ?? "").padStart(6, "0");
+                    const pendiente = e.estado === "anulacion_solicitada";
+                    return (
+                      <div key={e.id} style={{ background: "#fff", border: pendiente ? "1px solid #fecaca" : "1px solid #e2e8f0", borderRadius: "12px", padding: "14px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontWeight: "900", color: "#0f172a" }}>🧾 NVI #{num} · {p.comercio_nombre || "Cliente"}</div>
+                            <div style={{ marginTop: "5px", fontSize: "12px", color: "#64748b" }}>
+                              Vendedor: <strong>{p.preventista || "-"}</strong> · Importe: <strong>${Number(p.total || 0).toLocaleString("es-AR")}</strong>
+                            </div>
+                            <div style={{ marginTop: "7px", fontSize: "13px", color: "#334155" }}>
+                              Motivo: <strong>{e.motivo_solicitud_anulacion || "Sin motivo informado"}</strong>
+                            </div>
+                            <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>
+                              Solicitada: {e.solicitud_anulacion_at ? new Date(e.solicitud_anulacion_at).toLocaleString("es-AR") : "-"}
+                            </div>
+                          </div>
+                          {!pendiente && (
+                            <div style={{ fontWeight: "900", color: e.decision_anulacion === "aprobada" ? "#166534" : "#92400e" }}>
+                              {e.decision_anulacion === "aprobada" ? "✅ APROBADA" : "↩️ RECHAZADA"}
+                            </div>
+                          )}
+                        </div>
+                        {pendiente && (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "12px" }}>
+                            <button type="button" disabled={procesandoAnulacionSupervisor} onClick={() => rechazarAnulacionDespacho(e)}
+                              style={{ border: "none", borderRadius: "9px", padding: "11px", fontWeight: "900", cursor: "pointer", background: "#f59e0b", color: "#fff" }}>
+                              ↩️ RECHAZAR ANULACIÓN
+                            </button>
+                            <button type="button" disabled={procesandoAnulacionSupervisor} onClick={() => aprobarAnulacionDespacho(e)}
+                              style={{ border: "none", borderRadius: "9px", padding: "11px", fontWeight: "900", cursor: "pointer", background: "#dc2626", color: "#fff" }}>
+                              ✅ APROBAR ANULACIÓN
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                {repartosEntregasSupervisor.filter(e => repartosFiltro === "pendientes" ? e.estado === "anulacion_solicitada" : Boolean(e.decision_anulacion)).length === 0 && (
+                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "28px", textAlign: "center", color: "#64748b" }}>
+                    {repartosFiltro === "pendientes" ? "No hay solicitudes de anulación pendientes." : "Todavía no hay decisiones de anulación en el historial."}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: "10px" }}>
+                {repartosEntregasSupervisor.map(e => {
+                  const p = repartosPedidosPorId[String(e.pedido_id)] || {};
+                  const num = String(p.numero_pedido ?? "").padStart(6, "0");
+                  const etiquetas = {
+                    pendiente_preparacion: "📦 PENDIENTE",
+                    preparado: "✅ PREPARADO",
+                    asignado: "🚚 ASIGNADO",
+                    recibido: "📥 RECIBIDO POR REPARTIDOR",
+                    en_reparto: "🛣️ EN REPARTO",
+                    reintentar: "🔄 VOLVER",
+                    entregado: "✅ ENTREGADO",
+                    no_entregado: "❌ NO ENTREGADO",
+                    devolucion_informada: "📤 DEVOLUCIÓN INFORMADA",
+                    vuelto_deposito: "🔄 VOLVIÓ A DEPÓSITO",
+                    anulacion_solicitada: "⏳ ANULACIÓN SOLICITADA",
+                    anulacion_aprobada: "🚫 NVI ANULADA",
+                  };
+                  return (
+                    <div key={e.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "13px", display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontWeight: "900", color: "#0f172a" }}>🧾 NVI #{num} · {p.comercio_nombre || "Cliente"}</div>
+                        <div style={{ marginTop: "4px", fontSize: "12px", color: "#64748b" }}>
+                          {p.preventista || "-"} · ${Number(p.total || 0).toLocaleString("es-AR")} · {e.bultos || 0} bulto/s
+                        </div>
+                      </div>
+                      <div style={{ fontWeight: "900", fontSize: "12px", color: "#334155" }}>{etiquetas[e.estado] || e.estado}</div>
+                    </div>
+                  );
+                })}
+                {repartosEntregasSupervisor.length === 0 && (
+                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "28px", textAlign: "center", color: "#64748b" }}>
+                    Todavía no hay envíos registrados con Despacho.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
          ) : seccionActiva === "solicitudes" ? (
           <div>

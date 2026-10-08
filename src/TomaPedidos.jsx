@@ -79,6 +79,27 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
 
         if (errProductos) throw errProductos;
 
+        // La necesidad de variante no depende de la marca: también se infiere
+        // del stock físico existente para cada producto.
+        const { data: stockVariantes, error: errStockVariantes } = await supabase
+          .from('stock_por_deposito')
+          .select('producto_id,color,talle,cantidad')
+          .eq('empresa_id', empresaId)
+          .in('producto_id', productoIds);
+        if (errStockVariantes) throw errStockVariantes;
+
+        const variantesPorProducto = new Map();
+        (stockVariantes || []).forEach(v => {
+          const pid = String(v.producto_id || '');
+          if (!pid) return;
+          const actual = variantesPorProducto.get(pid) || { colores: new Set(), talles: new Set() };
+          const color = String(v.color || '').trim();
+          const talle = String(v.talle || '').trim();
+          if (color) actual.colores.add(color);
+          if (talle) actual.talles.add(talle);
+          variantesPorProducto.set(pid, actual);
+        });
+
         const productosPorId = new Map((productos || []).map(p => [p.id, p]));
 
         const normalizados = (renglones || [])
@@ -93,8 +114,12 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             nombre: r.detalle_en_lista || producto.nombre || 'Artículo',
             categoria: producto.descripcion || 'General',
             precio: Number(r.precio || 0),
-            usaColor: producto.usa_color === true,
-            usaTalle: producto.usa_talle === true,
+            usaColor: producto.usa_color === true || (variantesPorProducto.get(String(r.producto_id))?.colores.size || 0) > 0,
+            usaTalle: producto.usa_talle === true || (variantesPorProducto.get(String(r.producto_id))?.talles.size || 0) > 0,
+            coloresDisponibles: [...(variantesPorProducto.get(String(r.producto_id))?.colores || [])]
+              .sort((a,b) => a.localeCompare(b, 'es', { numeric:true })),
+            tallesDisponibles: [...(variantesPorProducto.get(String(r.producto_id))?.talles || [])]
+              .sort((a,b) => a.localeCompare(b, 'es', { numeric:true })),
           }))
           .sort((a, b) => a.codigo.localeCompare(b.codigo, 'es', { numeric: true }));
 
@@ -201,6 +226,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
       ajustePct: 0,
       color: '',
       talle: '',
+      coloresDisponibles: producto.coloresDisponibles || [],
+      tallesDisponibles: producto.tallesDisponibles || [],
       cant: 1,
       confirmadoItem: false,
       esNuevo: !!pedidoExistente,
