@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase, supabaseRegistro } from "./supabase";
 import PlanesAbonos from "./PlanesAbonos";
 
+const tipoContrato = (nombre = "") => nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas";
+
 export default function AdminClientes() {
   const [empresas, setEmpresas] = useState([]);
   const [empresasRegistros, setEmpresasRegistros] = useState([]);
@@ -15,6 +17,7 @@ export default function AdminClientes() {
   const [modalResetClave, setModalResetClave] = useState(null); // { usuario, nuevoPass: "" }
   const [modalCambiarEmail, setModalCambiarEmail] = useState(null); // { usuario, nuevoEmail: "" }
   const [nuevoRolEmpleado, setNuevoRolEmpleado] = useState("preventista");
+  const [nuevoTipoSupervisor, setNuevoTipoSupervisor] = useState("supervisorv");
     const [empresaEditando, setEmpresaEditando] = useState(null);
   const [paisEmpresa, setPaisEmpresa] = useState("Argentina");
   const [monedaEmpresa, setMonedaEmpresa] = useState("ARS");
@@ -58,13 +61,17 @@ export default function AdminClientes() {
   const [planesCatalogo, setPlanesCatalogo] = useState([]);
   const [variantesCatalogo, setVariantesCatalogo] = useState([]);
   const [abonoEmpresaActual, setAbonoEmpresaActual] = useState(null);
+  const [contratosActivosEmpresa, setContratosActivosEmpresa] = useState([]);
+  const [contratosTabla, setContratosTabla] = useState({});
   const [planSeleccionadoId, setPlanSeleccionadoId] = useState("");
+  const [productoAbono, setProductoAbono] = useState("Ventas");
   const [varianteSeleccionadaId, setVarianteSeleccionadaId] = useState("");
   const [precioAcordado, setPrecioAcordado] = useState("");
   const [monedaAcordada, setMonedaAcordada] = useState("ARS");
   const [inicioAbono, setInicioAbono] = useState("");
   const [vencimientoAbono, setVencimientoAbono] = useState("");
   const [cupoAbono, setCupoAbono] = useState("");
+  const [cupoRepartidoresAbono, setCupoRepartidoresAbono] = useState("");
   const [diaCorteAbono, setDiaCorteAbono] = useState("");
   const [notasContratoAbono, setNotasContratoAbono] = useState("");
   const [editandoContratoAbono, setEditandoContratoAbono] = useState(false);
@@ -126,12 +133,13 @@ export default function AdminClientes() {
   const cargarDatos = async () => {
     setCargando(true);
     try {
-      const [perfilesResp, empresasResp, pagosResp, planesResp, variantesResp] = await Promise.all([
+      const [perfilesResp, empresasResp, pagosResp, planesResp, variantesResp, contratosResp] = await Promise.all([
         supabase.from("perfiles").select("*"),
         supabase.from("empresas").select("*").order("nombre"),
         supabase.from("pagos_empresas").select("*").order("fecha", { ascending: false }),
         supabase.from("planes_abono").select("*").eq("activo", true).order("nombre"),
-        supabase.from("planes_abono_variantes").select("*").eq("activo", true).order("meses")
+        supabase.from("planes_abono_variantes").select("*").eq("activo", true).order("meses"),
+        supabase.from("empresa_abonos").select("*").eq("activo", true).order("created_at", { ascending: false })
       ]);
 
       if (perfilesResp.error) throw perfilesResp.error;
@@ -139,6 +147,13 @@ export default function AdminClientes() {
       if (pagosResp.error) console.warn("No se pudo cargar pagos:", pagosResp.error.message);
       if (planesResp.error) console.warn("No se pudo cargar catálogo de planes:", planesResp.error.message);
       if (variantesResp.error) console.warn("No se pudo cargar catálogo de modalidades:", variantesResp.error.message);
+      if (contratosResp.error) console.warn("No se pudieron cargar contratos para la tabla:", contratosResp.error.message);
+      const contratosPorEmpresa = {};
+      for (const contrato of (contratosResp.data || [])) {
+        if (!contratosPorEmpresa[contrato.empresa_id]) contratosPorEmpresa[contrato.empresa_id] = [];
+        contratosPorEmpresa[contrato.empresa_id].push(contrato);
+      }
+      setContratosTabla(contratosPorEmpresa);
       setPlanesCatalogo(planesResp.data || []);
       setVariantesCatalogo(variantesResp.data || []);
 
@@ -323,7 +338,7 @@ export default function AdminClientes() {
     const empresaDB = empresasRegistros.find(e => e.nombre === emp);
     setMonedaPago(t.moneda || "ARS");
     const cupoContratado = Number(t.cupo || 0);
-    const val = Number(t.valor || t.tarifa || 10000);
+    const val = Number(t.valor ?? t.tarifa ?? 0);
     setMontoPago(t.tipo === "plana" ? String(val) : String(cupoContratado * val));
     const tieneAbonosPrevios = historialPagos.some(p =>
       p.empresa_id === t.id && ["alta", "primer_abono", "renovacion"].includes(p.tipo_movimiento)
@@ -339,29 +354,57 @@ export default function AdminClientes() {
     setNotasAbono("");
 
     let contrato = null;
+    let contratos = [];
     if (empresaDB?.id) {
       const { data, error } = await supabase
         .from("empresa_abonos")
         .select("*")
         .eq("empresa_id", empresaDB.id)
         .eq("activo", true)
-        .order("created_at", { ascending: false })
-        .limit(1);
-      if (!error) contrato = data?.[0] || null;
-      else console.warn("No se pudo cargar el abono contratado:", error.message);
+        .order("created_at", { ascending: false });
+      if (!error) {
+        contratos = data || [];
+        contrato = contratos[0] || null;
+      } else console.warn("No se pudieron cargar los abonos contratados:", error.message);
     }
+    // La contratación activa prevalece sobre los valores históricos de empresas.
+    if (contrato) {
+      setMontoPago(String(Number(contrato.precio_acordado ?? 0)));
+      setMonedaPago(contrato.moneda || "ARS");
+    }
+    setContratosActivosEmpresa(contratos);
     setAbonoEmpresaActual(contrato);
     setEditandoContratoAbono(!contrato);
     setPlanSeleccionadoId(contrato?.plan_id || "");
+    setProductoAbono(contrato?.plan_nombre?.startsWith("Repartos · ") ? "Repartos" : contrato?.plan_nombre === "Simplex" ? "Simplex" : "Ventas");
     setVarianteSeleccionadaId(contrato?.variante_id || "");
     setPrecioAcordado(contrato?.precio_acordado == null ? "" : String(contrato.precio_acordado));
     setMonedaAcordada(contrato?.moneda || t.moneda || "ARS");
     setInicioAbono(contrato?.fecha_inicio || "");
     setVencimientoAbono(contrato?.proximo_vencimiento || "");
     setCupoAbono(contrato?.cupo_preventistas == null ? String(cupoContratado || "") : String(contrato.cupo_preventistas));
+    setCupoRepartidoresAbono(String(contrato?.cupo_repartidores ?? 0));
     setDiaCorteAbono(contrato?.dia_corte == null ? String(t.diaCorte || "") : String(contrato.dia_corte));
     setNotasContratoAbono(contrato?.notas || "");
     setMostrarModalPago(true);
+  };
+
+  const seleccionarContratoActivo = (contrato) => {
+    setAbonoEmpresaActual(contrato);
+    setMontoPago(String(Number(contrato?.precio_acordado ?? 0)));
+    setMonedaPago(contrato?.moneda || "ARS");
+    const nombre = contrato?.plan_nombre || "";
+    setProductoAbono(nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas");
+    setPlanSeleccionadoId(contrato?.plan_id || "");
+    setVarianteSeleccionadaId(contrato?.variante_id || "");
+    setPrecioAcordado(contrato?.precio_acordado == null ? "" : String(contrato.precio_acordado));
+    setMonedaAcordada(contrato?.moneda || "ARS");
+    setInicioAbono(contrato?.fecha_inicio || "");
+    setVencimientoAbono(contrato?.proximo_vencimiento || "");
+    setCupoAbono(String(contrato?.cupo_preventistas ?? 0));
+    setCupoRepartidoresAbono(String(contrato?.cupo_repartidores ?? 0));
+    setDiaCorteAbono(String(contrato?.dia_corte || ""));
+    setNotasContratoAbono(contrato?.notas || "");
   };
 
   const guardarContratoAbono = async () => {
@@ -375,14 +418,82 @@ export default function AdminClientes() {
     const plan = planesCatalogo.find(p => p.id === planSeleccionadoId);
     const variante = variantesCatalogo.find(v => v.id === varianteSeleccionadaId);
     if (!plan || !variante) return alert("No pude encontrar el plan o la modalidad seleccionada.");
+    if (variante.plan_id !== plan.id) return alert("La modalidad no corresponde al plan seleccionado.");
+    const nombreProducto = plan.nombre === "Simplex" ? "Simplex" : plan.nombre.startsWith("Repartos · ") ? "Repartos" : plan.nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : "Ventas";
+    if (nombreProducto !== productoAbono) return alert("El plan elegido no corresponde al producto seleccionado.");
+    // Simplex es un producto independiente: nunca se combina con otros contratos.
+    const tipoContrato = (nombre = "") => nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas";
+    if (contratosActivosEmpresa.some(c =>
+      (productoAbono === "Simplex" && tipoContrato(c.plan_nombre) !== "Simplex") ||
+      (productoAbono !== "Simplex" && tipoContrato(c.plan_nombre) === "Simplex")
+    )) return alert("Simplex no se puede combinar con Ventas ni Repartos. Revisá primero los contratos activos de esta empresa.");
+    if (contratosActivosEmpresa.some(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos") && productoAbono !== "Ventas + Repartos") return alert("Esta empresa ya tiene un contrato integrado. No se puede modificar un servicio por separado sin revisar ese contrato.");
+    if (productoAbono === "Ventas + Repartos") return alert("El plan integrado requiere cupos independientes para ambos servicios. Todavía no está habilitado el guardado.");
+    if (productoAbono === "Repartos") {
+      const cupo = Number(cupoRepartidoresAbono);
+      const rangos = { "Básico": [1, 3], "Intermedio": [4, 8], "PyME": [9, 20], "Full": [21, Infinity] };
+      const nivel = plan.nombre.split(" · ")[1];
+      const [min, max] = rangos[nivel] || [1, Infinity];
+      if (!Number.isInteger(cupo) || cupo < min || cupo > max) return alert(`El abono ${nivel} requiere entre ${min} y ${max === Infinity ? "más" : max} repartidores.`);
+      if (contratosActivosEmpresa.some(c => tipoContrato(c.plan_nombre) === "Repartos")) {
+        return alert("Esta empresa ya tiene un contrato de Repartos. La renovación se habilitará por separado para proteger el contrato actual.");
+      }
+      if (!window.confirm(`¿Registrar Repartos para ${empresaPago} con ${cupo} repartidores? No se cambiará el cupo de preventistas ni se habilitará el acceso a la app todavía.`)) return;
+      setGuardandoContratoAbono(true);
+      try {
+        // Crear el contrato sin alterar ningún contrato de Ventas vigente.
+        const payloadRepartos = {
+          empresa_id: empresaDB.id, plan_id: plan.id, variante_id: variante.id,
+          plan_nombre: plan.nombre, modalidad: variante.modalidad,
+          meses: Number(variante.meses) || 1,
+          precio_catalogo: Number(variante.precio) || 0,
+          precio_acordado: Number(precioAcordado) || 0,
+          moneda: monedaAcordada, fecha_inicio: inicioAbono,
+          proximo_vencimiento: vencimientoAbono,
+          cupo_preventistas: 0, cupo_repartidores: cupo,
+          dia_corte: Number(diaCorteAbono),
+          notas: notasContratoAbono.trim() || null, activo: true
+        };
+        const { data, error } = await supabase.from("empresa_abonos").insert([payloadRepartos]).select().single();
+        if (error) throw error;
+        const { error: empresaError } = await supabase.from("empresas")
+          .update({ cupo_repartidores: cupo }).eq("id", empresaDB.id);
+        if (empresaError) {
+          const { error: rollbackError } = await supabase.from("empresa_abonos").delete().eq("id", data.id);
+          throw new Error("No se pudo actualizar el cupo de la empresa. " + empresaError.message + (rollbackError ? " El contrato quedó creado: revisalo antes de reintentar." : " El contrato recién creado se revirtió."));
+        }
+        setContratosActivosEmpresa(prev => [data, ...prev]);
+        setAbonoEmpresaActual(data);
+        setEditandoContratoAbono(false);
+        await cargarDatos();
+        alert("✅ Contrato de Repartos registrado y cupo de repartidores guardado. El acceso y los permisos de la app todavía requieren integración.");
+      } catch (err) {
+        alert("Error al guardar Repartos: " + (err.message || "Error desconocido"));
+      } finally {
+        setGuardandoContratoAbono(false);
+      }
+      return;
+    }
+    if (productoAbono === "Ventas" && plan.nombre.startsWith("Ventas · ")) {
+      const rangos = { "Básico": [1, 3], "Intermedio": [4, 8], "PyME": [9, 20], "Full": [21, Infinity] };
+      const nivel = plan.nombre.split(" · ")[1];
+      const [min, max] = rangos[nivel] || [0, Infinity];
+      if (Number(cupoAbono) < min || Number(cupoAbono) > max) return alert(`El nivel ${nivel} permite de ${min} a ${max === Infinity ? "más" : max} preventistas.`);
+    }
 
     setGuardandoContratoAbono(true);
     try {
-      if (abonoEmpresaActual?.id) {
+      // Nunca cerrar un contrato de otro producto al registrar uno de Ventas.
+      const contratoAnterior = contratosActivosEmpresa.find(c => {
+        const n = c.plan_nombre || "";
+        const tipo = n === "Simplex" ? "Simplex" : n.startsWith("Repartos · ") ? "Repartos" : n.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : "Ventas";
+        return tipo === productoAbono;
+      });
+      if (contratoAnterior?.id) {
         const { error: cerrarError } = await supabase
           .from("empresa_abonos")
           .update({ activo: false, finalizado_at: new Date().toISOString() })
-          .eq("id", abonoEmpresaActual.id);
+          .eq("id", contratoAnterior.id);
         if (cerrarError) throw cerrarError;
       }
 
@@ -417,6 +528,7 @@ export default function AdminClientes() {
       if (empresaError) throw empresaError;
 
       setAbonoEmpresaActual(data);
+      setContratosActivosEmpresa(prev => [data, ...prev.filter(c => c.id !== contratoAnterior?.id && c.id !== data.id)]);
       setEditandoContratoAbono(false);
       setMontoPago(String(Number(precioAcordado) || 0));
       setMonedaPago(monedaAcordada);
@@ -584,6 +696,18 @@ export default function AdminClientes() {
         return;
       }
 
+      const esRepartidor = nuevoRolEmpleado === "repartidor";
+      const empresaAlta = empresasRegistros.find(emp => emp.nombre === empresaSeleccionada);
+      if (!empresaAlta?.id) throw new Error("No encontré la empresa seleccionada.");
+      if (esRepartidor) {
+        const contratosRep = (contratosTabla[empresaAlta.id] || []).filter(c =>
+          c.activo && ["Repartos", "Ventas + Repartos"].includes(tipoContrato(c.plan_nombre))
+        );
+        const cupoRep = contratosRep.reduce((total, c) => total + Number(c.cupo_repartidores || 0), 0);
+        const activosRep = preventistas.filter(p => p.empresa_id === empresaAlta.id && p.rol === "repartidor" && p.activo !== false).length;
+        if (cupoRep <= 0) throw new Error("Esta empresa no tiene cupos de Repartos en un abono activo.");
+        if (activosRep >= cupoRep) throw new Error(`Cupo completo: ${activosRep} repartidores activos de ${cupoRep} contratados.`);
+      }
       const esPreventista = (nuevoRolEmpleado || "preventista") === "preventista";
       const esTemporal = esPreventista && tipoNuevoPreventista === "temporal";
       if (esTemporal && (!temporalDesdeNuevo || !temporalHastaNuevo)) {
@@ -608,6 +732,8 @@ export default function AdminClientes() {
         }
       }
 
+      const rolAlta = nuevoRolEmpleado === "supervisor" ? (nuevoTipoSupervisor === "ambos" ? "supervisorv" : nuevoTipoSupervisor) : nuevoRolEmpleado;
+
       // 1. Creamos la cuenta real de login en Supabase Authentication
       const { data: authData, error: authErr } = await supabaseRegistro.auth.signUp({
         email: (nuevoEmail || '').trim().toLowerCase(),
@@ -616,7 +742,7 @@ export default function AdminClientes() {
           data: {
             nombre: nuevoNombre,
             empresa: empresaSeleccionada,
-            rol: nuevoRolEmpleado || "preventista"
+            rol: rolAlta
           }
         }
       });
@@ -635,8 +761,8 @@ export default function AdminClientes() {
         nombre: nuevoNombre,
         email: (nuevoEmail || '').trim().toLowerCase(),
         empresa: empresaSeleccionada,
-        empresa_id: empresasRegistros.find(e => e.nombre === empresaSeleccionada)?.id || null,
-        rol: nuevoRolEmpleado || "preventista",
+        empresa_id: empresaAlta.id,
+        rol: rolAlta,
         tipo_preventista: (nuevoRolEmpleado || "preventista") === "preventista" ? tipoNuevoPreventista : "permanente",
         temporal_desde: (nuevoRolEmpleado || "preventista") === "preventista" && tipoNuevoPreventista === "temporal" ? temporalDesdeNuevo : null,
         temporal_hasta: (nuevoRolEmpleado || "preventista") === "preventista" && tipoNuevoPreventista === "temporal" ? temporalHastaNuevo : null,
@@ -646,7 +772,25 @@ export default function AdminClientes() {
       const { error: perfilErr } = await supabase.from("perfiles").upsert([nuevo]);
       if (perfilErr) throw new Error("La cuenta se creó en Authentication, pero falló el perfil: " + perfilErr.message);
 
+      // Repartos consulta perfiles_roles: el rol principal por sí solo no habilita la asignación.
+      if (esRepartidor) {
+        const { error: rolRepartidorErr } = await supabase.from("perfiles_roles").insert([{
+          perfil_id: uid, empresa_id: empresaAlta.id, rol: "repartidor", activo: true
+        }]);
+        if (rolRepartidorErr) throw new Error("La cuenta y el perfil del repartidor se crearon, pero falta habilitar su rol para asignaciones: " + rolRepartidorErr.message + ". No vuelvas a crear la cuenta; revisemos el permiso.");
+      }
+
+      // Para doble función, la segunda autorización queda en perfiles_roles.
+      // No se modifica ningún rol anterior ni ninguna función de bajas.
+      if (nuevoRolEmpleado === "supervisor" && nuevoTipoSupervisor === "ambos") {
+        const { error: rolExtraErr } = await supabase.from("perfiles_roles").insert([{
+          perfil_id: uid, empresa_id: nuevo.empresa_id, rol: "supervisorr", activo: true
+        }]);
+        if (rolExtraErr) throw new Error("El supervisor se creó con acceso a Ventas, pero NO se pudo habilitar Repartos: " + rolExtraErr.message);
+      }
+
       setPreventistas(prev => [...prev.filter(p => p.email !== nuevo.email), nuevo]);
+      setNuevoTipoSupervisor("supervisorv");
       setNuevoNombre("");
       setNuevoEmail("");
       setNuevoPassword("");
@@ -654,7 +798,7 @@ export default function AdminClientes() {
       setTemporalDesdeNuevo("");
       setTemporalHastaNuevo("");
       setMostrarModalPreventista(false);
-      alert(nuevoRolEmpleado === "supervisor" ? "🎉 Supervisor creado con éxito." : "🎉 Preventista creado con éxito. Ya puede ingresar desde la app móvil.");
+      alert(nuevoRolEmpleado === "supervisor" ? "🎉 Supervisor creado con éxito." : esRepartidor ? "🚚 Repartidor creado y habilitado para recibir entregas." : "🎉 Preventista creado con éxito. Ya puede ingresar desde la app móvil.");
     } catch (err) {
       alert("Error al dar de alta: " + (err.message || "Verificá los datos"));
     }
@@ -882,14 +1026,21 @@ export default function AdminClientes() {
                 const bgBadge = esAlDia ? "rgba(16, 185, 129, 0.15)" : esPorVencer ? "rgba(245, 158, 11, 0.15)" : "rgba(239, 68, 68, 0.15)";
                 
                 const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase() && p.rol === "preventista").length;
-                const cupoMax = Number(t.cupo || cInfoRaw.cupo || 5);
-                const moneda = t.moneda || "ARS";
-                const valor = t.valor || t.tarifa || (moneda === "ARS" ? "10000" : "50");
+                const empresaDB = empresasRegistros.find(e => e.nombre === emp);
+                const contratosVigentes = contratosTabla[empresaDB?.id] || [];
+                const reparto = contratosVigentes.find(c => tipoContrato(c.plan_nombre) === "Repartos");
+                const ventas = contratosVigentes.find(c => tipoContrato(c.plan_nombre) === "Ventas");
+                const integrado = contratosVigentes.find(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos");
+                const contratoPrincipal = contratosVigentes[0] || null;
+                const soloRepartos = Boolean(reparto && !ventas && !integrado);
+                const cupoMax = soloRepartos ? 0 : Number(ventas?.cupo_preventistas ?? integrado?.cupo_preventistas ?? t.cupo ?? cInfoRaw.cupo ?? 0);
+                const cupoRepartidores = Number(reparto?.cupo_repartidores ?? integrado?.cupo_repartidores ?? empresaDB?.cupo_repartidores ?? 0);
+                const moneda = contratoPrincipal?.moneda || t.moneda || "ARS";
+                const valor = Number(t.valor ?? t.tarifa ?? 0);
                 const tipo = t.tipo || t.tipo_tarifa || "preventista";
-                // El abono se calcula por el cupo contratado, no por los usuarios ya creados.
-                const totalEst = tipo === "preventista" ? (cupoMax * Number(valor)) : Number(valor);
+                const totalEst = contratoPrincipal ? contratosVigentes.reduce((sum, c) => sum + Number(c.precio_acordado ?? 0), 0) : (tipo === "preventista" ? cupoMax * valor : valor);
                 const bandera = (t.pais === "México") ? "🇲🇽" : (t.pais === "Colombia") ? "🇨🇴" : (t.pais === "Brasil") ? "🇧🇷" : (t.pais === "Internacional") ? "🌐" : "🇦🇷";
-                const diaCorte = t.diaCobro || t.dia_cobro || cInfoRaw.dia || "05";
+                const diaCorte = contratoPrincipal?.dia_corte ?? t.diaCobro ?? t.dia_cobro ?? cInfoRaw.dia ?? "05";
 
                 return (
                   <tr key={emp} style={{ borderBottom: "1px solid #334155" }}>
@@ -900,17 +1051,17 @@ export default function AdminClientes() {
                     <td style={{ padding: "12px 8px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                         <span style={{ fontWeight: "700", color: prevsCount > cupoMax ? "#ef4444" : "#4ade80", fontSize: "13px" }}>
-                          {prevsCount} / {cupoMax} prev
+                          {prevsCount} / {cupoMax} prev{cupoRepartidores > 0 ? ` · ${cupoRepartidores} repartidores` : ""}
                         </span>
                         {prevsCount > cupoMax && <span style={{ fontSize: "10px", padding: "1px 6px", backgroundColor: "#7f1d1d", color: "#fca5a5", borderRadius: "10px", fontWeight: "bold" }}>Excedido</span>}
                       </div>
                       <div style={{ width: "90px", height: "5px", backgroundColor: "#334155", borderRadius: "3px", marginTop: "4px", overflow: "hidden" }}>
-                        <div style={{ width: Math.min(100, (prevsCount / cupoMax) * 100) + "%", height: "100%", backgroundColor: prevsCount > cupoMax ? "#ef4444" : "#10b981" }}></div>
+                        <div style={{ width: Math.min(100, (cupoMax > 0 ? (prevsCount / cupoMax) * 100 : 0)) + "%", height: "100%", backgroundColor: prevsCount > cupoMax ? "#ef4444" : "#10b981" }}></div>
                       </div>
                     </td>
                     <td style={{ padding: "12px 8px" }}>
-                      <div style={{ fontWeight: "700", color: "#38bdf8" }}>{moneda} ${Number(totalEst).toLocaleString()} / mes</div>
-                      <div style={{ fontSize: "11px", color: "#94a3b8" }}>{tipo === "preventista" ? `$${valor} x prev` : "Tarifa Plana"}</div>
+                      <div style={{ fontWeight: "700", color: "#38bdf8" }}>{moneda} ${Number(totalEst).toLocaleString("es-AR")} / {contratoPrincipal?.modalidad || "mes"}</div>
+                      <div style={{ fontSize: "11px", color: "#94a3b8" }}>{contratoPrincipal ? contratosVigentes.map(c => c.plan_nombre).join(" + ") : (tipo === "preventista" ? `$${valor} x prev` : "Tarifa Plana")}</div>
                     </td>
                     <td style={{ padding: "12px 8px" }}>
                       <span style={{ padding: "4px 8px", backgroundColor: "#0f172a", borderRadius: "6px", fontSize: "12px", color: "#cbd5e1" }}>
@@ -971,21 +1122,21 @@ export default function AdminClientes() {
                   <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
                     👔 SUPERVISOR RESPONSABLE
                   </h4>
-                  <button onClick={() => { setEmpresaSeleccionada(empresaDetalleModal); setNuevoRolEmpleado("supervisor"); setNuevoNombre(""); setNuevoEmail(""); setNuevoPassword(""); setMostrarModalPreventista(true); }} style={{ backgroundColor: "#0284c7", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
+                  <button onClick={() => { setEmpresaSeleccionada(empresaDetalleModal); setNuevoRolEmpleado("supervisor"); setNuevoTipoSupervisor("supervisorv"); setNuevoNombre(""); setNuevoEmail(""); setNuevoPassword(""); setMostrarModalPreventista(true); }} style={{ backgroundColor: "#0284c7", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
                     + Nuevo Supervisor
                   </button>
                 </div>
 
-                {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "supervisor").length === 0 ? (
+                {preventistas.filter(p => p.empresa === empresaDetalleModal && ["supervisor", "supervisorv", "supervisorr"].includes(p.rol)).length === 0 ? (
                   <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px", backgroundColor: "#fff", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
                     Sin supervisor registrado para esta empresa. Podés crearlo con el botón superior.
                   </div>
                 ) : (
-                  preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "supervisor").map(sup => (
+                  preventistas.filter(p => p.empresa === empresaDetalleModal && ["supervisor", "supervisorv", "supervisorr"].includes(p.rol)).map(sup => (
                     <div key={sup.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "12px 16px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
                       <div>
                         <div style={{ fontWeight: "800", color: "#0f172a", fontSize: "14px" }}>👤 {sup.nombre}</div>
-                        <div style={{ fontSize: "12px", color: "#64748b" }}>✉️ {sup.email} · Rol: Supervisor</div>
+                        <div style={{ fontSize: "12px", color: "#64748b" }}>✉️ {sup.email} · Rol: {sup.rol === "supervisorr" ? "Depósito y Repartos" : sup.rol === "supervisorv" ? "Ventas" : "Supervisor anterior"}</div>
                       </div>
                       <div style={{ display: "flex", gap: "8px" }}>
                         <button onClick={() => setModalResetClave({ usuario: sup, nuevoPass: "" })} style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "none", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🔑 Reset Clave</button>
@@ -1075,6 +1226,45 @@ export default function AdminClientes() {
                   )}
                 </div>
               </div>
+
+              {/* 3. REPARTIDORES: alta y consulta, sin alterar funciones de bajas existentes. */}
+              {(() => {
+                const emp = empresasRegistros.find(e => e.nombre === empresaDetalleModal);
+                const contratosRep = (contratosTabla[emp?.id] || []).filter(c =>
+                  c.activo && ["Repartos", "Ventas + Repartos"].includes(tipoContrato(c.plan_nombre))
+                );
+                const cupo = contratosRep.reduce((n, c) => n + Number(c.cupo_repartidores || 0), 0);
+                const choferes = preventistas.filter(p => p.empresa_id === emp?.id && p.rol === "repartidor");
+                const activos = choferes.filter(p => p.activo !== false).length;
+                return (
+                  <div style={{ backgroundColor: "#f8fafc", borderRadius: "12px", padding: "16px", marginTop: "20px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
+                      <div>
+                        <h4 style={{ margin: 0, color: "#0f172a", fontSize: "14px", fontWeight: "800" }}>🚚 REPARTIDORES</h4>
+                        <span style={{ fontSize: "12px", color: "#64748b" }}>{activos} / {cupo} repartidores activos</span>
+                      </div>
+                      <button type="button" disabled={cupo === 0 || activos >= cupo} onClick={() => {
+                        setEmpresaSeleccionada(empresaDetalleModal);
+                        setNuevoRolEmpleado("repartidor");
+                        setNuevoNombre(""); setNuevoEmail(""); setNuevoPassword("");
+                        setMostrarModalPreventista(true);
+                      }} style={{ backgroundColor: cupo === 0 || activos >= cupo ? "#94a3b8" : "#059669", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: cupo === 0 || activos >= cupo ? "not-allowed" : "pointer" }}>
+                        + Nuevo Repartidor
+                      </button>
+                    </div>
+                    {choferes.length === 0 ? (
+                      <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px", backgroundColor: "#fff", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>No hay repartidores registrados en esta empresa.</div>
+                    ) : choferes.map(chofer => (
+                      <div key={chofer.id} style={{ backgroundColor: "#fff", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "12px", marginBottom: "6px", display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: "800" }}>🚚 {chofer.nombre || "Repartidor"}</div>
+                          <div style={{ fontSize: "12px", color: "#64748b" }}>{chofer.email} · {chofer.activo === false ? "Inactivo" : "Activo"}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* Botón Cerrar Ficha */}
               <div style={{ marginTop: "24px", display: "flex", justifyContent: "flex-end" }}>
@@ -1187,11 +1377,21 @@ export default function AdminClientes() {
       {mostrarModalPreventista && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20000, padding: "16px" }}>
           <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "450px", boxSizing: "border-box" }}>
-            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px" }}>{nuevoRolEmpleado === "supervisor" ? "👔 Dar de Alta Nuevo Supervisor" : "🚶 Dar de Alta Nuevo Preventista"}</h3>
+            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px" }}>{nuevoRolEmpleado === "supervisor" ? "👔 Dar de Alta Nuevo Supervisor" : nuevoRolEmpleado === "repartidor" ? "🚚 Dar de Alta Nuevo Repartidor" : "🚶 Dar de Alta Nuevo Preventista"}</h3>
             <form onSubmit={crearNuevoPreventista}>
               <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Walter)" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
               <input type="email" value={nuevoEmail} onChange={(e) => setNuevoEmail(e.target.value)} placeholder="Email de login" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
               <input type="password" value={nuevoPassword} onChange={(e) => setNuevoPassword(e.target.value)} placeholder="Contraseña temporal" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
+              {nuevoRolEmpleado === "supervisor" && (
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Funciones del supervisor</label>
+                  <select value={nuevoTipoSupervisor} onChange={e => setNuevoTipoSupervisor(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="supervisorv">Supervisor de Ventas</option>
+                    <option value="supervisorr">Supervisor de Depósito y Repartos</option>
+                    <option value="ambos">Ambas funciones</option>
+                  </select>
+                </div>
+              )}
               {nuevoRolEmpleado === "preventista" && (
                 <div style={{ marginBottom: "12px" }}>
                   <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Tipo de preventista</label>
@@ -1236,21 +1436,26 @@ export default function AdminClientes() {
             </div>
 
             {(() => {
-              const contrato = tarifasMap[empresaPago] || {};
-              const cupo = Number(contrato.cupo || 0);
-              const tarifa = Number(contrato.valor || contrato.tarifa || 0);
-              const moneda = contrato.moneda || monedaPago || "ARS";
-              const esPlana = contrato.tipo === "plana";
-              const mensual = esPlana ? tarifa : cupo * tarifa;
+              const activos = contratosActivosEmpresa;
+              const reparto = activos.find(c => tipoContrato(c.plan_nombre) === "Repartos");
+              const ventas = activos.find(c => tipoContrato(c.plan_nombre) === "Ventas");
+              const simplex = activos.find(c => tipoContrato(c.plan_nombre) === "Simplex");
+              const integrado = activos.find(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos");
+              const vigente = abonoEmpresaActual || reparto || ventas || simplex || integrado;
+              const empresaDB = empresasRegistros.find(e => e.nombre === empresaPago);
+              const cupoRepartidores = Number(reparto?.cupo_repartidores ?? integrado?.cupo_repartidores ?? empresaDB?.cupo_repartidores ?? 0);
+              const cupoVentas = Number(ventas?.cupo_preventistas ?? integrado?.cupo_preventistas ?? (reparto && !ventas && !integrado ? 0 : empresaDB?.cupo_preventistas ?? 0));
               return (
                 <div style={{ backgroundColor: "#0f172a", border: "1px solid #38bdf8", borderRadius: "10px", padding: "12px", marginBottom: "16px" }}>
-                  <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: "800", marginBottom: "4px" }}>CONTRATO ACTUAL</div>
-                  <div style={{ color: "#e2e8f0", fontSize: "12px" }}>
-                    {esPlana ? "Tarifa plana mensual" : `${cupo} preventistas contratados × ${moneda} $${tarifa.toLocaleString("es-AR")} c/u`}
-                  </div>
-                  <div style={{ marginTop: "4px", color: "#38bdf8", fontSize: "18px", fontWeight: "900" }}>
-                    Abono mensual: {moneda} ${mensual.toLocaleString("es-AR")}
-                  </div>
+                  <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: "800", marginBottom: "4px" }}>RESUMEN DE SERVICIOS CONTRATADOS</div>
+                  {vigente ? <>
+                    <div style={{ color: "#e2e8f0", fontSize: "12px" }}>{activos.map(c => c.plan_nombre).join(" + ")}</div>
+                    <div style={{ color: "#cbd5e1", fontSize: "12px", marginTop: "4px" }}>{cupoVentas} preventistas · {cupoRepartidores} repartidores</div>
+                    <div style={{ marginTop: "4px", color: "#38bdf8", fontSize: "18px", fontWeight: "900" }}>
+                      Precio acordado: {vigente.moneda || "ARS"} ${Number(vigente.precio_acordado ?? 0).toLocaleString("es-AR")}
+                      <span style={{ fontSize: "11px", color: "#94a3b8" }}> / {vigente.modalidad || "período"}</span>
+                    </div>
+                  </> : <div style={{ color: "#94a3b8", fontSize: "12px" }}>Sin contrato activo registrado</div>}
                 </div>
               );
             })()}
@@ -1265,7 +1470,7 @@ export default function AdminClientes() {
                         {abonoEmpresaActual.plan_nombre} · <span style={{ textTransform: "capitalize" }}>{abonoEmpresaActual.modalidad}</span>
                       </div>
                       <div style={{ color: "#cbd5e1", fontSize: "12px", marginTop: "3px" }}>
-                        {abonoEmpresaActual.moneda} ${Number(abonoEmpresaActual.precio_acordado || 0).toLocaleString("es-AR")} · {abonoEmpresaActual.cupo_preventistas || 0} preventistas
+                        {abonoEmpresaActual.moneda} ${Number(abonoEmpresaActual.precio_acordado || 0).toLocaleString("es-AR")} · {abonoEmpresaActual.plan_nombre?.startsWith("Repartos · ") ? `${Number(abonoEmpresaActual.cupo_repartidores ?? 0)} repartidores` : `${Number(abonoEmpresaActual.cupo_preventistas ?? 0)} preventistas`}
                       </div>
                       <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "3px" }}>
                         Vigente desde {abonoEmpresaActual.fecha_inicio || "—"} · Día de corte {abonoEmpresaActual.dia_corte || "—"} · próximo vencimiento {abonoEmpresaActual.proximo_vencimiento || "—"}
@@ -1284,9 +1489,48 @@ export default function AdminClientes() {
                 )}
               </div>
 
+              {abonoEmpresaActual && !editandoContratoAbono && (
+                <div style={{ marginTop: "10px" }}>
+                  <button type="button" onClick={() => {
+                    setAbonoEmpresaActual(null);
+                    setProductoAbono("Ventas");
+                    setPlanSeleccionadoId("");
+                    setVarianteSeleccionadaId("");
+                    setPrecioAcordado("");
+                    setCupoAbono("");
+                    setCupoRepartidoresAbono("");
+                    setInicioAbono("");
+                    setVencimientoAbono("");
+                    setNotasContratoAbono("");
+                    setEditandoContratoAbono(true);
+                  }} style={{ backgroundColor: "#334155", color: "#fff", border: "1px solid #64748b", padding: "9px 13px", borderRadius: "7px", cursor: "pointer", fontWeight: "700" }}>
+                    + Preparar contrato de otro servicio
+                  </button>
+                  <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "5px" }}>Los contratos vigentes se conservan. El plan integrado todavía no permite guardado.</div>
+                </div>
+              )}
+
+              {contratosActivosEmpresa.length > 1 && !editandoContratoAbono && (
+                <div style={{ marginTop: "12px", padding: "10px", backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
+                  <div style={{ fontSize: "12px", color: "#94a3b8", marginBottom: "7px" }}>Contratos activos de esta empresa (elegí cuál consultar)</div>
+                  <div style={{ display: "flex", gap: "7px", flexWrap: "wrap" }}>
+                    {contratosActivosEmpresa.map(c => (
+                      <button key={c.id} type="button" onClick={() => seleccionarContratoActivo(c)} style={{ padding: "7px 10px", borderRadius: "7px", border: c.id === abonoEmpresaActual?.id ? "1px solid #a78bfa" : "1px solid #475569", backgroundColor: c.id === abonoEmpresaActual?.id ? "#4c1d95" : "#334155", color: "#fff", cursor: "pointer", fontSize: "12px" }}>
+                        {c.plan_nombre || "Plan"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {editandoContratoAbono && (
                 <div style={{ marginTop: "14px", borderTop: "1px solid #334155", paddingTop: "14px" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: "10px" }}>
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Producto
+                      <select value={productoAbono} onChange={(e) => { setProductoAbono(e.target.value); setPlanSeleccionadoId(""); setVarianteSeleccionadaId(""); setPrecioAcordado(""); setCupoAbono(e.target.value === "Repartos" ? "0" : ""); setCupoRepartidoresAbono(e.target.value === "Repartos" ? "3" : ""); }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="Ventas">Ventas</option><option value="Repartos">Repartos</option><option value="Ventas + Repartos">Ventas + Repartos</option><option value="Simplex">Simplex</option>
+                      </select>
+                    </label>
                     <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Plan
                       <select value={planSeleccionadoId} onChange={(e) => {
                         setPlanSeleccionadoId(e.target.value);
@@ -1294,7 +1538,7 @@ export default function AdminClientes() {
                         setPrecioAcordado("");
                       }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
                         <option value="">Elegir plan...</option>
-                        {planesCatalogo.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                        {planesCatalogo.filter(p => productoAbono === "Repartos" ? p.nombre.startsWith("Repartos · ") : productoAbono === "Ventas + Repartos" ? p.nombre.startsWith("Ventas + Repartos · ") : productoAbono === "Simplex" ? p.nombre === "Simplex" : p.nombre.startsWith("Ventas · ") || p.nombre === "Básico").map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                       </select>
                     </label>
 
@@ -1342,18 +1586,32 @@ export default function AdminClientes() {
                       </select>
                     </label>
 
-                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de preventistas
-                      <input type="number" min="0" value={cupoAbono} onChange={(e) => setCupoAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
-                    </label>
+                    {productoAbono !== "Simplex" && (
+                      <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de preventistas (Ventas)
+                        <input type="number" min="0" disabled={productoAbono === "Repartos"} value={productoAbono === "Repartos" ? "0" : cupoAbono} onChange={(e) => setCupoAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                      </label>
+                    )}
+                    {(productoAbono === "Repartos" || productoAbono === "Ventas + Repartos") && (
+                      <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de repartidores (independiente)
+                        <input type="number" min="0" value={cupoRepartidoresAbono} onChange={(e) => setCupoRepartidoresAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                      </label>
+                    )}
+                    {productoAbono === "Simplex" && <div style={{ fontSize: 12, color: "#94a3b8" }}>Simplex tiene su propio acceso. No comparte cupos con Ventas ni Repartos.</div>}
                   </div>
 
                   <label style={{ display: "block", color: "#94a3b8", fontSize: "12px", fontWeight: "700", marginTop: "10px" }}>Notas del acuerdo
                     <textarea rows={2} value={notasContratoAbono} onChange={(e) => setNotasContratoAbono(e.target.value)} placeholder="Ej. precio especial primer año..." style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", resize: "vertical" }} />
                   </label>
 
+                  {(productoAbono === "Repartos" || productoAbono === "Ventas + Repartos") && (
+                    <div style={{ color: "#fbbf24", fontSize: 12, marginTop: 12 }}>
+                      <strong>Vista previa, sin guardar:</strong> {productoAbono === "Repartos" ? "0 preventistas" : `${Number(cupoAbono) || 0} preventistas`} y {Number(cupoRepartidoresAbono) || 0} repartidores.
+                      {" "}El cupo de Repartos se puede registrar en el contrato y en la empresa. Esto NO habilita todavía usuarios, pantallas ni permisos de Repartos.
+                    </div>
+                  )}
                   <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "10px", flexWrap: "wrap" }}>
                     {abonoEmpresaActual && <button type="button" onClick={() => setEditandoContratoAbono(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: "pointer" }}>Cancelar</button>}
-                    <button type="button" disabled={guardandoContratoAbono} onClick={guardarContratoAbono} style={{ backgroundColor: guardandoContratoAbono ? "#475569" : "#7c3aed", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: guardandoContratoAbono ? "not-allowed" : "pointer", fontWeight: "900" }}>
+                    <button type="button" disabled={guardandoContratoAbono || productoAbono === "Ventas + Repartos"} onClick={guardarContratoAbono} style={{ backgroundColor: guardandoContratoAbono || productoAbono === "Ventas + Repartos" ? "#475569" : "#7c3aed", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: guardandoContratoAbono ? "not-allowed" : "pointer", fontWeight: "900" }}>
                       {guardandoContratoAbono ? "Guardando..." : "💾 Guardar abono contratado"}
                     </button>
                   </div>
@@ -1373,10 +1631,9 @@ export default function AdminClientes() {
                 if (v === "bonificacion") {
                   setMontoPago("0");
                 } else if (v === "primer_abono" || v === "renovacion") {
-                  const contrato = tarifasMap[empresaPago] || {};
-                  const tarifa = Number(contrato.valor || contrato.tarifa || 0);
-                  const cupo = Number(contrato.cupo || 0);
-                  setMontoPago(String(contrato.tipo === "plana" ? tarifa : cupo * tarifa));
+                  // No recuperar tarifas históricas: el importe real es el pactado en el contrato.
+                  setMontoPago(String(Number(abonoEmpresaActual?.precio_acordado ?? 0)));
+                  setMonedaPago(abonoEmpresaActual?.moneda || "ARS");
                 }
               }} style={{ width: "100%", padding: "11px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "14px", boxSizing: "border-box" }}>
                 <option value="primer_abono">🆕 Alta / Primer abono</option>

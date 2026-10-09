@@ -9,12 +9,31 @@ import AdminClientes from "./AdminClientes";
 import AdminPromotores from "./AdminPromotores";
 import WebComercial from "./WebComercial";
 import MonitorPedidos from "./MonitorPedidos";
-import Despacho from "./Despacho";
+import Repartos from "./Repartos";
 import Repartidor from "./Repartidor";
 import { supabase } from "./supabase";
 
+// Navegación para quienes tienen acceso a ambos módulos.
+function SupervisorConCambioModulo() {
+  return (
+    <div>
+      <div style={{ position: "fixed", right: 12, bottom: 12, zIndex: 10000 }}>
+        <button type="button" onClick={() => window.location.assign("/")}
+          style={{ padding: "12px 16px", border: "none", borderRadius: 10, background: "#0f766e", color: "white", fontWeight: 800, boxShadow: "0 3px 12px #0004", cursor: "pointer" }}>
+          ⇄ CAMBIAR MÓDULO
+        </button>
+      </div>
+      <Supervisor />
+    </div>
+  );
+}
+
 function EnrutadorSeguro() {
   console.log("🚦 EnrutadorSeguro está renderizando");
+  // Compatibilidad: enlaces antiguos siguen funcionando.
+  if (window.location.pathname === "/despacho" || window.location.pathname.startsWith("/despacho/")) {
+    window.history.replaceState(null, "", "/repartos" + window.location.search + window.location.hash);
+  }
   const ruta = window.location.pathname;
   const [sesion, setSesion] = useState(null);
   const [perfil, setPerfil] = useState(null);
@@ -145,6 +164,8 @@ function EnrutadorSeguro() {
 
   // Con sesión activa: derivamos según rol y ruta
 const rol = (perfil?.rol || "").toLowerCase();
+const puedeVentas = rol === "superadmin" || rol === "supervisor" || rol === "supervisorv" || rolesExtra.includes("supervisorv");
+const puedeRepartos = rol === "superadmin" || rol === "supervisorr" || rolesExtra.includes("supervisorr") || rolesExtra.includes("despacho");
 
 // Esperar a que Supabase termine de cargar el perfil antes de decidir qué panel mostrar.
 // Evita que un Supervisor o SuperAdmin vea por un instante la pantalla de Preventista.
@@ -177,33 +198,38 @@ if (ruta.startsWith("/promotores")) {
   window.location.replace("/");
   return null;
 }
-  if (ruta.startsWith("/repartos")) {
-    const puedeRepartir = rolesExtra.includes("repartidor");
-
-    if (puedeRepartir) {
+  // Ruta explícita del chofer, incluso si también tiene otros roles.
+  if (ruta === "/repartos/chofer" || ruta.startsWith("/repartos/chofer/")) {
+    if (rolesExtra.includes("repartidor")) {
       return <Repartidor sesion={sesion} perfil={perfil} />;
     }
-
     window.location.replace("/");
     return null;
   }
 
-  if (ruta.startsWith("/despacho")) {
-    const puedeDespacho =
-      rol === "superadmin" ||
-      rol === "supervisor" ||
-      rolesExtra.includes("despacho");
-
-    if (puedeDespacho) {
-      return <Despacho sesion={sesion} perfil={perfil} />;
+  // El Supervisor de Depósito organiza la preparación y ordena los repartos.
+  // Se conserva el rol adicional "despacho" en la base de datos por compatibilidad.
+  if (ruta === "/repartos" || ruta === "/repartos/") {
+    if (puedeRepartos) {
+      return <Repartos sesion={sesion} perfil={perfil} onVolver={puedeVentas && rol !== "superadmin" ? () => window.location.assign("/") : undefined} />;
     }
-
+    if (rolesExtra.includes("repartidor")) {
+      return <Repartidor sesion={sesion} perfil={perfil} />;
+    }
     window.location.replace("/");
     return null;
   }
 
-  if (ruta.startsWith("/pedidos")) return <MonitorPedidos />;
+  if (ruta.startsWith("/pedidos")) {
+    if (puedeVentas) return <MonitorPedidos />;
+    window.location.replace("/");
+    return null;
+  }
   if (ruta.startsWith("/pagos")) {
+    if (!puedeVentas) {
+      window.location.replace("/");
+      return null;
+    }
     if (typeof PortalPagos !== "undefined") return <PortalPagos />;
     window.location.replace("/supervisor");
     return null;
@@ -216,8 +242,30 @@ if (ruta.startsWith("/promotores")) {
     return <AdminClientes />;
   }
 
-  if (rol === "supervisor") {
-    return <Supervisor />;
+  // Un supervisor con ambas funciones elige su módulo al entrar.
+  if (puedeVentas && puedeRepartos && rol !== "superadmin" && (ruta === "/" || ruta === "/ventas")) {
+    if (ruta === "/ventas") return <SupervisorConCambioModulo />;
+    return (
+      <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif" }}>
+        <div style={{ width: "100%", maxWidth: "430px", background: "#1e293b", border: "1px solid #334155", borderRadius: "16px", padding: "26px", color: "#fff", textAlign: "center" }}>
+          <img src="/logo.svg" alt="RutaComercio" style={{ width: "150px", margin: "0 auto 14px" }} />
+          <h2>Hola, {perfil?.nombre || "supervisor"}</h2>
+          <p style={{ color: "#94a3b8" }}>¿Con qué módulo querés trabajar?</p>
+          <div style={{ display: "grid", gap: "10px" }}>
+            <button onClick={() => window.location.assign("/ventas")} style={{ padding: "17px", background: "#2563eb", color: "#fff", border: "none", borderRadius: "10px", fontWeight: "bold", cursor: "pointer" }}>📋 SUPERVISOR DE VENTAS</button>
+            <button onClick={() => window.location.assign("/repartos")} style={{ padding: "17px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", fontWeight: "bold", cursor: "pointer" }}>🚚 DEPÓSITO Y REPARTOS</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (puedeVentas && (ruta === "/" || ruta === "/ventas" || ruta.startsWith("/supervisor"))) {
+    return puedeRepartos && rol !== "superadmin" ? <SupervisorConCambioModulo /> : <Supervisor />;
+  }
+
+  if (puedeRepartos && (ruta === "/" || ruta.startsWith("/supervisor"))) {
+    return <Repartos sesion={sesion} perfil={perfil} onVolver={puedeVentas && rol !== "superadmin" ? () => window.location.assign("/") : undefined} />;
   }
 
   if (rol === "simplex") {
@@ -246,6 +294,10 @@ if (ruta.startsWith("/promotores")) {
     );
   }
 
+  if (rol === "supervisorr" || rol === "supervisorv") {
+    window.location.replace("/");
+    return null;
+  }
   return <App sesion={sesion} perfil={perfil} />;
 }
 

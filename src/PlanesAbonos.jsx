@@ -1,6 +1,22 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 
+const nivelesComerciales = [
+  { nombre: "Básico", rango: "1 a 3" },
+  { nombre: "Intermedio", rango: "4 a 8" },
+  { nombre: "PyME", rango: "9 a 20" },
+  { nombre: "Full", rango: "21 en adelante" },
+];
+const productoDe = (nombre = "") => {
+  if (nombre === "Simplex") return "Simplex";
+  if (nombre === "Básico" || nombre.startsWith("Ventas · ")) return "Ventas";
+  if (nombre.startsWith("Repartos · ")) return "Repartos";
+  if (nombre.startsWith("Ventas + Repartos · ")) return "Ventas + Repartos";
+  return nombre.includes(" · ") ? nombre.split(" · ")[0] : nombre;
+};
+const productosIniciales = ["Ventas", "Repartos", "Ventas + Repartos", "Simplex"];
+const nivelDe = (p) => p.nombre === "Básico" ? "Básico" : p.nombre.split(" · ")[1] || "Simple";
+
 const planVacio = { nombre: "", descripcion: "", activo: true, notas: "" };
 const modalidadVacia = { modalidad: "mensual", meses: 1, precio: "", moneda: "ARS", descuento: "", activo: true, notas: "" };
 
@@ -21,6 +37,40 @@ export default function PlanesAbonos({ onClose }) {
   const [formModalidad, setFormModalidad] = useState(modalidadVacia);
   const [editandoModalidad, setEditandoModalidad] = useState(null);
   const [guardando, setGuardando] = useState(false);
+  const [productoVisible, setProductoVisible] = useState("Ventas");
+  const [creandoNiveles, setCreandoNiveles] = useState(false);
+  const [nivelVisible, setNivelVisible] = useState("Básico");
+  const [creandoProducto, setCreandoProducto] = useState(false);
+  const productos = [...new Set([...productosIniciales, ...planes.map(p => productoDe(p.nombre))])].filter(p => p && p !== "Nuevo plan");
+
+  // Usa las columnas existentes: no cambia ni desactiva contratos actuales.
+  const crearNiveles = async () => {
+    if (!["Ventas", "Repartos", "Ventas + Repartos"].includes(productoVisible)) return;
+    const faltantes = nivelesComerciales.filter(n => !planes.some(p => p.nombre === `${productoVisible} · ${n.nombre}` || (productoVisible === "Ventas" && n.nombre === "Básico" && p.nombre === "Básico")));
+    if (!faltantes.length) return alert("Los cuatro niveles ya están creados.");
+    if (!window.confirm(`¿Crear ${faltantes.length} nivel(es) de ${productoVisible}? Los precios se cargarán después.`)) return;
+    setCreandoNiveles(true);
+    try {
+      for (const n of faltantes) {
+        const { error } = await supabase.from("planes_abono").insert({
+          nombre: `${productoVisible} · ${n.nombre}`,
+          descripcion: `${n.rango} ${productoVisible === "Ventas" ? "preventistas" : productoVisible === "Repartos" ? "repartidores" : "usuarios por servicio (cupos independientes)"}`,
+          activo: true,
+          tipo_acceso: "multiusuario",
+          cupo_base: Number(n.rango.split(" ")[0]),
+          permite_adicionales: true,
+        });
+        if (error) throw error;
+      }
+      await cargar();
+      alert("Niveles creados. Ahora podés cargar los precios de cada uno.");
+    } catch (err) {
+      await cargar();
+      alert("No se pudieron crear todos los niveles: " + err.message);
+    } finally {
+      setCreandoNiveles(false);
+    }
+  };
 
   const cargar = async () => {
     const [p, v] = await Promise.all([
@@ -36,6 +86,7 @@ export default function PlanesAbonos({ onClose }) {
   useEffect(() => { cargar(); }, []);
 
   const cerrarPlan = () => {
+    setCreandoProducto(false);
     setMostrarNuevoPlan(false);
     setEditandoPlan(null);
     setFormPlan(planVacio);
@@ -43,23 +94,48 @@ export default function PlanesAbonos({ onClose }) {
 
   const guardarPlan = async (e) => {
     e.preventDefault();
+    if (guardando) return;
+    const nombre = formPlan.nombre.trim();
+    if (!nombre) return alert("Ingresá un nombre.");
+    const esProductoNuevo = creandoProducto && !editandoPlan;
+    if (esProductoNuevo && (productos.includes(nombre) || nombre.includes(" · "))) {
+      return alert("Ese producto ya existe o tiene un nombre no válido.");
+    }
+    const nombreRegistro = esProductoNuevo ? `${nombre} · Básico` : nombre;
+    if (!editandoPlan && planes.some(p => p.nombre.toLowerCase() === nombreRegistro.toLowerCase())) {
+      return alert("Ese abono ya existe.");
+    }
     setGuardando(true);
     const payload = {
-      nombre: formPlan.nombre.trim(),
+      nombre: nombreRegistro,
       descripcion: formPlan.descripcion.trim() || null,
       activo: formPlan.activo,
-      notas: formPlan.notas.trim() || null,
+      ...(!editandoPlan ? {
+        tipo_acceso: nombreRegistro === "Simplex" ? "simplex" : "multiusuario",
+        cupo_base: nombreRegistro === "Simplex" ? 1 : 1,
+        permite_adicionales: nombreRegistro !== "Simplex",
+      } : {}),
     };
-    const r = editandoPlan
-      ? await supabase.from("planes_abono").update(payload).eq("id", editandoPlan.id)
-      : await supabase.from("planes_abono").insert(payload);
-    setGuardando(false);
-    if (r.error) return alert(r.error.message);
-    cerrarPlan();
-    cargar();
+    try {
+      const r = editandoPlan
+        ? await supabase.from("planes_abono").update(payload).eq("id", editandoPlan.id)
+        : await supabase.from("planes_abono").insert(payload);
+      if (r.error) throw r.error;
+      cerrarPlan();
+      setCreandoProducto(false);
+      if (esProductoNuevo) { setProductoVisible(nombre); setNivelVisible("Básico"); }
+      await cargar();
+    } catch (error) {
+      alert("No se pudo guardar: " + error.message);
+    } finally { setGuardando(false); }
   };
 
   const abrirModalidad = (plan, modalidad) => {
+    const existente = variantes.find(v => v.plan_id === plan.id && v.modalidad === modalidad && v.activo !== false);
+    if (existente && modalidad !== "personalizado") {
+      editarModalidad(plan, existente);
+      return;
+    }
     const cfg = configModalidades[modalidad];
     setEditandoModalidad(null);
     setPlanModalidad(plan);
@@ -72,6 +148,7 @@ export default function PlanesAbonos({ onClose }) {
 
   const guardarModalidad = async (e) => {
     e.preventDefault();
+    if (guardando) return;
     setGuardando(true);
     const payload = {
       plan_id: planModalidad.id,
@@ -81,7 +158,7 @@ export default function PlanesAbonos({ onClose }) {
       moneda: formModalidad.moneda,
       descuento_porcentaje: formModalidad.descuento === "" ? null : Number(formModalidad.descuento),
       activo: formModalidad.activo,
-      notas: formModalidad.notas.trim() || null,
+      notas: String(formModalidad.notas || "").trim() || null,
     };
     const r = editandoModalidad
       ? await supabase.from("planes_abono_variantes").update(payload).eq("id", editandoModalidad.id)
@@ -155,31 +232,48 @@ export default function PlanesAbonos({ onClose }) {
           <div>
             <h2 style={{ margin: 0 }}>📋 Planes y Abonos</h2>
             <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 5 }}>
-              Primero creás el plan. Después cargás sus precios mensual, semestral, anual o una modalidad especial.
+              Catálogo comercial de consulta. Los precios son orientativos y no habilitan servicios ni modifican contratos.
             </div>
           </div>
           <button onClick={onClose} style={{ ...boton, background: "#334155" }}>✕ Cerrar</button>
         </div>
 
-        {!mostrarNuevoPlan && !editandoPlan && (
-          <button
-            onClick={() => { setMostrarNuevoPlan(true); setFormPlan(planVacio); }}
-            style={{ ...boton, background: "#2563eb", fontSize: 15, marginBottom: 18 }}
-          >
-            + CREAR NUEVO PLAN
-          </button>
-        )}
-
+        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>PLANES</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+          {productos.map(producto => (
+            <button key={producto} type="button" onClick={() => { cerrarPlan(); setProductoVisible(producto); setNivelVisible(producto === "Simplex" ? "Simple" : "Básico"); }}
+              style={{ ...boton, background: productoVisible === producto ? "#2563eb" : "#334155" }}>
+              {producto}
+            </button>
+          ))}
+          <button type="button" onClick={() => { cerrarPlan(); setMostrarNuevoPlan(true); setCreandoProducto(true); setFormPlan({ ...planVacio }); }}
+            style={{ ...boton, background: "#2563eb" }}>+ Agregar nuevo plan</button>
+        </div>
+        <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>ABONOS — {productoVisible.toUpperCase()}</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+          {(productoVisible === "Simplex" ? [{ nombre: "Simple", rango: "1 usuario" }] : nivelesComerciales).map(n => (
+            <button key={n.nombre} type="button" onClick={() => setNivelVisible(n.nombre)}
+              style={{ ...boton, background: nivelVisible === n.nombre ? "#2563eb" : "#334155" }}>
+              {n.nombre} ({n.rango})
+            </button>
+          ))}
+          {["Ventas", "Repartos", "Ventas + Repartos"].includes(productoVisible) && (
+            <button type="button" disabled={creandoNiveles} onClick={crearNiveles}
+              style={{ ...boton, background: "#047857" }}>
+              {creandoNiveles ? "Creando..." : `+ Crear abonos de ${productoVisible} que falten`}
+            </button>
+          )}
+        </div>
         {(mostrarNuevoPlan || editandoPlan) && (
           <form onSubmit={guardarPlan} style={{ background: "#1e293b", padding: 16, borderRadius: 10, marginBottom: 18, border: "1px solid #334155" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 12 }}>
-              <b style={{ fontSize: 16 }}>{editandoPlan ? "✏️ Editar plan" : "➕ Crear nuevo plan"}</b>
+              <b style={{ fontSize: 16 }}>{editandoPlan ? "✏️ Editar abono" : creandoProducto ? "➕ Agregar nuevo producto" : "➕ Crear abono"}</b>
               <button type="button" onClick={cerrarPlan} style={{ ...boton, background: "#475569", padding: "7px 10px" }}>Cancelar</button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
-              <input required placeholder="Nombre del plan. Ej.: RutaComercio Básico" value={formPlan.nombre} onChange={e => setFormPlan({ ...formPlan, nombre: e.target.value })} style={campo} />
-              <input placeholder="Qué incluye. Ej.: Hasta 3 preventistas" value={formPlan.descripcion} onChange={e => setFormPlan({ ...formPlan, descripcion: e.target.value })} style={campo} />
-              <input placeholder="Notas internas (opcional)" value={formPlan.notas} onChange={e => setFormPlan({ ...formPlan, notas: e.target.value })} style={campo} />
+              <input required placeholder={creandoProducto ? "Nombre del nuevo producto" : "Nombre del abono"} value={formPlan.nombre} onChange={e => setFormPlan({ ...formPlan, nombre: e.target.value })} style={campo} />
+              <input placeholder="Descripción y notas comerciales (guardadas en Supabase)" value={formPlan.descripcion} onChange={e => setFormPlan({ ...formPlan, descripcion: e.target.value })} style={campo} />
+
             </div>
             <button disabled={guardando} style={{ ...boton, background: "#2563eb", marginTop: 12 }}>
               {guardando ? "Guardando..." : editandoPlan ? "Guardar cambios" : "Crear plan"}
@@ -188,7 +282,7 @@ export default function PlanesAbonos({ onClose }) {
         )}
 
         <div style={{ display: "grid", gap: 14 }}>
-          {planes.map(p => {
+          {planes.filter(p => productoDe(p.nombre) === productoVisible && (productoVisible === "Simplex" || nivelDe(p) === nivelVisible)).map(p => {
             const vars = variantes.filter(v => v.plan_id === p.id);
             return (
               <div key={p.id} style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 12, padding: 16 }}>
@@ -196,11 +290,12 @@ export default function PlanesAbonos({ onClose }) {
                   <div>
                     <b style={{ fontSize: 18 }}>{p.nombre}</b>
                     <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>{p.descripcion || "Sin descripción"}</div>
-                    {p.notas && <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>Nota: {p.notas}</div>}
+                    
                   </div>
                   <button
                     onClick={() => {
                       setMostrarNuevoPlan(false);
+                      setCreandoProducto(false);
                       setEditandoPlan(p);
                       setFormPlan({ nombre: p.nombre || "", descripcion: p.descripcion || "", activo: p.activo !== false, notas: p.notas || "" });
                     }}
@@ -306,9 +401,9 @@ export default function PlanesAbonos({ onClose }) {
             );
           })}
 
-          {planes.length === 0 && (
+          {planes.filter(p => productoDe(p.nombre) === productoVisible && (productoVisible === "Simplex" || nivelDe(p) === nivelVisible)).length === 0 && !mostrarNuevoPlan && (
             <div style={{ padding: 25, border: "1px dashed #475569", borderRadius: 10, textAlign: "center", color: "#94a3b8" }}>
-              Todavía no hay planes. Empezá con <b>+ CREAR NUEVO PLAN</b>.
+              Todavía no hay un abono cargado para esta selección.
             </div>
           )}
         </div>

@@ -1,5 +1,82 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+// Mapa de planificación: no consulta Geoapify mientras se navega por el mapa.
+const puntoValido = (lat, lng) => lat != null && lng != null &&
+  Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) &&
+  Math.abs(Number(lat)) <= 90 && Math.abs(Number(lng)) <= 180;
+
+function AjustarMapaRepartos({ puntos }) {
+  const map = useMap();
+  useEffect(() => {
+    if (puntos.length === 1) map.setView(puntos[0], 14);
+    else if (puntos.length > 1) map.fitBounds(puntos, { padding: [35, 35], maxZoom: 15 });
+  }, [map, puntos]);
+  return null;
+}
+
+function ElegirPuntoMapa({ onElegir }) {
+  useMapEvents({ click(evento) { onElegir([evento.latlng.lat, evento.latlng.lng]); } });
+  return null;
+}
+
+const iconoEntrega = (estado) => {
+  const color = ["asignado", "recibido", "en_reparto"].includes(estado) ? "#2563eb" :
+    ["entregado"].includes(estado) ? "#16a34a" : "#ea580c";
+  return L.divIcon({ className: "", html: `<div style="width:19px;height:19px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 1px 5px #33415588"></div>`, iconSize:[25,25], iconAnchor:[12,12] });
+};
+
+function MapaPlanificacion({ destinos, repartidores, alElegirEntrega, ubicando, onUbicar }) {
+  const [filtro, setFiltro] = useState("todos");
+  const [filtroEstado, setFiltroEstado] = useState("todos");
+  // Los filtros solo cambian la visualización; nunca guardan ni asignan entregas.
+  const visibles = destinos.filter(d => {
+    const coincideChofer = filtro === "todos" || (filtro === "sin_asignar" ? !d.repartidor_id : String(d.repartidor_id) === filtro);
+    const estado = String(d.estado || "").toLowerCase();
+    const coincideEstado = filtroEstado === "todos" ||
+      (filtroEstado === "pendientes" && ["pendiente_preparacion", "preparado"].includes(estado)) ||
+      (filtroEstado === "asignadas" && ["asignado", "recibido", "en_reparto", "reintentar"].includes(estado)) ||
+      (filtroEstado === "finalizadas" && ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(estado));
+    return coincideChofer && coincideEstado;
+  });
+  const ubicados = visibles.filter(d => puntoValido(d.latitud, d.longitud));
+  const puntos = useMemo(() => ubicados.map(d => [Number(d.latitud), Number(d.longitud)]), [destinos, filtro, filtroEstado]);
+  const sinCoordenadas = destinos.filter(d => !puntoValido(d.latitud, d.longitud) && d.direccion);
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:12,padding:12,marginBottom:14}}>
+    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:9}}>
+      <strong>🗺️ MAPA DE PLANIFICACIÓN</strong>
+      <select value={filtro} onChange={e => setFiltro(e.target.value)} style={{padding:8,borderRadius:7,border:"1px solid #cbd5e1"}}>
+        <option value="todos">Todas las entregas</option><option value="sin_asignar">Sin chofer asignado</option>
+        {repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}
+      </select>
+      <select aria-label="Filtrar por estado" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{padding:8,borderRadius:7,border:"1px solid #cbd5e1"}}>
+        <option value="todos">Todos los estados</option>
+        <option value="pendientes">Pendientes y preparadas</option>
+        <option value="asignadas">Asignadas y en reparto</option>
+        <option value="finalizadas">Finalizadas</option>
+      </select>
+    </div>
+    {puntos.length > 0 ? <div style={{height:350,borderRadius:9,overflow:"hidden"}}>
+      <MapContainer center={puntos[0]} zoom={13} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
+        <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <AjustarMapaRepartos puntos={puntos}/>
+        {ubicados.map(d => <Marker key={d.id} position={[Number(d.latitud),Number(d.longitud)]} icon={iconoEntrega(d.estado)}>
+          <Popup><strong>{d.cliente}</strong><div>{d.direccion}</div><div>{d.estado}</div>
+            <div>Chofer: {repartidores.find(r => String(r.id) === String(d.repartidor_id))?.nombre || "Sin asignar"}</div>
+            <button type="button" onClick={() => alElegirEntrega(d)}>VER ENTREGA</button>
+          </Popup></Marker>)}
+      </MapContainer>
+    </div> : <div style={{padding:20,background:"#f8fafc",borderRadius:8}}>No hay destinos ubicados para los filtros seleccionados.</div>}
+    <div style={{fontSize:12,color:"#475569",marginTop:8}}>🟠 Pendiente/preparada · 🔵 Asignada/en reparto · 🟢 Entregada. {ubicados.length} de {visibles.length} destinos visibles en el mapa. Los filtros no modifican asignaciones.</div>
+    {sinCoordenadas.length > 0 && <div style={{fontSize:12,marginTop:8}}>
+      ⚠️ {sinCoordenadas.length} entrega/s sin coordenadas.
+      <button type="button" disabled={ubicando} onClick={onUbicar} style={{marginLeft:8,padding:"7px 10px"}}>{ubicando ? "Ubicando..." : "📍 UBICAR DIRECCIONES"}</button>
+    </div>}
+  </section>;
+}
 
 const ESTADO_LABEL = {
   pendiente_preparacion: "📦 PENDIENTE",
@@ -12,6 +89,8 @@ const ESTADO_LABEL = {
   anulacion_solicitada: "⏳ ANULACIÓN SOLICITADA",
 };
 
+const PROVINCIAS_ARGENTINAS = ["Buenos Aires", "Catamarca", "Chaco", "Chubut", "Ciudad Autónoma de Buenos Aires", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego, Antártida e Islas del Atlántico Sur", "Tucumán"];
+
 const fechaLocalISO = () => {
   const d = new Date();
   const y = d.getFullYear();
@@ -20,12 +99,19 @@ const fechaLocalISO = () => {
   return `${y}-${m}-${dia}`;
 };
 
-export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
+export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
   const [perfil, setPerfil] = useState(perfilProp || null);
   const [empresaId, setEmpresaId] = useState(perfilProp?.empresa_id || null);
   const [empresaNombre, setEmpresaNombre] = useState(perfilProp?.empresa || "");
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState("");
+  const [modoIndependiente, setModoIndependiente] = useState(false);
+  const [nuevaEntregaAbierta, setNuevaEntregaAbierta] = useState(false);
+  const [entregaManualActiva, setEntregaManualActiva] = useState(null);
+  const [guardandoManual, setGuardandoManual] = useState(false);
+  const [corrigiendoPunto, setCorrigiendoPunto] = useState(false);
+  const [puntoElegido, setPuntoElegido] = useState(null);
+  const [manual, setManual] = useState({ destinatario: "", direccion: "", localidad: "", provincia: "", partido: "", telefono: "", referencia_domicilio: "", bultos: "1", fecha_programada: fechaLocalISO(), numero_remito: "", numero_factura: "", observaciones: "" });
   const [pedidos, setPedidos] = useState([]);
   const [entregas, setEntregas] = useState([]);
   const [pedidoActivo, setPedidoActivo] = useState(null);
@@ -33,6 +119,36 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
   const [busqueda, setBusqueda] = useState("");
   const [bandeja, setBandeja] = useState("pendientes");
   const [repartidores, setRepartidores] = useState([]);
+  const [ubicandoDestinos, setUbicandoDestinos] = useState(false);
+  const [seleccionUbicacion, setSeleccionUbicacion] = useState(null);
+  const [indiceUbicacion, setIndiceUbicacion] = useState("");
+  const [municipios, setMunicipios] = useState([]);
+  const [cargandoMunicipios, setCargandoMunicipios] = useState(false);
+  const [municipiosError, setMunicipiosError] = useState("");
+  const [corrigiendoUbicacion, setCorrigiendoUbicacion] = useState(false);
+
+  // Catálogo público de municipios/departamentos argentinos; nunca se escribe en Supabase.
+  useEffect(() => {
+    if (!manual.provincia || !nuevaEntregaAbierta) { setMunicipios([]); return; }
+    const controller = new AbortController();
+    const obtener = async () => {
+      setCargandoMunicipios(true); setMunicipiosError(""); setMunicipios([]);
+      try {
+        const p = await fetch("https://apis.datos.gob.ar/georef/api/provincias?nombre=" + encodeURIComponent(manual.provincia) + "&campos=id,nombre", {signal:controller.signal});
+        if (!p.ok) throw new Error("No se pudo consultar provincias");
+        const prov = (await p.json()).provincias?.find(x => x.nombre.toLowerCase() === manual.provincia.toLowerCase());
+        if (!prov) throw new Error("Provincia no encontrada en el catálogo");
+        const tipo = manual.provincia === "Buenos Aires" ? "municipios" : "departamentos";
+        const r = await fetch(`https://apis.datos.gob.ar/georef/api/${tipo}?provincia=${encodeURIComponent(prov.id)}&max=5000&campos=id,nombre`, {signal:controller.signal});
+        if (!r.ok) throw new Error("No se pudo consultar municipios");
+        const datos = await r.json();
+        setMunicipios((datos[tipo] || []).map(x => x.nombre).sort((a,b)=>a.localeCompare(b,"es")));
+      } catch(e) { if (e.name !== "AbortError") setMunicipiosError("No se pudo cargar el catálogo. Podés escribir el partido manualmente."); }
+      finally { if (!controller.signal.aborted) setCargandoMunicipios(false); }
+    };
+    obtener();
+    return () => controller.abort();
+  }, [manual.provincia, nuevaEntregaAbierta]);
   const [repartidorSeleccionado, setRepartidorSeleccionado] = useState("");
   const [asignando, setAsignando] = useState(false);
   const [guardandoDatos, setGuardandoDatos] = useState(false);
@@ -79,6 +195,24 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
 
       setEmpresaNombre(empresaDb?.nombre || p.empresa || "");
 
+      // La modalidad depende del abono vigente, nunca del nombre de la empresa.
+      const { data: abonosDb, error: errorAbonos } = await supabase
+        .from("empresa_abonos")
+        .select("cupo_preventistas,cupo_repartidores,activo,created_at")
+        .eq("empresa_id", p.empresa_id)
+        .eq("activo", true)
+        .order("created_at", { ascending: false });
+      if (errorAbonos) throw errorAbonos;
+      const abono = (abonosDb || [])[0];
+      const independiente = Boolean(abono && Number(abono.cupo_repartidores) > 0 && Number(abono.cupo_preventistas) === 0);
+      setModoIndependiente(independiente);
+      console.log("🔎 DIAGNÓSTICO REPARTOS:", {
+  empresaId: p.empresa_id,
+  abonos: abonosDb,
+  independiente
+});
+
+
       // Repartidores habilitados de la empresa.
       const { data: rolesRepartidor, error: errorRolesRepartidor } = await supabase
         .from("perfiles_roles")
@@ -108,6 +242,7 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
 
       setRepartidores(listaRepartidores);
 
+      if (!independiente) {
       // NVI que ya fueron enviadas por el Supervisor a Depósito.
       const { data: pedidosDb, error: errorPedidos } = await supabase
         .from("pedidos")
@@ -150,7 +285,7 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
       if (idsComercios.length) {
         const { data: comerciosDb, error: errorComercios } = await supabase
           .from("comercios")
-          .select("id,direccion,localidad,provincia,telefono,whatsapp,contacto")
+          .select("id,direccion,localidad,provincia,telefono,whatsapp,contacto,ubicacion_exacta_latitud,ubicacion_exacta_longitud")
           .in("id", idsComercios);
 
         if (errorComercios) throw errorComercios;
@@ -167,6 +302,8 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
           numeroVisible: String(ped.numero_pedido || "").padStart(6, "0"),
           cliente: ped.comercio_nombre || `Comercio #${ped.comercio_id || ""}`,
           direccion: [c.direccion, c.localidad, c.provincia].filter(Boolean).join(", "),
+          latitud: c.ubicacion_exacta_latitud,
+          longitud: c.ubicacion_exacta_longitud,
           telefono: c.telefono || "",
           whatsapp: c.whatsapp || "",
           contacto: c.contacto || "",
@@ -175,6 +312,10 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
       });
 
       setPedidos(consolidados);
+
+      } else {
+        setPedidos([]);
+      }
 
       const { data: entregasDb, error: errorEntregas } = await supabase
         .from("repartos_entregas")
@@ -185,8 +326,8 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
       if (errorEntregas) throw errorEntregas;
       setEntregas(entregasDb || []);
     } catch (e) {
-      console.error("Error cargando Despacho:", e);
-      setErrorCarga(e?.message || "No se pudo cargar Despacho.");
+      console.error("Error cargando Depósito y Repartos:", e);
+      setErrorCarga(e?.message || "No se pudo cargar Depósito y Repartos.");
     } finally {
       setCargando(false);
     }
@@ -403,7 +544,7 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
 
     // Logística puede corregir la preparación mientras todavía no salió a reparto.
     if (!["preparado", "asignado"].includes(entrega.estado)) {
-      alert("⚠️ Esta entrega ya salió a reparto. Los datos de preparación ya no se modifican desde Despacho.");
+      alert("⚠️ Esta entrega ya salió a reparto. Los datos de preparación ya no se modifican desde Depósito y Repartos.");
       return;
     }
 
@@ -650,6 +791,201 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
     }
   };
 
+  const crearEntregaManual = async () => {
+    if (guardandoManual || !empresaId) return;
+    if (!manual.destinatario.trim() || !manual.direccion.trim() || !manual.provincia.trim() || !manual.partido.trim() || !manual.localidad.trim()) {
+      alert("Ingresá destinatario, calle, provincia, partido y localidad."); return;
+    }
+    const bultos = Number(manual.bultos);
+    if (!Number.isInteger(bultos) || bultos < 1) {
+      alert("Los bultos deben ser un número entero mayor que cero."); return;
+    }
+    setGuardandoManual(true);
+    try {
+      const { error } = await supabase.from("repartos_entregas").insert([{
+        empresa_id: empresaId, pedido_id: null, deposito_id: null, repartidor_id: null,
+        destinatario: manual.destinatario.trim(), direccion: manual.direccion.trim(),
+        localidad: manual.localidad.trim() || null, provincia: manual.provincia.trim() || null,
+        partido: manual.partido.trim() || null,
+        telefono: manual.telefono.trim() || null, referencia_domicilio: manual.referencia_domicilio.trim() || null,
+        bultos, fecha_programada: manual.fecha_programada || null,
+        numero_remito: manual.numero_remito.trim() || null, numero_factura: manual.numero_factura.trim() || null,
+        observaciones: manual.observaciones.trim() || null, estado: "pendiente_preparacion",
+        actualizado_at: new Date().toISOString(),
+      }]);
+      if (error) throw error;
+      setNuevaEntregaAbierta(false);
+      setManual({ destinatario: "", direccion: "", localidad: "", provincia: "", partido: "", telefono: "", referencia_domicilio: "", bultos: "1", fecha_programada: fechaLocalISO(), numero_remito: "", numero_factura: "", observaciones: "" });
+      await cargarDatos();
+      alert("✅ Entrega creada correctamente.");
+    } catch (e) { alert("❌ No se pudo crear la entrega: " + (e?.message || "Error")); }
+    finally { setGuardandoManual(false); }
+  };
+
+  const actualizarEntregaManual = async (nuevoEstado, repartidorId = null) => {
+    if (!entregaManualActiva || guardandoManual) return;
+    if (nuevoEstado === "asignado" && !repartidorId) { alert("Elegí un repartidor."); return; }
+    setGuardandoManual(true);
+    try {
+      const ahora = new Date().toISOString();
+      const cambios = { estado: nuevoEstado, actualizado_at: ahora };
+      if (nuevoEstado === "preparado") cambios.preparado_at = ahora;
+      if (nuevoEstado === "asignado") { cambios.repartidor_id = repartidorId; cambios.asignado_at = ahora; }
+      const { error } = await supabase.from("repartos_entregas").update(cambios)
+        .eq("id", entregaManualActiva.id).eq("empresa_id", empresaId).eq("estado", entregaManualActiva.estado);
+      if (error) throw error;
+      setEntregaManualActiva(null);
+      await cargarDatos();
+    } catch (e) { alert("❌ No se pudo actualizar: " + (e?.message || "Error")); }
+    finally { setGuardandoManual(false); }
+  };
+
+  const eliminarEntregaSinAsignar = async () => {
+    const e = entregaManualActiva;
+    if (!e || guardandoManual || !empresaId) return;
+    const permitidos = ["pendiente_preparacion", "preparado"];
+    if (!permitidos.includes(e.estado) || e.repartidor_id || e.pedido_id) {
+      alert("Esta entrega no se puede eliminar desde aquí: ya está vinculada a un repartidor o a Ventas.");
+      return;
+    }
+    const nombre = e.destinatario || "esta entrega";
+    if (!window.confirm(`¿ELIMINAR DEFINITIVAMENTE la entrega de ${nombre}?\n\nEsta operación no se puede deshacer. No afecta otras entregas.`)) return;
+    setGuardandoManual(true);
+    try {
+      // No eliminar entregas que contienen artículos: requieren un proceso específico.
+      const { data: articulos, error: errorArticulos } = await supabase
+        .from("repartos_entrega_items").select("id").eq("entrega_id", e.id)
+        .eq("empresa_id", empresaId).limit(1);
+      if (errorArticulos) throw errorArticulos;
+      if (articulos?.length) throw new Error("La entrega tiene artículos vinculados. No se eliminó para proteger los datos.");
+      const { data, error } = await supabase.from("repartos_entregas")
+        .delete()
+        .eq("id", e.id).eq("empresa_id", empresaId)
+        .is("pedido_id", null).is("repartidor_id", null)
+        .in("estado", permitidos)
+        .select("id");
+      if (error) throw error;
+      if (data?.length !== 1) throw new Error("No se eliminó: la entrega pudo haber cambiado de estado o faltan permisos.");
+      setEntregaManualActiva(null);
+      await cargarDatos();
+      alert("✅ Entrega eliminada correctamente.");
+    } catch (err) {
+      alert("❌ No se pudo eliminar: " + (err?.message || "Error desconocido"));
+    } finally {
+      setGuardandoManual(false);
+    }
+  };
+
+  const desasignarManual = async () => {
+    const e = entregaManualActiva;
+    if (!e || e.estado !== "asignado" || !e.repartidor_id || guardandoManual) return;
+    if (!window.confirm(`¿DESASIGNAR la entrega de ${e.destinatario}?\n\nVolverá a PREPARADO y quedará sin repartidor.`)) return;
+    setGuardandoManual(true);
+    try {
+      const { data, error } = await supabase.from("repartos_entregas")
+        .update({ estado: "preparado", repartidor_id: null, asignado_at: null, actualizado_at: new Date().toISOString() })
+        .eq("id", e.id).eq("empresa_id", empresaId).eq("estado", "asignado")
+        .select("id");
+      if (error) throw error;
+      if (!data?.length) throw new Error("La entrega cambió de estado. Actualizá la pantalla.");
+      setEntregaManualActiva(null);
+      await cargarDatos();
+    } catch (err) { alert("No se pudo desasignar: " + (err.message || err)); }
+    finally { setGuardandoManual(false); }
+  };
+
+  const guardarPuntoManual = async () => {
+    if (!entregaManualActiva || !puntoElegido || guardandoManual) return;
+    const idEntrega = entregaManualActiva.id;
+    const latitud = Number(puntoElegido[0]);
+    const longitud = Number(puntoElegido[1]);
+    if (!puntoValido(latitud, longitud)) { alert("El punto seleccionado no es válido."); return; }
+    if (!window.confirm(`¿Guardar este punto para ${entregaManualActiva.destinatario}?\n\nLatitud: ${latitud.toFixed(6)}\nLongitud: ${longitud.toFixed(6)}\n\nConfirmá solo si está en el domicilio correcto.`)) return;
+    setGuardandoManual(true);
+    try {
+      // Verificar la fila devuelta: un UPDATE sin error puede afectar cero filas por RLS.
+      const { data: actualizadas, error } = await supabase.from("repartos_entregas")
+        .update({ latitud, longitud, actualizado_at: new Date().toISOString() })
+        .eq("id", idEntrega).eq("empresa_id", empresaId)
+        .select("id,latitud,longitud");
+      if (error) throw error;
+      if (!actualizadas || actualizadas.length !== 1) throw new Error("Supabase no confirmó la actualización. Revisar permisos de la empresa.");
+      const guardada = actualizadas[0];
+      if (Math.abs(Number(guardada.latitud) - latitud) > 0.000001 || Math.abs(Number(guardada.longitud) - longitud) > 0.000001)
+        throw new Error("Las coordenadas devueltas no coinciden con las seleccionadas.");
+      // Confirmar con una lectura nueva antes de cerrar el editor.
+      const { data: verificada, error: errorLectura } = await supabase.from("repartos_entregas")
+        .select("id,latitud,longitud").eq("id", idEntrega).eq("empresa_id", empresaId).single();
+      if (errorLectura) throw errorLectura;
+      if (Math.abs(Number(verificada.latitud) - latitud) > 0.000001 || Math.abs(Number(verificada.longitud) - longitud) > 0.000001)
+        throw new Error("El punto no quedó persistido en la base de datos.");
+      setEntregas(prev => prev.map(e => e.id === idEntrega ? { ...e, latitud, longitud } : e));
+      setCorrigiendoPunto(false);
+      setPuntoElegido(null);
+      setEntregaManualActiva(null);
+      await cargarDatos();
+      alert("✅ Ubicación guardada y verificada en Supabase. Al actualizar la página debe permanecer en el mismo lugar.");
+    } catch (err) { alert("❌ No se pudo confirmar el guardado del punto: " + (err.message || err)); }
+    finally { setGuardandoManual(false); }
+  };
+
+  // Buscar candidatos y permitir elección explícita, nunca aceptar el primero automáticamente.
+  const ubicarDirecciones = async () => {
+    const clave = import.meta.env.VITE_GEOAPIFY_API_KEY;
+    if (!clave) { alert("Falta configurar VITE_GEOAPIFY_API_KEY."); return; }
+    const faltantes = entregas.filter(e => !e.pedido_id && !puntoValido(e.latitud, e.longitud) && e.direccion);
+    if (!faltantes.length) { alert("No hay direcciones pendientes de ubicar."); return; }
+    setUbicandoDestinos(true);
+    try {
+      const e = faltantes[0];
+      const texto = [e.direccion, e.localidad, e.partido, e.provincia, "Argentina"].filter(Boolean).join(", ");
+      const params = new URLSearchParams({text:texto,filter:"countrycode:ar",format:"json",limit:"10",apiKey:clave});
+      const respuesta = await fetch(`https://api.geoapify.com/v1/geocode/search?${params}`);
+      if (!respuesta.ok) throw new Error(`Geoapify respondió ${respuesta.status}`);
+      const data = await respuesta.json();
+      const candidatos = (data.results || []).filter(r => puntoValido(r.lat,r.lon));
+      setIndiceUbicacion("");
+      setSeleccionUbicacion({ entrega:e, texto, candidatos });
+    } catch (err) { alert("No se pudo buscar la dirección: " + (err.message || err)); }
+    finally { setUbicandoDestinos(false); }
+  };
+
+  const guardarCandidato = async () => {
+    if (!seleccionUbicacion || indiceUbicacion === "") return;
+    const r = seleccionUbicacion.candidatos[Number(indiceUbicacion)];
+    if (!r) return;
+    const e = seleccionUbicacion.entrega;
+    const normalizar = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    const ubicacion = normalizar([r.formatted,r.county,r.city,r.state,r.suburb].join(" "));
+    const partidoOk = !e.partido || ubicacion.includes(normalizar(e.partido));
+    const localidadOk = !e.localidad || ubicacion.includes(normalizar(e.localidad));
+    if (!partidoOk || !localidadOk) {
+      alert("La opción seleccionada no coincide con el partido o localidad cargados. No se guardó. Usá el punto manual si Geoapify no encuentra la dirección correcta.");
+      return;
+    }
+    if (!window.confirm(`¿Guardar esta ubicación para ${e.destinatario}?\n\n${r.formatted}\n\nConfirmá solamente si es el domicilio correcto.`)) return;
+    setUbicandoDestinos(true);
+    try {
+      const {data: actualizadas, error} = await supabase.from("repartos_entregas")
+        .update({latitud:Number(r.lat),longitud:Number(r.lon)})
+        .eq("id",e.id).eq("empresa_id",empresaId)
+        .is("latitud", null).is("longitud", null)
+        .select("id");
+      if (error) throw error;
+      if (!actualizadas?.length) throw new Error("No se guardó: esta entrega ya tiene una ubicación o no hay permiso para modificarla.");
+      setSeleccionUbicacion(null);
+      await cargarDatos();
+    } catch (err) { alert("No se pudo guardar la ubicación: " + (err.message || err)); }
+    finally { setUbicandoDestinos(false); }
+  };
+
+  const destinosMapa = modoIndependiente
+    ? entregas.filter(e => !e.pedido_id).map(e => ({ ...e, cliente: e.destinatario || "Destinatario", direccion: [e.direccion,e.localidad,e.partido,e.provincia].filter(Boolean).join(", ") }))
+    : pedidos.map(p => ({
+        ...p, estado: estadoLogisticoPedido(p),
+        repartidor_id: (entregasPorPedido.get(String(p.id)) || [])[0]?.repartidor_id || null,
+      }));
+
   const cerrarSesion = async () => {
     try {
       await supabase.auth.signOut();
@@ -668,6 +1004,170 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
     background: "#fff",
     color: "#0f172a",
   };
+
+  if (modoIndependiente) {
+    const hoy = fechaLocalISO();
+    const manuales = entregas.filter(e => !e.pedido_id);
+    const cuenta = estado => manuales.filter(e => e.estado === estado).length;
+    const filtradas = manuales.filter(e => {
+      const grupo = bandeja === "todos" ||
+        (bandeja === "pendientes" && e.estado === "pendiente_preparacion") ||
+        (bandeja === "preparados" && e.estado === "preparado") ||
+        (bandeja === "asignados" && ["asignado", "en_reparto"].includes(e.estado)) ||
+        (bandeja === "hoy" && e.creado_at?.slice(0, 10) === hoy) ||
+        (bandeja === "devoluciones_pendientes" && e.estado === "devolucion_informada") ||
+        (bandeja === "volvieron_hoy" && e.estado === "vuelto_deposito");
+      return grupo && [e.destinatario, e.direccion, e.localidad, e.numero_remito, e.numero_factura]
+        .some(x => String(x || "").toLowerCase().includes(busqueda.toLowerCase().trim()));
+    });
+    const campo = (clave, titulo, tipo = "text", obligatorio = false) => (
+      <label style={{ display: "block", fontSize: 12, fontWeight: 800 }} key={clave}>
+        {titulo}
+        <input type={tipo} required={obligatorio} value={manual[clave]}
+          onChange={e => setManual(m => ({ ...m, [clave]: e.target.value }))}
+          style={{ ...inputStyle, marginTop: 5 }} />
+      </label>
+    );
+    return (
+      <div style={{ minHeight: "100vh", background: "#f1f5f9", color: "#0f172a", fontFamily: "Arial, sans-serif" }}>
+        <header style={{ background: "#0f172a", color: "white", padding: 16 }}>
+          <div style={{ maxWidth: 1000, margin: "auto", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div><div style={{ fontSize: 20, fontWeight: 900 }}>🚚 RutaComercio · Repartos</div>
+              <div style={{ color: "#94a3b8", fontSize: 12 }}>{empresaNombre} · Repartos independiente</div></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {typeof onVolver === "function" && <button onClick={onVolver}>← VOLVER</button>}
+              <button onClick={cerrarSesion} style={{ padding: 9 }}>SALIR</button>
+            </div>
+          </div>
+        </header>
+        <main style={{ maxWidth: 1000, margin: "auto", padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+            <strong>Gestión de entregas</strong>
+            <button onClick={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }}
+              style={{ padding: "12px 18px", background: "#16a34a", color: "white", border: 0, borderRadius: 8, fontWeight: 900, cursor: "pointer" }}>＋ NUEVA ENTREGA</button>
+          </div>
+          <MapaPlanificacion destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const e = entregas.find(x => x.id === d.id); if (e) { setEntregaManualActiva(e); setRepartidorSeleccionado(e.repartidor_id || ""); } }} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))", gap: 8, marginBottom: 14 }}>
+            {[["pendientes", "📦 PENDIENTES", cuenta("pendiente_preparacion")], ["preparados", "✅ PREPARADAS", cuenta("preparado")],
+              ["asignados", "🚚 ASIGNADAS", cuenta("asignado") + cuenta("en_reparto")], ["todos", "📋 TODAS", manuales.length],
+              ["devoluciones_pendientes", "📥 DEVOLUCIONES", cuenta("devolucion_informada")], ["volvieron_hoy", "🔄 VOLVIERON", cuenta("vuelto_deposito")]].map(([id, titulo, n]) => (
+              <button key={id} onClick={() => setBandeja(id)} style={{ padding: 12, textAlign: "left", background: bandeja === id ? "#dbeafe" : "white", border: bandeja === id ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
+                <div style={{ fontSize: 11, fontWeight: 800 }}>{titulo}</div><div style={{ fontSize: 24, fontWeight: 900 }}>{n}</div>
+              </button>))}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><input placeholder="🔎 Destinatario, dirección, remito o factura..." value={busqueda} onChange={e => setBusqueda(e.target.value)} style={inputStyle} />
+            <button onClick={cargarDatos} style={{ padding: "0 14px" }}>↻</button></div>
+          {cargando ? <p>Cargando entregas...</p> : errorCarga ? <p style={{ color: "#b91c1c" }}>❌ {errorCarga}</p> : filtradas.length === 0 ?
+            <div style={{ background: "white", padding: 25, borderRadius: 9, textAlign: "center" }}>No hay entregas en esta bandeja.</div> :
+            <div style={{ display: "grid", gap: 8 }}>{filtradas.map(e => <button key={e.id} onClick={() => { setEntregaManualActiva(e); setNuevaEntregaAbierta(false); setRepartidorSeleccionado(e.repartidor_id || ""); }}
+              style={{ textAlign: "left", padding: 14, background: "white", border: "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}><strong>📦 {e.destinatario || "Sin destinatario"}</strong><strong>{ESTADO_LABEL[e.estado] || e.estado}</strong></div>
+              <div style={{ fontSize: 12, color: "#475569", marginTop: 6 }}>📍 {[e.direccion, e.localidad, e.partido, e.provincia].filter(Boolean).join(", ")}</div>
+              <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{e.bultos || "—"} bulto/s · {e.fecha_programada || "Sin fecha"} · {e.numero_remito ? `Remito ${e.numero_remito}` : "Sin remito"}</div>
+            </button>)}</div>}
+          {seleccionUbicacion && <div style={{position:"fixed",inset:0,zIndex:3000,background:"#000a",padding:16,overflowY:"auto"}}>
+            <div style={{maxWidth:680,margin:"25px auto",padding:20,background:"white",borderRadius:12}}>
+              <h3>📍 Elegir ubicación — {seleccionUbicacion.entrega.destinatario}</h3>
+              <p style={{fontSize:13}}>Dirección solicitada: {seleccionUbicacion.texto}</p>
+              <p style={{fontSize:12,color:"#92400e"}}>Elegí una opción que corresponda al partido y localidad indicados. Si no aparece, usá el mapa manual.</p>
+              <div style={{display:"grid",gap:9,maxHeight:300,overflowY:"auto"}}>
+                {seleccionUbicacion.candidatos.length===0 && <p>Geoapify no encontró alternativas.</p>}
+                {seleccionUbicacion.candidatos.map((r,i)=><label key={i} style={{display:"flex",gap:10,padding:10,border:"1px solid #cbd5e1",borderRadius:8,cursor:"pointer"}}>
+                  <input type="radio" name="ubicacion-candidata" checked={indiceUbicacion===String(i)} onChange={()=>setIndiceUbicacion(String(i))}/>
+                  <span>{r.formatted || "Ubicación sin dirección detallada"}</span>
+                </label>)}
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:16}}>
+                <button type="button" disabled={indiceUbicacion==="" || ubicandoDestinos} onClick={guardarCandidato}>✅ GUARDAR UBICACIÓN ELEGIDA</button>
+                <button type="button" onClick={()=>{setEntregaManualActiva(seleccionUbicacion.entrega);setCorrigiendoPunto(true);setPuntoElegido(null);setSeleccionUbicacion(null);}}>🗺️ ELEGIR EN EL MAPA MANUALMENTE</button>
+                <button type="button" onClick={()=>setSeleccionUbicacion(null)}>CANCELAR</button>
+              </div>
+            </div>
+          </div>}
+          {nuevaEntregaAbierta && <div style={{ position: "fixed", inset: 0, background: "#0009", zIndex: 2000, overflowY: "auto", padding: 16 }}>
+            <form onSubmit={e => { e.preventDefault(); crearEntregaManual(); }} style={{ maxWidth: 650, margin: "30px auto", background: "white", padding: 20, borderRadius: 12 }}>
+              <h3>＋ Nueva entrega</h3><p style={{ fontSize: 12, color: "#64748b" }}>No requiere NVI ni pedido de Ventas.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+                {campo("destinatario", "Destinatario *", "text", true)}
+                {campo("direccion", "Dirección *", "text", true)}
+                {campo("localidad", "Localidad *", "text", true)}
+                <label style={{display:"block",fontSize:12,fontWeight:800}}>Provincia *
+                  <select required value={manual.provincia} onChange={e=>setManual(m=>({...m,provincia:e.target.value,partido:""}))} style={{...inputStyle,marginTop:5}}>
+                    <option value="">Seleccionar provincia...</option>{PROVINCIAS_ARGENTINAS.map(p=><option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
+                <label style={{display:"block",fontSize:12,fontWeight:800}}>Partido / Departamento *
+                  <input
+                    required
+                    type="text"
+                    list="repartos-lista-municipios"
+                    autoComplete="off"
+                    disabled={!manual.provincia}
+                    placeholder={!manual.provincia ? "Primero elegí la provincia" : cargandoMunicipios ? "Cargando partidos..." : "Escribí para buscar, ej.: Quilmes"}
+                    value={manual.partido}
+                    onChange={e=>setManual(m=>({...m,partido:e.target.value}))}
+                    style={{...inputStyle,marginTop:5}}
+                  />
+                  <datalist id="repartos-lista-municipios">
+                    {municipios.map(x=><option key={x} value={x}/>)}
+                  </datalist>
+                  {municipiosError && <span style={{fontSize:11,color:"#92400e"}}>{municipiosError}</span>}
+                  <span style={{display:"block",fontSize:11,color:"#64748b",marginTop:4}}>Podés buscar por nombre o escribirlo manualmente.</span>
+                </label>
+                {campo("telefono", "Teléfono", "tel")}
+                {campo("referencia_domicilio", "Referencia del domicilio")}{campo("bultos", "Cantidad de bultos *", "number", true)}
+                {campo("fecha_programada", "Fecha programada", "date")}{campo("numero_remito", "Nº remito")}{campo("numero_factura", "Nº factura")}
+              </div>
+              <label style={{ display: "block", marginTop: 12, fontWeight: 800, fontSize: 12 }}>Observaciones<textarea value={manual.observaciones} onChange={e => setManual(m => ({ ...m, observaciones: e.target.value }))} style={{ ...inputStyle, marginTop: 5 }} rows={3} /></label>
+              <div style={{ display: "flex", gap: 10, marginTop: 16 }}><button type="button" onClick={() => setNuevaEntregaAbierta(false)} disabled={guardandoManual}>CANCELAR</button>
+                <button type="submit" disabled={guardandoManual} style={{ background: "#16a34a", color: "white", border: 0, borderRadius: 8, padding: 12, fontWeight: 900 }}>{guardandoManual ? "GUARDANDO..." : "💾 GUARDAR ENTREGA"}</button></div>
+            </form></div>}
+          {entregaManualActiva && <div style={{ position: "fixed", inset: 0, background: "#0009", zIndex: 2000, overflowY: "auto", padding: 16 }}>
+            <div style={{ maxWidth: 600, margin: "40px auto", background: "white", padding: 20, borderRadius: 12 }}>
+              <h3>📦 {entregaManualActiva.destinatario}</h3>
+              <p>📍 {[entregaManualActiva.direccion, entregaManualActiva.localidad, entregaManualActiva.partido, entregaManualActiva.provincia].filter(Boolean).join(", ")}</p>
+              {puntoValido(entregaManualActiva.latitud, entregaManualActiva.longitud) && <button type="button" disabled={corrigiendoUbicacion} onClick={async()=>{
+                if (!window.confirm("¿Quitar la ubicación guardada de esta entrega para poder ubicarla nuevamente? No se borra la entrega.")) return;
+                setCorrigiendoUbicacion(true);
+                try { const {error}=await supabase.from("repartos_entregas").update({latitud:null,longitud:null}).eq("id",entregaManualActiva.id).eq("empresa_id",empresaId); if(error) throw error; setEntregaManualActiva(null); await cargarDatos(); alert("Ubicación quitada. Revisá el domicilio antes de volver a ubicarla."); }
+                catch(e){alert("No se pudo quitar la ubicación: "+(e.message||e));} finally {setCorrigiendoUbicacion(false);}
+              }} style={{padding:8,marginBottom:10}}>📍 CORREGIR UBICACIÓN DEL MAPA</button>}
+              <button type="button" onClick={() => { setCorrigiendoPunto(v => !v); setPuntoElegido(null); }} style={{padding:9,marginBottom:10}}>📍 ELEGIR PUNTO MANUALMENTE</button>
+              {corrigiendoPunto && <div style={{marginBottom:12}}>
+                <p style={{fontSize:12}}>Tocá el domicilio correcto en el mapa. No se guarda hasta que confirmes.</p>
+                <div style={{height:310,overflow:"hidden",borderRadius:9}}>
+                  <MapContainer center={puntoValido(entregaManualActiva.latitud, entregaManualActiva.longitud) ? [Number(entregaManualActiva.latitud),Number(entregaManualActiva.longitud)] : [-34.724,-58.254]} zoom={13} style={{height:"100%",width:"100%"}}>
+                    <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
+                    <ElegirPuntoMapa onElegir={setPuntoElegido}/>
+                    {puntoElegido && <Marker position={puntoElegido}/>}
+                  </MapContainer>
+                </div>
+                <button type="button" disabled={!puntoElegido || guardandoManual} onClick={guardarPuntoManual} style={{padding:10,marginTop:8,background:"#16a34a",color:"white",border:0,borderRadius:8}}>✅ GUARDAR PUNTO ELEGIDO</button>
+              </div>}
+              <p>☎ {entregaManualActiva.telefono || "Sin teléfono"} · {entregaManualActiva.bultos || "—"} bultos</p>
+              <p><strong>{ESTADO_LABEL[entregaManualActiva.estado] || entregaManualActiva.estado}</strong></p>
+              {entregaManualActiva.observaciones && <p>📝 {entregaManualActiva.observaciones}</p>}
+              {entregaManualActiva.estado === "pendiente_preparacion" && <button disabled={guardandoManual} onClick={() => actualizarEntregaManual("preparado")} style={{ padding: 12, background: "#16a34a", color: "white", border: 0, borderRadius: 8, fontWeight: 800 }}>✅ MARCAR PREPARADA</button>}
+              {entregaManualActiva.estado === "preparado" && <div style={{ display: "grid", gap: 10 }}>
+                {repartidores.length === 0 ? <p>No hay repartidores habilitados para esta empresa.</p> : <><label>Elegir repartidor<select value={repartidorSeleccionado} onChange={e => setRepartidorSeleccionado(e.target.value)} style={inputStyle}><option value="">Seleccionar...</option>{repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}</select></label>
+                  <button disabled={guardandoManual || !repartidorSeleccionado} onClick={() => actualizarEntregaManual("asignado", repartidorSeleccionado)} style={{ padding: 12, background: "#2563eb", color: "white", border: 0, borderRadius: 8, fontWeight: 800 }}>🚚 ASIGNAR REPARTO</button></>}
+              </div>}
+              {["pendiente_preparacion", "preparado"].includes(entregaManualActiva.estado) && !entregaManualActiva.repartidor_id && !entregaManualActiva.pedido_id && (
+                <div style={{ marginTop: 16 }}>
+                  <button type="button" disabled={guardandoManual} onClick={eliminarEntregaSinAsignar}
+                    style={{padding:11,background:"#fee2e2",color:"#991b1b",border:"1px solid #fca5a5",borderRadius:8,fontWeight:800}}>
+                    🗑️ ELIMINAR ENTREGA
+                  </button>
+                </div>
+              )}
+              {entregaManualActiva.estado === "asignado" && <button type="button" disabled={guardandoManual} onClick={desasignarManual} style={{padding:11,background:"#f59e0b",border:0,borderRadius:8,fontWeight:800}}>↩️ DESASIGNAR REPARTIDOR</button>}
+              {entregaManualActiva.repartidor_id && <p style={{ fontSize: 12 }}>Repartidor: {repartidores.find(r => r.id === entregaManualActiva.repartidor_id)?.nombre || "Asignado"}</p>}
+              <div style={{ marginTop: 16 }}><button onClick={() => setEntregaManualActiva(null)}>← CERRAR</button></div>
+            </div></div>}
+        </main>
+      </div>
+    );
+  }
 
   if (pedidoActivo) {
     const existentes = entregasPorPedido.get(String(pedidoActivo.id)) || [];
@@ -729,7 +1229,7 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
                 <div style={{ background:"#f8fafc", border:"1px solid #cbd5e1", borderRadius:"10px", padding:"12px", marginBottom:"14px" }}>
                   <div style={{ fontSize:"14px", fontWeight:"900", marginBottom:"10px" }}>📦 DATOS REALES DE LOGÍSTICA</div>
                   <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"10px" }}>
-                    Despacho puede corregir estos datos hasta que la mercadería salga a reparto.
+                    Depósito y Repartos puede corregir estos datos hasta que la mercadería salga a reparto.
                   </div>
 
                   <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))", gap:"10px" }}>
@@ -982,7 +1482,7 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
       <header style={{ background: "#0f172a", color: "#fff", padding: "12px 14px" }}>
         <div style={{ maxWidth: "1000px", margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
           <div>
-            <div style={{ fontSize: "20px", fontWeight: "950" }}>📦 RutaComercio · Despacho</div>
+            <div style={{ fontSize: "20px", fontWeight: "950" }}>📦 RutaComercio · Depósito y Repartos</div>
             <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "2px" }}>
               {empresaNombre || "Empresa"} · Preparación de entregas
             </div>
@@ -1001,6 +1501,7 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
       </header>
 
       <main style={{ maxWidth: "1000px", margin: "0 auto", padding: "14px" }}>
+        <MapaPlanificacion destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const p = pedidos.find(x => x.id === d.id); if (p) abrirPedido(p); }} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[
             ["hoy", "📥 NVIs RECIBIDAS HOY", resumenHoy.recibidas],
@@ -1077,7 +1578,7 @@ export default function Despacho({ sesion: sesionProp, perfil: perfilProp, onVol
         </div>
 
         {cargando ? (
-          <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>⏳ Cargando Despacho...</div>
+          <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>⏳ Cargando Depósito y Repartos...</div>
         ) : errorCarga ? (
           <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", color: "#991b1b", borderRadius: "10px", padding: "14px" }}>
             ❌ {errorCarga}
