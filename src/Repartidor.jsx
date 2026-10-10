@@ -53,23 +53,24 @@ function useRutaChatAviso(empresaId, usuarioId) {
       if (!contexto || contexto.state !== "running") return;
       try {
         const ahora = contexto.currentTime;
-        const oscilador = contexto.createOscillator();
-        const volumen = contexto.createGain();
-        oscilador.type = "triangle";
-        oscilador.frequency.setValueAtTime(740, ahora);
-        oscilador.frequency.setValueAtTime(988, ahora + 0.22);
-        volumen.gain.setValueAtTime(0.0001, ahora);
-        volumen.gain.exponentialRampToValueAtTime(0.48, ahora + 0.018);
-        volumen.gain.setValueAtTime(0.48, ahora + 0.17);
-        volumen.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.21);
-        volumen.gain.setValueAtTime(0.0001, ahora + 0.22);
-        volumen.gain.exponentialRampToValueAtTime(0.48, ahora + 0.24);
-        volumen.gain.setValueAtTime(0.48, ahora + 0.43);
-        volumen.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.56);
-        oscilador.connect(volumen);
-        volumen.connect(contexto.destination);
-        oscilador.start(ahora);
-        oscilador.stop(ahora + 0.57);
+        // Tres avisos firmes, pensados para escucharse mejor en la calle.
+        // El volumen real nunca puede superar el límite del dispositivo.
+        [0, 0.46, 0.92].forEach((desfase, indice) => {
+          const inicio = ahora + desfase;
+          const oscilador = contexto.createOscillator();
+          const volumen = contexto.createGain();
+          oscilador.type = "square";
+          oscilador.frequency.setValueAtTime(indice === 1 ? 950 : 790, inicio);
+          oscilador.frequency.setValueAtTime(indice === 1 ? 1190 : 990, inicio + 0.18);
+          volumen.gain.setValueAtTime(0.0001, inicio);
+          volumen.gain.linearRampToValueAtTime(0.65, inicio + 0.012);
+          volumen.gain.setValueAtTime(0.65, inicio + 0.32);
+          volumen.gain.linearRampToValueAtTime(0.0001, inicio + 0.38);
+          oscilador.connect(volumen);
+          volumen.connect(contexto.destination);
+          oscilador.start(inicio);
+          oscilador.stop(inicio + 0.39);
+        });
       } catch (e) { console.warn("RutaChat: no se pudo reproducir aviso", e); }
     };
 
