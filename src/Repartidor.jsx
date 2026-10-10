@@ -122,6 +122,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const [gpsEstado, setGpsEstado] = useState("Sin iniciar");
   const [ordenRuta, setOrdenRuta] = useState([]);
   const [rutaGuardada, setRutaGuardada] = useState(false);
+  const [guardandoRuta, setGuardandoRuta] = useState(false);
   const [organizarAsignadasAbierto, setOrganizarAsignadasAbierto] = useState(false);
   const [organizarRecibidasAbierto, setOrganizarRecibidasAbierto] = useState(false);
   const [arrastrandoId, setArrastrandoId] = useState(null);
@@ -349,14 +350,44 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entregas]);
 
-  const guardarOrdenRuta = () => {
+  const guardarOrdenRuta = async () => {
+    if (guardandoRuta) return;
+    setGuardandoRuta(true);
+    setRutaGuardada(false);
     try {
-      localStorage.setItem(claveOrdenRuta(), JSON.stringify(ordenRuta));
+      const session = sesionProp || (await supabase.auth.getSession()).data?.session;
+      const usuarioId = session?.user?.id;
+      const empresaId = perfil?.empresa_id;
+      if (!usuarioId || !empresaId) throw new Error("No se pudo identificar al repartidor y su empresa.");
+
+      // Si hay entregas recibidas, informar la ruta que efectivamente podrá salir.
+      // Antes de recibirlas, informar la planificación de las asignadas.
+      const destinos = recibidas.length > 0 ? recibidas : asignadas;
+      const idsValidos = new Set(destinos.map(e => e.id));
+      const idsRuta = ordenRuta.filter(id => idsValidos.has(id));
+      if (!idsRuta.length) throw new Error("No hay entregas para guardar en esta ruta.");
+
+      const { error: errorRuta } = await supabase
+        .from("repartos_rutas_planificadas")
+        .upsert({
+          empresa_id: empresaId,
+          repartidor_id: usuarioId,
+          entrega_ids: idsRuta,
+          actualizado_at: new Date().toISOString(),
+        }, { onConflict: "empresa_id,repartidor_id" });
+      if (errorRuta) throw errorRuta;
+
+      try { localStorage.setItem(claveOrdenRuta(), JSON.stringify(ordenRuta)); }
+      catch (e) { console.warn("Ruta enviada, pero no se pudo guardar copia local:", e); }
       setRutaGuardada(true);
       setOrganizarAsignadasAbierto(false);
       setOrganizarRecibidasAbierto(false);
-    } catch {
-      alert("No se pudo guardar la ruta en este dispositivo.");
+      alert("✅ Ruta guardada y enviada. El Supervisor podrá consultarla cuando se habilite su pantalla de rutas.");
+    } catch (e) {
+      console.error("Error al enviar ruta:", e);
+      alert("❌ No se pudo enviar la ruta al Supervisor. " + (e?.message || "Revisá la conexión e intentá de nuevo."));
+    } finally {
+      setGuardandoRuta(false);
     }
   };
 
@@ -1174,12 +1205,12 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                 </div>
               ))}
             </div>
-            <button type="button" onClick={guardarOrdenRuta}
-              style={{...boton,width:"100%",marginTop:"10px",background:rutaGuardada?"#166534":"#2563eb",color:"#fff"}}>
-              {rutaGuardada ? "✅ RUTA GUARDADA" : "💾 GUARDAR ESTA RUTA"}
+            <button type="button" onClick={guardarOrdenRuta} disabled={guardandoRuta}
+              style={{...boton,width:"100%",marginTop:"10px",background:rutaGuardada?"#166534":"#2563eb",color:"#fff",opacity:guardandoRuta?.65:1}}>
+              {guardandoRuta ? "⏳ ENVIANDO RUTA..." : rutaGuardada ? "✅ RUTA ENVIADA" : "💾 GUARDAR Y ENVIAR RUTA"}
             </button>
             <div style={{fontSize:"10px",color:"#64748b",marginTop:"6px",textAlign:"center"}}>
-              Se conserva en este dispositivo al actualizar la página. No modifica las asignaciones.
+              Se guarda en este dispositivo y se comparte con el Supervisor. No modifica las asignaciones.
             </div>
             </>)}
           </div>
@@ -1232,6 +1263,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                       onClick={(ev)=>{
                         ev.stopPropagation();
                         if (idx===0) return;
+                        setRutaGuardada(false);
                         setOrdenRuta(prev=>{
                           const n=[...prev];
                           [n[idx-1],n[idx]]=[n[idx],n[idx-1]];
@@ -1246,6 +1278,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                       onClick={(ev)=>{
                         ev.stopPropagation();
                         if (idx===recibidasOrdenadas.length-1) return;
+                        setRutaGuardada(false);
                         setOrdenRuta(prev=>{
                           const n=[...prev];
                           [n[idx],n[idx+1]]=[n[idx+1],n[idx]];
@@ -1257,6 +1290,13 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                   </div>
                 </div>
               ))}
+            </div>
+            <button type="button" onClick={guardarOrdenRuta} disabled={guardandoRuta}
+              style={{...boton,width:"100%",marginTop:"10px",background:rutaGuardada?"#166534":"#2563eb",color:"#fff",opacity:guardandoRuta?.65:1}}>
+              {guardandoRuta ? "⏳ ENVIANDO RUTA..." : rutaGuardada ? "✅ RUTA ENVIADA" : "💾 GUARDAR Y ENVIAR RUTA"}
+            </button>
+            <div style={{fontSize:"10px",color:"#64748b",marginTop:"6px",textAlign:"center"}}>
+              Se comparte el orden de las entregas recibidas con el Supervisor de Repartos.
             </div>
             </>)}
           </div>
