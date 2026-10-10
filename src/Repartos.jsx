@@ -440,7 +440,7 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
       }
     };
     consultar();
-    const intervalo = window.setInterval(consultar, 15000);
+    const intervalo = window.setInterval(consultar, 60000);
     return () => { vigente = false; window.clearInterval(intervalo); };
   }, [empresaId, claveAvisos]);
 
@@ -455,7 +455,7 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
     </button>
     {abierto && <div style={{paddingTop:12}}>
       <div style={{fontSize:12,color:"#475569",marginBottom:10}}>
-        Recorridos organizados por los repartidores · Solo lectura · Actualización automática cada 15 segundos.
+        Recorridos organizados por los repartidores · Solo lectura · Actualización automática cada 60 segundos.
         {ultimaRevision && <span> Última consulta: {ultimaRevision.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}.</span>}
       </div>
       {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}

@@ -117,6 +117,13 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
   const [activa, setActiva] = useState(null);
+  // Historial independiente de RutaChat, asociado a cada entrega.
+  const [notasEntrega, setNotasEntrega] = useState([]);
+  const [textoNotaEntrega, setTextoNotaEntrega] = useState("");
+  const [cargandoNotas, setCargandoNotas] = useState(false);
+  const [guardandoNota, setGuardandoNota] = useState(false);
+  const [errorNotas, setErrorNotas] = useState("");
+
   const [jornadaActiva, setJornadaActiva] = useState(false);
   const [procesandoJornada, setProcesandoJornada] = useState(false);
   const [gpsEstado, setGpsEstado] = useState("Sin iniciar");
@@ -261,13 +268,15 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Restaurar el resumen cuando ya conocemos empresa y usuario.
   useEffect(() => {
+    if (!perfil?.empresa_id || !(sesionProp?.user?.id || perfil?.id)) return;
     try {
       const raw = localStorage.getItem(claveResumenSalida());
-      if (raw) setResumenSalida(JSON.parse(raw));
-    } catch {}
+      setResumenSalida(raw ? JSON.parse(raw) : null);
+    } catch { setResumenSalida(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [perfil?.empresa_id, sesionProp?.user?.id, perfil?.id]);
 
   const asignadas = useMemo(() => entregas.filter(e => e.estado === "asignado"), [entregas]);
   const recibidas = useMemo(() => entregas.filter(e => e.estado === "recibido"), [entregas]);
@@ -275,9 +284,18 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const enReparto = useMemo(() => entregas.filter(e => e.estado === "en_reparto"), [entregas]);
   const paraVolver = useMemo(() => entregas.filter(e => e.estado === "reintentar"), [entregas]);
 
-  const guardarUbicacion = async (position) => {
+  // Evitar escrituras repetidas del GPS: una actualización normal cada 30 segundos.
+  // Las acciones importantes pueden solicitar una actualización inmediata.
+  const ultimaUbicacionGuardadaRef = React.useRef(0);
+  const guardandoUbicacionRef = React.useRef(false);
+
+  const guardarUbicacion = async (position, forzar = false) => {
+    if (!position?.coords || guardandoUbicacionRef.current) return;
+    if (!forzar && Date.now() - ultimaUbicacionGuardadaRef.current < 30000) return;
+    guardandoUbicacionRef.current = true;
+    try {
     const userId = sesionProp?.user?.id || (await supabase.auth.getSession()).data?.session?.user?.id;
-    if (!userId || !position?.coords) return;
+    if (!userId) return;
 
     const { latitude, longitude } = position.coords;
     const ahora = new Date().toISOString();
@@ -297,17 +315,21 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       console.error("Error actualizando GPS repartidor:", error);
       setGpsEstado("Error GPS");
     } else {
+      ultimaUbicacionGuardadaRef.current = Date.now();
       setGpsEstado("GPS activo");
+    }
+    } finally {
+      guardandoUbicacionRef.current = false;
     }
   };
 
-  const pedirUbicacionAhora = () => {
+  const pedirUbicacionAhora = (forzar = true) => {
     if (!navigator.geolocation) {
       setGpsEstado("GPS no disponible");
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      guardarUbicacion,
+      (position) => guardarUbicacion(position, forzar),
       (e) => {
         console.warn("GPS repartidor:", e);
         setGpsEstado("Sin permiso GPS");
@@ -492,7 +514,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     pedirUbicacionAhora();
 
     const watchId = navigator.geolocation.watchPosition(
-      guardarUbicacion,
+      (position) => guardarUbicacion(position, false),
       (e) => {
         console.warn("GPS continuo repartidor:", e);
         setGpsEstado("Sin señal GPS");
@@ -501,7 +523,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     );
 
     const refuerzo = setInterval(() => {
-      if (document.visibilityState === "visible") pedirUbicacionAhora();
+      if (document.visibilityState === "visible") pedirUbicacionAhora(false);
     }, 30000);
 
     return () => {
@@ -843,24 +865,33 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     window.location.replace("/");
   };
 
-  const idsSalidaActiva = resumenSalida?.idsSalida || [];
+  // Si la página se recargó en medio de una salida, recuperar las cifras
+  // de las entregas que siguen teniendo salida_at (sin cambiar estados).
+  const entregasConSalida = entregas.filter(e => e.salida_at);
+  const salidasEnCurso = entregasConSalida.filter(e =>
+    ["en_reparto", "reintentar"].includes(e.estado));
+  const inicioSalidaActual = salidasEnCurso.length
+    ? salidasEnCurso.map(e => new Date(e.salida_at).getTime()).filter(Number.isFinite).sort((a,b)=>b-a)[0]
+    : null;
+  const idsSalidaActiva = resumenSalida?.idsSalida?.length
+    ? resumenSalida.idsSalida
+    : inicioSalidaActual == null ? [] : entregasConSalida
+      .filter(e => new Date(e.salida_at).getTime() === inicioSalidaActual)
+      .map(e => e.id);
   const entregadasEstaSalida = entregas.filter(
     e => idsSalidaActiva.includes(e.id) && e.estado === "entregado"
   ).length;
-
-  const asignadasMostradas = jornadaActiva && resumenSalida
-    ? resumenSalida.asignadasTotal
+  const totalSalidaMostrado = jornadaActiva
+    ? (resumenSalida?.recibidasTotal ?? idsSalidaActiva.length)
+    : 0;
+  const asignadasMostradas = jornadaActiva
+    ? (resumenSalida?.asignadasTotal ?? idsSalidaActiva.length + asignadas.length)
     : asignadas.length + recibidas.length;
-
-  const recibidasMostradas = jornadaActiva && resumenSalida
-    ? resumenSalida.recibidasTotal
+  const recibidasMostradas = jornadaActiva
+    ? totalSalidaMostrado
     : recibidas.length;
 
-  const totalSalidaMostrado = jornadaActiva && resumenSalida
-    ? resumenSalida.recibidasTotal
-    : recibidas.length;
-
-  const tituloEntrega = e => e.pedido_id ? `NVI #${e.numeroVisible}` : "Entrega manual";
+  const tituloEntrega = e => e.pedido_id ? `NVI #${e.numeroVisible}` : "Entrega";
 
   const miIdChat = sesionProp?.user?.id || perfil?.id;
   const cargarChat = async () => {
@@ -913,6 +944,69 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     }
   }, [chatAbierto, chatDestino, conversacionChat.length, conversacionChat[conversacionChat.length - 1]?.id]);
 
+  const cargarNotasEntrega = async (entregaId) => {
+    if (!entregaId || !perfil?.empresa_id) return;
+    setCargandoNotas(true);
+    try {
+      const { data, error: err } = await supabase
+        .from("repartos_entrega_notas")
+        .select("id,autor_id,contenido,creado_at")
+        .eq("empresa_id", perfil.empresa_id)
+        .eq("entrega_id", entregaId)
+        .order("creado_at", { ascending: true });
+      if (err) throw err;
+      setNotasEntrega(data || []);
+      setErrorNotas("");
+    } catch (e) {
+      setErrorNotas(e?.message || "No se pudieron cargar las notas.");
+    } finally {
+      setCargandoNotas(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!activa?.id || !perfil?.empresa_id) {
+      setNotasEntrega([]);
+      setTextoNotaEntrega("");
+      setErrorNotas("");
+      return;
+    }
+    setNotasEntrega([]);
+    setTextoNotaEntrega("");
+    cargarNotasEntrega(activa.id);
+    const intervalo = setInterval(() => cargarNotasEntrega(activa.id), 15000);
+    return () => clearInterval(intervalo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activa?.id, perfil?.empresa_id]);
+
+  const guardarNotaEntrega = async () => {
+    const contenido = textoNotaEntrega.trim();
+    if (!activa?.id || !contenido || guardandoNota) return;
+    if (contenido.length > 2000) {
+      setErrorNotas("La nota no puede superar los 2000 caracteres.");
+      return;
+    }
+    setGuardandoNota(true);
+    setErrorNotas("");
+    try {
+      const sesion = sesionProp || (await supabase.auth.getSession()).data?.session;
+      if (!sesion?.user?.id || !perfil?.empresa_id) throw new Error("No hay sesión activa.");
+      const { error: err } = await supabase.from("repartos_entrega_notas").insert({
+        empresa_id: perfil.empresa_id,
+        entrega_id: activa.id,
+        autor_id: sesion.user.id,
+        contenido
+      });
+      if (err) throw err;
+      setTextoNotaEntrega("");
+      await cargarNotasEntrega(activa.id);
+    } catch (e) {
+      setErrorNotas(e?.message || "No se pudo guardar la nota.");
+    } finally {
+      setGuardandoNota(false);
+    }
+  };
+
   const boton = {
     border: "none", borderRadius: "9px", minHeight: "46px", padding: "9px 12px",
     fontWeight: "900", cursor: "pointer"
@@ -959,6 +1053,44 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             ))}
           </div>
           )}
+
+          <section style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
+            <div style={{fontWeight:"900",fontSize:"15px",marginBottom:"9px"}}>📝 NOTAS DE ESTA ENTREGA</div>
+            <div style={{fontSize:"12px",color:"#64748b",marginBottom:"10px"}}>
+              Historial compartido con el Supervisor de Repartos. No es RutaChat.
+            </div>
+            {cargandoNotas && notasEntrega.length === 0 && (
+              <div style={{fontSize:"12px",color:"#64748b",marginBottom:"8px"}}>Cargando notas...</div>
+            )}
+            {!cargandoNotas && notasEntrega.length === 0 && (
+              <div style={{fontSize:"12px",color:"#64748b",marginBottom:"8px"}}>Todavía no hay notas en esta entrega.</div>
+            )}
+            <div style={{display:"grid",gap:"8px",maxHeight:"250px",overflowY:"auto",marginBottom:"10px"}}>
+              {notasEntrega.map(n => {
+                const mia = n.autor_id === (sesionProp?.user?.id || perfil?.id);
+                return (
+                  <div key={n.id} style={{background:mia?"#dcfce7":"#eff6ff",borderRadius:"9px",padding:"10px",overflowWrap:"anywhere"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:"8px",fontSize:"11px",fontWeight:"900"}}>
+                      <span>{mia ? "🚚 Repartidor (vos)" : "👔 Supervisor"}</span>
+                      <span style={{color:"#64748b",fontWeight:"500"}}>
+                        {new Date(n.creado_at).toLocaleString("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                      </span>
+                    </div>
+                    <div style={{marginTop:"5px",fontSize:"13px",whiteSpace:"pre-wrap"}}>{n.contenido}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <textarea value={textoNotaEntrega} onChange={e=>setTextoNotaEntrega(e.target.value)}
+              maxLength={2000} rows={3} placeholder="Escribí una nota sobre esta entrega..."
+              style={{width:"100%",boxSizing:"border-box",padding:"10px",border:"1px solid #cbd5e1",borderRadius:"9px",fontFamily:"inherit",fontSize:"14px"}} />
+            {errorNotas && <div style={{color:"#b91c1c",fontSize:"12px",marginTop:"6px"}}>⚠️ {errorNotas}</div>}
+            <button type="button" onClick={guardarNotaEntrega}
+              disabled={!textoNotaEntrega.trim() || guardandoNota}
+              style={{...boton,width:"100%",marginTop:"8px",background:"#0f766e",color:"#fff",opacity:(!textoNotaEntrega.trim()||guardandoNota)?0.55:1}}>
+              {guardandoNota ? "⏳ GUARDANDO..." : "💾 GUARDAR NOTA"}
+            </button>
+          </section>
 
           {activa.estado === "asignado" ? (
             <div>
@@ -1026,10 +1158,6 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               </div>
 
               <div style={{display:"grid",gap:"8px"}}>
-                <button onClick={()=>navegarEntrega(activa)} style={{...boton,width:"100%",background:"#2563eb",color:"#fff",fontSize:"14px"}}>
-                  📍 NAVEGAR
-                </button>
-
                 <button onClick={()=>marcarEntregada(activa)} style={{...boton,width:"100%",background:"#16a34a",color:"#fff",fontSize:"14px"}}>
                   ✅ ENTREGADA
                 </button>
@@ -1118,12 +1246,12 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
             <div style={{fontSize:"10px",fontWeight:"900",color:"#166534"}}>ENTREGADAS</div>
-            <div style={{fontSize:"25px",fontWeight:"950",color:"#166534"}}>{jornadaActiva && resumenSalida
+            <div style={{fontSize:"25px",fontWeight:"950",color:"#166534"}}>{jornadaActiva
               ? `${entregadasEstaSalida} de ${totalSalidaMostrado}`
-              : entregadas.length}</div>
+              : "0"}</div>
           </div>
           <div style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
-            <div style={{fontSize:"10px",fontWeight:"900",color:"#9a3412"}}>VOLVER</div>
+            <div style={{fontSize:"10px",fontWeight:"900",color:"#9a3412"}}>VOLVER MÁS TARDE</div>
             <div style={{fontSize:"25px",fontWeight:"950",color:"#9a3412"}}>{paraVolver.length}</div>
           </div>
         </div>
@@ -1410,6 +1538,13 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             >
               📍 NAVEGAR AL PRÓXIMO DESTINO
             </button>
+            <button
+              type="button"
+              onClick={()=>setActiva(proximoDestino)}
+              style={{...boton,width:"100%",background:"#16a34a",color:"#fff",fontSize:"14px",marginTop:"8px"}}
+            >
+              📍 LLEGUÉ AL DESTINO
+            </button>
           </div>
         )}
 
@@ -1424,7 +1559,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
           </div>
         ) : (
           <div style={{display:"grid",gap:"9px"}}>
-            {entregasOrdenadasPantalla.map(e=>(
+            {entregasOrdenadasPantalla.filter(e => !(jornadaActiva && proximoDestino && e.id === proximoDestino.id)).map(e=>(
               <button key={e.id} onClick={()=>setActiva(e)} style={{width:"100%",textAlign:"left",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",cursor:"pointer",color:"#0f172a"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:"10px"}}>
                   <div>
