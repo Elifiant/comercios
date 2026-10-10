@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -288,6 +288,137 @@ function useRutaChatAviso(empresaId, usuarioId) {
       }
     };
   }, [empresaId, usuarioId]);
+}
+
+
+// Mapa exclusivo de la ruta enviada. Los números respetan el orden del repartidor.
+function MapaRutaEnviada({ paradas }) {
+  const ubicadas = paradas.filter(p => puntoValido(p.latitud, p.longitud));
+  const puntos = ubicadas.map(p => [Number(p.latitud), Number(p.longitud)]);
+  if (!ubicadas.length) return <div style={{fontSize:12,padding:12,background:"#f8fafc",borderRadius:8}}>Las paradas todavía no tienen coordenadas para mostrarlas en el mapa.</div>;
+  return <div>
+    <div style={{height:300,borderRadius:9,overflow:"hidden",marginTop:9}}>
+      <MapContainer center={puntos[0]} zoom={13} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
+        <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <AjustarMapaRepartos puntos={puntos} />
+        {ubicadas.length > 1 && <Polyline positions={puntos} pathOptions={{color:"#2563eb",weight:3,dashArray:"7,7"}} />}
+        {ubicadas.map(p => <Marker key={p.id} position={[Number(p.latitud),Number(p.longitud)]}
+          icon={L.divIcon({className:"",html:`<div style="width:30px;height:30px;border-radius:50%;background:#1d4ed8;color:white;border:3px solid white;box-shadow:0 2px 6px #33415588;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900">${p.numero}</div>`,iconSize:[36,36],iconAnchor:[18,18]})}>
+          <Popup><strong>{p.numero}. {p.nombre}</strong><div>{p.direccion}</div></Popup>
+        </Marker>)}
+      </MapContainer>
+    </div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Los números indican el orden enviado. La línea une los puntos en ese orden; no representa calles ni navegación.</div>
+    {ubicadas.length !== paradas.length && <div style={{fontSize:12,color:"#92400e",marginTop:5}}>⚠️ {paradas.length - ubicadas.length} parada/s sin coordenadas no aparecen en el mapa.</div>}
+  </div>;
+}
+
+// Recorridos enviados por los repartidores: consulta exclusivamente de lectura.
+function RutasEnviadasSupervisor({ empresaId, repartidores, entregas, pedidos }) {
+  const [abierto, setAbierto] = useState(false);
+  const [rutas, setRutas] = useState([]);
+  const [error, setError] = useState("");
+  const [cargando, setCargando] = useState(false);
+  const [ultimaRevision, setUltimaRevision] = useState(null);
+
+  useEffect(() => {
+    if (!empresaId) return;
+    let vigente = true;
+    let consultando = false;
+    const consultar = async () => {
+      if (consultando) return;
+      consultando = true;
+      if (vigente) setCargando(true);
+      try {
+        const { data, error: err } = await supabase
+          .from("repartos_rutas_planificadas")
+          .select("repartidor_id,entrega_ids,actualizado_at")
+          .eq("empresa_id", empresaId)
+          .order("actualizado_at", { ascending: false });
+        if (err) throw err;
+        if (vigente) {
+          setRutas(data || []);
+          setError("");
+          setUltimaRevision(new Date());
+        }
+      } catch (e) {
+        if (vigente) setError(e?.message || "No se pudieron consultar las rutas.");
+      } finally {
+        consultando = false;
+        if (vigente) setCargando(false);
+      }
+    };
+    consultar();
+    const intervalo = window.setInterval(consultar, 15000);
+    return () => { vigente = false; window.clearInterval(intervalo); };
+  }, [empresaId]);
+
+  const entregasPorId = new Map(entregas.map(e => [String(e.id), e]));
+  const pedidosPorId = new Map(pedidos.map(p => [String(p.id), p]));
+  const cantidad = rutas.length;
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
+    <button type="button" onClick={() => setAbierto(v => !v)}
+      style={{width:"100%",padding:12,border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900,cursor:"pointer",textAlign:"left"}}>
+      📨 RUTAS ENVIADAS POR REPARTIDORES {cantidad ? `(${cantidad})` : ""} {abierto ? "▲" : "▼"}
+    </button>
+    {abierto && <div style={{paddingTop:12}}>
+      <div style={{fontSize:12,color:"#475569",marginBottom:10}}>
+        Recorridos organizados por los repartidores · Solo lectura · Actualización automática cada 15 segundos.
+        {ultimaRevision && <span> Última consulta: {ultimaRevision.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}.</span>}
+      </div>
+      {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}
+      {cargando && !ultimaRevision && <p style={{fontSize:12}}>Consultando rutas...</p>}
+      {!error && !cargando && rutas.length === 0 && <p style={{fontSize:13}}>Todavía no se enviaron rutas.</p>}
+      <div style={{display:"grid",gap:12}}>
+        {rutas.map(r => {
+          const rep = repartidores.find(x => String(x.id) === String(r.repartidor_id));
+          const ids = Array.isArray(r.entrega_ids) ? r.entrega_ids : [];
+          const paradasMapa = ids.map((id, indice) => {
+            const e = entregasPorId.get(String(id));
+            const ped = e?.pedido_id ? pedidosPorId.get(String(e.pedido_id)) : null;
+            return {
+              id, numero: indice + 1,
+              nombre: e?.pedido_id ? (ped?.cliente || "Entrega de NVI") : (e?.destinatario || "Entrega manual"),
+              direccion: e?.pedido_id ? (ped?.direccion || [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", ")) : [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", "),
+              latitud: puntoValido(e?.latitud, e?.longitud) ? e.latitud : ped?.latitud,
+              longitud: puntoValido(e?.latitud, e?.longitud) ? e.longitud : ped?.longitud,
+            };
+          });
+          return <details key={r.repartidor_id} style={{border:"1px solid #bfdbfe",borderRadius:9,padding:12,background:"#eff6ff"}}>
+            <summary style={{fontWeight:900,cursor:"pointer",listStyle:"revert",padding:"4px 0"}}>
+              🚚 {rep?.nombre || rep?.email || "Repartidor"} · {ids.length} parada/s
+              <div style={{fontSize:12,color:"#475569",fontWeight:400,marginTop:4}}>
+                Enviada: {r.actualizado_at ? new Date(r.actualizado_at).toLocaleString("es-AR") : "Sin fecha"} · Tocá para ver recorrido
+              </div>
+            </summary>
+            <details style={{marginTop:10,background:"white",border:"1px solid #bfdbfe",borderRadius:8,padding:10}}>
+              <summary style={{cursor:"pointer",fontWeight:800,color:"#1d4ed8"}}>🗺️ VER RECORRIDO EN MAPA</summary>
+              <MapaRutaEnviada paradas={paradasMapa} />
+            </details>
+            <div style={{display:"grid",gap:6,marginTop:10}}>
+              {ids.map((id, indice) => {
+                const e = entregasPorId.get(String(id));
+                const ped = e?.pedido_id ? pedidosPorId.get(String(e.pedido_id)) : null;
+                const nombre = e?.pedido_id ? (ped?.cliente || "Entrega de NVI") : (e?.destinatario || "Entrega manual");
+                const direccion = e?.pedido_id ? (ped?.direccion || [e.direccion,e.localidad,e.partido,e.provincia].filter(Boolean).join(", ")) : [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", ");
+                return <div key={id} style={{background:"white",border:"1px solid #dbeafe",borderRadius:8,padding:9,display:"flex",gap:10}}>
+                  <strong style={{color:"#1d4ed8",minWidth:24}}>{indice + 1}.</strong>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontWeight:800,fontSize:13}}>{e ? nombre : "Entrega no disponible en la lista actual"}</div>
+                    {e?.pedido_id && ped?.numeroVisible && <div style={{fontSize:11}}>NVI #{ped.numeroVisible}</div>}
+                    <div style={{fontSize:12,color:"#475569"}}>📍 {direccion || "Dirección no disponible"}</div>
+                    {e && <div style={{fontSize:11,color:"#64748b"}}>Estado: {e.estado || "Sin estado"}</div>}
+                  </div>
+                </div>;
+              })}
+              {ids.length === 0 && <div style={{fontSize:12}}>La ruta enviada no contiene paradas.</div>}
+            </div>
+          </details>;
+        })}
+      </div>
+      <div style={{fontSize:11,color:"#64748b",marginTop:10}}>Para solicitar un cambio, hablá con el repartidor mediante RutaChat. Solo él puede modificar y volver a enviar su recorrido.</div>
+    </div>}
+  </section>;
 }
 
 export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
@@ -1237,6 +1368,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
         </header>
         <main style={{ maxWidth: 1000, margin: "auto", padding: 14 }}>
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
+          <RutasEnviadasSupervisor empresaId={empresaId} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
             <strong>Gestión de entregas</strong>
             <button onClick={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }}
@@ -1698,6 +1830,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
 
       <main style={{ maxWidth: "1000px", margin: "0 auto", padding: "14px" }}>
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
+          <RutasEnviadasSupervisor empresaId={empresaId} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
         <MapaPlanificacion filtro={filtroRepartidor} setFiltro={setFiltroRepartidor} destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const p = pedidos.find(x => x.id === d.id); if (p) abrirPedido(p); }} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[
