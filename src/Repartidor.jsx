@@ -122,6 +122,8 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const [gpsEstado, setGpsEstado] = useState("Sin iniciar");
   const [ordenRuta, setOrdenRuta] = useState([]);
   const [rutaGuardada, setRutaGuardada] = useState(false);
+  const [organizarAsignadasAbierto, setOrganizarAsignadasAbierto] = useState(false);
+  const [organizarRecibidasAbierto, setOrganizarRecibidasAbierto] = useState(false);
   const [arrastrandoId, setArrastrandoId] = useState(null);
   const arrastreTactil = React.useRef(null);
   const [resumenSalida, setResumenSalida] = useState(null);
@@ -351,6 +353,8 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     try {
       localStorage.setItem(claveOrdenRuta(), JSON.stringify(ordenRuta));
       setRutaGuardada(true);
+      setOrganizarAsignadasAbierto(false);
+      setOrganizarRecibidasAbierto(false);
     } catch {
       alert("No se pudo guardar la ruta en este dispositivo.");
     }
@@ -1141,7 +1145,9 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
         {!cargando && !error && !jornadaActiva && asignadas.length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
-            <div style={{fontSize:"13px",fontWeight:"950",marginBottom:"5px"}}>🧭 ORGANIZAR MI RUTA</div>
+            <button type="button" onClick={() => setOrganizarAsignadasAbierto(v => !v)} style={{width:"100%",textAlign:"left",background:"#f1f5f9",border:"1px solid #cbd5e1",borderRadius:"8px",padding:"11px",fontSize:"13px",fontWeight:"950",cursor:"pointer"}}>🧭 ORGANIZAR MI RUTA {organizarAsignadasAbierto ? "▲" : "▼"}</button>
+            {organizarAsignadasAbierto && (<>
+
             <div style={{fontSize:"11px",color:"#64748b",marginBottom:"9px"}}>
               Arrastrá los destinos desde ☰ o usá las flechas. El mapa mostrará los números en ese orden.
               Esto no cambia las asignaciones del Supervisor.
@@ -1175,12 +1181,15 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             <div style={{fontSize:"10px",color:"#64748b",marginTop:"6px",textAlign:"center"}}>
               Se conserva en este dispositivo al actualizar la página. No modifica las asignaciones.
             </div>
+            </>)}
           </div>
         )}
 
         {!cargando && !error && !jornadaActiva && recibidas.length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
-            <div style={{fontSize:"13px",fontWeight:"950",marginBottom:"4px"}}>🗺️ ORGANIZAR RUTA</div>
+            <button type="button" onClick={() => setOrganizarRecibidasAbierto(v => !v)} style={{width:"100%",textAlign:"left",background:"#f1f5f9",border:"1px solid #cbd5e1",borderRadius:"8px",padding:"11px",fontSize:"13px",fontWeight:"950",cursor:"pointer"}}>🗺️ ORGANIZAR RUTA {organizarRecibidasAbierto ? "▲" : "▼"}</button>
+            {organizarRecibidasAbierto && (<>
+
             <div style={{fontSize:"10px",color:"#64748b",marginBottom:"10px"}}>
               Arrastrá las entregas para definir el orden del recorrido.
             </div>
@@ -1249,6 +1258,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                 </div>
               ))}
             </div>
+            </>)}
           </div>
         )}
 
