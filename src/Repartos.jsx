@@ -108,6 +108,7 @@ function RutaChatSupervisor({ empresaId, repartidores }) {
   const [texto, setTexto] = useState("");
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const fondoChatRef = React.useRef(null);
 
   useEffect(() => {
     if (!abierto) return;
@@ -163,6 +164,13 @@ function RutaChatSupervisor({ empresaId, repartidores }) {
     (m.remitente_id === miId && m.destinatario_id === destino) ||
     (m.remitente_id === destino && m.destinatario_id === miId));
   const sinLeer = mensajes.filter(m => m.destinatario_id === miId && !m.leido_at).length;
+  // Al abrir el chat, cambiar de chofer o llegar un mensaje, mostrar el final.
+  useEffect(() => {
+    if (abierto && fondoChatRef.current) {
+      fondoChatRef.current.scrollTop = fondoChatRef.current.scrollHeight;
+    }
+  }, [abierto, destino, conversacion.length, conversacion[conversacion.length - 1]?.id]);
+
 
   return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
     <button type="button" onClick={() => setAbierto(v => !v)}
@@ -177,7 +185,7 @@ function RutaChatSupervisor({ empresaId, repartidores }) {
         {repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email || "Repartidor"}</option>)}
       </select>
       {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}
-      <div style={{maxHeight:280,overflowY:"auto",background:"#f8fafc",padding:10,borderRadius:8,marginTop:10}}>
+      <div ref={fondoChatRef} style={{maxHeight:280,overflowY:"auto",background:"#f8fafc",padding:10,borderRadius:8,marginTop:10}}>
         {!conversacion.length && <div style={{fontSize:12,color:"#64748b"}}>Todavía no hay mensajes con este repartidor.</div>}
         {conversacion.map(m => <div key={m.id} style={{textAlign:m.remitente_id === miId ? "right" : "left",marginBottom:8}}>
           <div style={{display:"inline-block",maxWidth:"90%",background:m.remitente_id === miId ? "#dcfce7" : "#e2e8f0",padding:9,borderRadius:8,fontSize:13,overflowWrap:"anywhere"}}>
@@ -196,9 +204,95 @@ function RutaChatSupervisor({ empresaId, repartidores }) {
   </section>;
 }
 
+
+// Aviso de RutaChat: funciona con el chat plegado, sin alterar las entregas.
+// El primer control de mensajes establece la base y no reproduce mensajes antiguos.
+function useRutaChatAviso(empresaId, usuarioId) {
+  const audioRef = React.useRef(null);
+  const vistosRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!empresaId || !usuarioId) return;
+    let vigente = true;
+    let consultando = false;
+    vistosRef.current = null;
+
+    // Los navegadores móviles requieren un gesto del usuario para habilitar audio.
+    const habilitarAudio = () => {
+      try {
+        const AudioContexto = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContexto) return;
+        if (!audioRef.current) audioRef.current = new AudioContexto();
+        if (audioRef.current.state === "suspended") audioRef.current.resume().catch(() => {});
+      } catch (e) { console.warn("RutaChat: audio no disponible", e); }
+    };
+
+    const sonar = () => {
+      const contexto = audioRef.current;
+      if (!contexto || contexto.state !== "running") return;
+      try {
+        const ahora = contexto.currentTime;
+        const oscilador = contexto.createOscillator();
+        const volumen = contexto.createGain();
+        oscilador.type = "triangle";
+        oscilador.frequency.setValueAtTime(740, ahora);
+        oscilador.frequency.setValueAtTime(988, ahora + 0.22);
+        volumen.gain.setValueAtTime(0.0001, ahora);
+        volumen.gain.exponentialRampToValueAtTime(0.48, ahora + 0.018);
+        volumen.gain.setValueAtTime(0.48, ahora + 0.17);
+        volumen.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.21);
+        volumen.gain.setValueAtTime(0.0001, ahora + 0.22);
+        volumen.gain.exponentialRampToValueAtTime(0.48, ahora + 0.24);
+        volumen.gain.setValueAtTime(0.48, ahora + 0.43);
+        volumen.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.56);
+        oscilador.connect(volumen);
+        volumen.connect(contexto.destination);
+        oscilador.start(ahora);
+        oscilador.stop(ahora + 0.57);
+      } catch (e) { console.warn("RutaChat: no se pudo reproducir aviso", e); }
+    };
+
+    const revisar = async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const { data, error } = await supabase.from("mensajes_operativos")
+          .select("id")
+          .eq("empresa_id", empresaId)
+          .eq("destinatario_id", usuarioId)
+          .order("creado_at", { ascending: false })
+          .limit(100);
+        if (error || !vigente) return;
+        const actuales = new Set((data || []).map(m => m.id));
+        if (vistosRef.current !== null &&
+            [...actuales].some(id => !vistosRef.current.has(id))) sonar();
+        vistosRef.current = actuales;
+      } catch (e) { console.warn("RutaChat: consulta de avisos", e); }
+      finally { consultando = false; }
+    };
+
+    window.addEventListener("pointerdown", habilitarAudio, { capture: true });
+    window.addEventListener("keydown", habilitarAudio, { capture: true });
+    revisar();
+    const intervalo = window.setInterval(revisar, 8000);
+    return () => {
+      vigente = false;
+      window.clearInterval(intervalo);
+      window.removeEventListener("pointerdown", habilitarAudio, true);
+      window.removeEventListener("keydown", habilitarAudio, true);
+      vistosRef.current = null;
+      if (audioRef.current) {
+        audioRef.current.close().catch(() => {});
+        audioRef.current = null;
+      }
+    };
+  }, [empresaId, usuarioId]);
+}
+
 export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
   const [perfil, setPerfil] = useState(perfilProp || null);
   const [empresaId, setEmpresaId] = useState(perfilProp?.empresa_id || null);
+  useRutaChatAviso(empresaId, sesionProp?.user?.id || perfil?.id);
   const [empresaNombre, setEmpresaNombre] = useState(perfilProp?.empresa || "");
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState("");

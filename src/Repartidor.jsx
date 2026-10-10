@@ -25,6 +25,91 @@ const iconoNumero = (numero) => L.divIcon({
   popupAnchor: [0,-16],
 });
 
+
+// Aviso de RutaChat: funciona con el chat plegado, sin alterar las entregas.
+// El primer control de mensajes establece la base y no reproduce mensajes antiguos.
+function useRutaChatAviso(empresaId, usuarioId) {
+  const audioRef = React.useRef(null);
+  const vistosRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!empresaId || !usuarioId) return;
+    let vigente = true;
+    let consultando = false;
+    vistosRef.current = null;
+
+    // Los navegadores móviles requieren un gesto del usuario para habilitar audio.
+    const habilitarAudio = () => {
+      try {
+        const AudioContexto = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContexto) return;
+        if (!audioRef.current) audioRef.current = new AudioContexto();
+        if (audioRef.current.state === "suspended") audioRef.current.resume().catch(() => {});
+      } catch (e) { console.warn("RutaChat: audio no disponible", e); }
+    };
+
+    const sonar = () => {
+      const contexto = audioRef.current;
+      if (!contexto || contexto.state !== "running") return;
+      try {
+        const ahora = contexto.currentTime;
+        const oscilador = contexto.createOscillator();
+        const volumen = contexto.createGain();
+        oscilador.type = "triangle";
+        oscilador.frequency.setValueAtTime(740, ahora);
+        oscilador.frequency.setValueAtTime(988, ahora + 0.22);
+        volumen.gain.setValueAtTime(0.0001, ahora);
+        volumen.gain.exponentialRampToValueAtTime(0.48, ahora + 0.018);
+        volumen.gain.setValueAtTime(0.48, ahora + 0.17);
+        volumen.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.21);
+        volumen.gain.setValueAtTime(0.0001, ahora + 0.22);
+        volumen.gain.exponentialRampToValueAtTime(0.48, ahora + 0.24);
+        volumen.gain.setValueAtTime(0.48, ahora + 0.43);
+        volumen.gain.exponentialRampToValueAtTime(0.0001, ahora + 0.56);
+        oscilador.connect(volumen);
+        volumen.connect(contexto.destination);
+        oscilador.start(ahora);
+        oscilador.stop(ahora + 0.57);
+      } catch (e) { console.warn("RutaChat: no se pudo reproducir aviso", e); }
+    };
+
+    const revisar = async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const { data, error } = await supabase.from("mensajes_operativos")
+          .select("id")
+          .eq("empresa_id", empresaId)
+          .eq("destinatario_id", usuarioId)
+          .order("creado_at", { ascending: false })
+          .limit(100);
+        if (error || !vigente) return;
+        const actuales = new Set((data || []).map(m => m.id));
+        if (vistosRef.current !== null &&
+            [...actuales].some(id => !vistosRef.current.has(id))) sonar();
+        vistosRef.current = actuales;
+      } catch (e) { console.warn("RutaChat: consulta de avisos", e); }
+      finally { consultando = false; }
+    };
+
+    window.addEventListener("pointerdown", habilitarAudio, { capture: true });
+    window.addEventListener("keydown", habilitarAudio, { capture: true });
+    revisar();
+    const intervalo = window.setInterval(revisar, 8000);
+    return () => {
+      vigente = false;
+      window.clearInterval(intervalo);
+      window.removeEventListener("pointerdown", habilitarAudio, true);
+      window.removeEventListener("keydown", habilitarAudio, true);
+      vistosRef.current = null;
+      if (audioRef.current) {
+        audioRef.current.close().catch(() => {});
+        audioRef.current = null;
+      }
+    };
+  }, [empresaId, usuarioId]);
+}
+
 export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
   const [perfil, setPerfil] = useState(perfilProp || null);
   const [entregas, setEntregas] = useState([]);
@@ -47,6 +132,8 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const [chatTexto, setChatTexto] = useState("");
   const [chatError, setChatError] = useState("");
   const [chatEnviando, setChatEnviando] = useState(false);
+  const fondoChatRef = React.useRef(null);
+  useRutaChatAviso(perfil?.empresa_id, sesionProp?.user?.id || perfil?.id);
 
   const claveResumenSalida = () => {
     const uid = sesionProp?.user?.id || perfil?.id || "repartidor";
@@ -783,6 +870,13 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     (m.remitente_id===miIdChat && m.destinatario_id===chatDestino) ||
     (m.remitente_id===chatDestino && m.destinatario_id===miIdChat));
 
+  // Mantener a la vista el último mensaje sin mover la pantalla de entregas.
+  useEffect(() => {
+    if (chatAbierto && fondoChatRef.current) {
+      fondoChatRef.current.scrollTop = fondoChatRef.current.scrollHeight;
+    }
+  }, [chatAbierto, chatDestino, conversacionChat.length, conversacionChat[conversacionChat.length - 1]?.id]);
+
   const boton = {
     border: "none", borderRadius: "9px", minHeight: "46px", padding: "9px 12px",
     fontWeight: "900", cursor: "pointer"
@@ -959,7 +1053,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                 {chatContactos.map(c=><option key={c.id} value={c.id}>{c.nombre||"Supervisor"}</option>)}
               </select>
               {chatError && <div style={{color:"#b91c1c",fontSize:"12px",marginTop:"8px"}}>⚠️ {chatError}</div>}
-              <div style={{maxHeight:"230px",overflowY:"auto",background:"#f8fafc",borderRadius:"8px",padding:"8px",marginTop:"8px"}}>
+              <div ref={fondoChatRef} style={{maxHeight:"230px",overflowY:"auto",background:"#f8fafc",borderRadius:"8px",padding:"8px",marginTop:"8px"}}>
                 {!conversacionChat.length && <div style={{fontSize:"12px",color:"#64748b"}}>Todavía no hay mensajes.</div>}
                 {conversacionChat.map(m=><div key={m.id} style={{marginBottom:"8px",textAlign:m.remitente_id===miIdChat?"right":"left"}}>
                   <div style={{display:"inline-block",maxWidth:"90%",background:m.remitente_id===miIdChat?"#dcfce7":"#e2e8f0",padding:"8px",borderRadius:"8px",fontSize:"12px",overflowWrap:"anywhere"}}>
