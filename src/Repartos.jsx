@@ -29,54 +29,6 @@ const iconoEntrega = (estado) => {
   return L.divIcon({ className: "", html: `<div style="width:19px;height:19px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 1px 5px #33415588"></div>`, iconSize:[25,25], iconAnchor:[12,12] });
 };
 
-function MapaPlanificacion({ destinos, repartidores, alElegirEntrega, ubicando, onUbicar, filtro, setFiltro }) {
-  const [filtroEstado, setFiltroEstado] = useState("todos");
-  // Los filtros solo cambian la visualización; nunca guardan ni asignan entregas.
-  const visibles = destinos.filter(d => {
-    const coincideChofer = filtro === "todos" || (filtro === "sin_asignar" ? !d.repartidor_id : String(d.repartidor_id) === filtro);
-    const estado = String(d.estado || "").toLowerCase();
-    const coincideEstado = filtroEstado === "todos" ||
-      (filtroEstado === "pendientes" && ["pendiente_preparacion", "preparado"].includes(estado)) ||
-      (filtroEstado === "asignadas" && ["asignado", "recibido", "en_reparto", "reintentar"].includes(estado)) ||
-      (filtroEstado === "finalizadas" && ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(estado));
-    return coincideChofer && coincideEstado;
-  });
-  const ubicados = visibles.filter(d => puntoValido(d.latitud, d.longitud));
-  const puntos = useMemo(() => ubicados.map(d => [Number(d.latitud), Number(d.longitud)]), [destinos, filtro, filtroEstado]);
-  const sinCoordenadas = destinos.filter(d => !puntoValido(d.latitud, d.longitud) && d.direccion);
-  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:12,padding:12,marginBottom:14}}>
-    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:9}}>
-      <strong>🗺️ MAPA DE PLANIFICACIÓN</strong>
-      <select value={filtro} onChange={e => setFiltro(e.target.value)} style={{padding:8,borderRadius:7,border:"1px solid #cbd5e1"}}>
-        <option value="todos">Todos los choferes</option><option value="sin_asignar">Sin chofer asignado</option>
-        {repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}
-      </select>
-      <select aria-label="Filtrar por estado" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{padding:8,borderRadius:7,border:"1px solid #cbd5e1"}}>
-        <option value="todos">Todos los estados</option>
-        <option value="pendientes">Pendientes y preparadas</option>
-        <option value="asignadas">Asignadas y en reparto</option>
-        <option value="finalizadas">Finalizadas</option>
-      </select>
-    </div>
-    {puntos.length > 0 ? <div style={{height:350,borderRadius:9,overflow:"hidden"}}>
-      <MapContainer center={puntos[0]} zoom={13} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
-        <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        <AjustarMapaRepartos puntos={puntos}/>
-        {ubicados.map(d => <Marker key={d.id} position={[Number(d.latitud),Number(d.longitud)]} icon={iconoEntrega(d.estado)}>
-          <Popup><strong>{d.cliente}</strong><div>{d.direccion}</div><div>{d.estado}</div>
-            <div>Chofer: {repartidores.find(r => String(r.id) === String(d.repartidor_id))?.nombre || "Sin asignar"}</div>
-            <button type="button" onClick={() => alElegirEntrega(d)}>VER ENTREGA</button>
-          </Popup></Marker>)}
-      </MapContainer>
-    </div> : <div style={{padding:20,background:"#f8fafc",borderRadius:8}}>No hay destinos ubicados para los filtros seleccionados.</div>}
-    <div style={{fontSize:12,color:"#475569",marginTop:8}}>🟠 Pendiente/preparada · 🔵 Asignada/en reparto · 🟢 Entregada. {ubicados.length} de {visibles.length} destinos visibles en el mapa. Los filtros no modifican asignaciones.</div>
-    {sinCoordenadas.length > 0 && <div style={{fontSize:12,marginTop:8}}>
-      ⚠️ {sinCoordenadas.length} entrega/s sin coordenadas.
-      <button type="button" disabled={ubicando} onClick={onUbicar} style={{marginLeft:8,padding:"7px 10px"}}>{ubicando ? "Ubicando..." : "📍 UBICAR DIRECCIONES"}</button>
-    </div>}
-  </section>;
-}
-
 const ESTADO_LABEL = {
   pendiente_preparacion: "📦 PENDIENTE",
   preparado: "✅ PREPARADO",
@@ -295,6 +247,14 @@ function useRutaChatAviso(empresaId, usuarioId) {
 function MapaRutaEnviada({ paradas, ubicacionChofer, nombreChofer }) {
   const ubicadas = paradas.filter(p => puntoValido(p.latitud, p.longitud));
   const puntos = ubicadas.map(p => [Number(p.latitud), Number(p.longitud)]);
+  // Solo trazar la ruta pendiente: desde el GPS actual hacia las paradas
+  // todavía por visitar. Las finalizadas conservan su marcador histórico.
+  const pendientes = ubicadas.filter(p => !["entregado", "no_entregado", "devolucion_informada"].includes(p.estado));
+  const gpsValido = puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud);
+  const lineaPendiente = [
+    ...(gpsValido ? [[Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)]] : []),
+    ...pendientes.map(p => [Number(p.latitud), Number(p.longitud)]),
+  ];
   if (!ubicadas.length && !puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud)) return <div style={{fontSize:12,padding:12,background:"#f8fafc",borderRadius:8}}>Todavía no hay coordenadas disponibles para mostrar el recorrido.</div>;
   const centro = puntos[0] || [Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)];
   const puntosEncuadre = puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud)
@@ -304,7 +264,7 @@ function MapaRutaEnviada({ paradas, ubicacionChofer, nombreChofer }) {
       <MapContainer center={centro} zoom={13} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
         <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         <AjustarMapaRepartos puntos={puntosEncuadre.length ? puntosEncuadre : [centro]} />
-        {ubicadas.length > 1 && <Polyline positions={puntos} pathOptions={{color:"#2563eb",weight:3,dashArray:"7,7"}} />}
+        {lineaPendiente.length > 1 && <Polyline positions={lineaPendiente} pathOptions={{color:"#2563eb",weight:3,dashArray:"7,7"}} />}
         {ubicadas.map(p => <Marker key={p.id} position={[Number(p.latitud),Number(p.longitud)]}
           icon={L.divIcon({className:"",html:`<div style="width:30px;height:30px;border-radius:50%;background:${p.estado === "entregado" ? "#16a34a" : p.estado === "no_entregado" ? "#dc2626" : p.estado === "reintentar" ? "#f59e0b" : "#1d4ed8"};color:white;border:3px solid white;box-shadow:0 2px 6px #33415588;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900">${p.numero}</div>`,iconSize:[36,36],iconAnchor:[18,18]})}>
           <Popup><strong>{p.numero}. {p.nombre}</strong><div>{p.direccion}</div><div>Estado: {p.estado || "Pendiente"}</div></Popup>
@@ -317,7 +277,7 @@ function MapaRutaEnviada({ paradas, ubicacionChofer, nombreChofer }) {
       </MapContainer>
     </div>
     <div style={{fontSize:11,color:"#475569",marginTop:6}}>🔵 Pendiente/en reparto · 🟢 Entregado · 🔴 No entregado · 🟠 Volver más tarde · 🚚 Última posición GPS</div>
-    <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Los números indican el orden enviado. La línea une los puntos en ese orden; no representa calles ni navegación.</div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Los números indican el orden enviado. La línea parte del GPS y une únicamente las paradas pendientes; no representa calles ni navegación.</div>
     {ubicadas.length !== paradas.length && <div style={{fontSize:12,color:"#92400e",marginTop:5}}>⚠️ {paradas.length - ubicadas.length} parada/s sin coordenadas no aparecen en el mapa.</div>}
   </div>;
 }
@@ -342,7 +302,7 @@ function RutaEnviadaViva({ empresaId, repartidorId, nombreChofer, paradasInicial
           .select("id,latitud,longitud,ultima_posicion_at")
           .eq("empresa_id", empresaId).eq("id", repartidorId).maybeSingle()];
         if (ids.length) consultas.push(supabase.from("repartos_entregas")
-          .select("id,estado").eq("empresa_id", empresaId).in("id", ids));
+          .select("id,estado,salida_at,entregado_at,actualizado_at,motivo_no_entrega,observaciones").eq("empresa_id", empresaId).in("id", ids));
         const resultados = await Promise.all(consultas);
         const error = resultados.find(r => r.error)?.error;
         if (error) throw error;
@@ -350,7 +310,7 @@ function RutaEnviadaViva({ empresaId, repartidorId, nombreChofer, paradasInicial
         setUbicacion(resultados[0].data || null);
         if (ids.length) {
           const nuevos = {};
-          (resultados[1].data || []).forEach(e => { nuevos[String(e.id)] = e.estado; });
+          (resultados[1].data || []).forEach(e => { nuevos[String(e.id)] = e; });
           setEstados(nuevos);
         }
         setErrorVivo("");
@@ -363,7 +323,7 @@ function RutaEnviadaViva({ empresaId, repartidorId, nombreChofer, paradasInicial
     return () => { vigente = false; window.clearInterval(intervalo); };
   }, [abierto, empresaId, repartidorId, paradasIniciales.map(p => p.id).join("|")]);
   if (!abierto) return null;
-  const paradas = paradasIniciales.map(p => ({...p, estado: estados[String(p.id)] || p.estado}));
+  const paradas = paradasIniciales.map(p => ({...p, ...(estados[String(p.id)] || {})}));
   return <>
     <details open={mapaAbierto} onToggle={e => setMapaAbierto(e.currentTarget.open)} style={{marginTop:10,background:"white",border:"1px solid #bfdbfe",borderRadius:8,padding:10}}>
       <summary style={{cursor:"pointer",fontWeight:800,color:"#1d4ed8"}}>🗺️ VER RECORRIDO EN MAPA</summary>
@@ -376,22 +336,83 @@ function RutaEnviadaViva({ empresaId, repartidorId, nombreChofer, paradasInicial
     </div>
     {errorVivo && <div style={{fontSize:12,color:"#b91c1c"}}>⚠️ {errorVivo}</div>}
     <div style={{display:"grid",gap:6,marginTop:10}}>
-      {paradas.map(p => <div key={p.id} style={{background:"white",border:"1px solid #dbeafe",borderRadius:8,padding:9,display:"flex",gap:10}}>
-        <strong style={{color:p.estado === "entregado" ? "#16a34a" : p.estado === "no_entregado" ? "#dc2626" : p.estado === "reintentar" ? "#d97706" : "#1d4ed8",minWidth:24}}>{p.numero}.</strong>
-        <div style={{minWidth:0}}><div style={{fontWeight:800,fontSize:13}}>{p.nombre}</div>
-          <div style={{fontSize:12,color:"#475569"}}>📍 {p.direccion || "Dirección no disponible"}</div>
-          <div style={{fontSize:11,color:"#64748b"}}>Estado: {p.estado || "Sin estado"}</div></div>
-      </div>)}
+      {paradas.map(p => {
+        const partesDireccion = String(p.direccion || "").split(",").map(x => x.trim()).filter(Boolean);
+        // Ocultar la provincia solo en esta vista; conservar la dirección original en datos y mapa.
+        const ultima = partesDireccion[partesDireccion.length - 1] || "";
+        const provincias = ["Buenos Aires", "Catamarca", "Chaco", "Chubut", "Ciudad Autónoma de Buenos Aires", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán"];
+        if (provincias.some(x => x.toLocaleLowerCase("es") === ultima.toLocaleLowerCase("es"))) partesDireccion.pop();
+        // Evitar repetir localidad cuando también figura como partido.
+        if (partesDireccion.length >= 3 && partesDireccion[partesDireccion.length - 1].toLocaleLowerCase("es") === partesDireccion[partesDireccion.length - 2].toLocaleLowerCase("es")) partesDireccion.pop();
+        const direccionBreve = partesDireccion.join(", ") || "Dirección no disponible";
+        const estadoTexto = p.estado === "entregado" ? "✅ Entregada" : p.estado === "no_entregado" ? "❌ No entregada" : p.estado === "reintentar" ? "🟠 Más tarde" : "🔵 " + (p.estado || "Pendiente").replaceAll("_", " ");
+        const color = p.estado === "entregado" ? "#166534" : p.estado === "no_entregado" ? "#b91c1c" : p.estado === "reintentar" ? "#92400e" : "#1d4ed8";
+        const horaParada = valor => valor ? new Date(valor).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"}) : null;
+        const nota = p.estado === "no_entregado" ? [p.motivo_no_entrega, p.observaciones].filter(Boolean).join(" · ") : (p.observaciones || "");
+        return <div key={p.id} style={{background:"white",border:"1px solid #dbeafe",borderRadius:8,padding:"9px 12px",fontSize:16,lineHeight:1.4,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",columnGap:16,rowGap:3}}>
+            <strong style={{color,minWidth:25}}>{p.numero}.</strong>
+            <strong>{p.nombre}</strong>
+            <span>📍 {direccionBreve}</span>
+            <strong style={{color}}>{estadoTexto}</strong>
+            {p.estado === "entregado" && p.entregado_at && <strong style={{color:"#166534"}}>✅ {horaParada(p.entregado_at)}</strong>}
+            {p.estado === "no_entregado" && p.actualizado_at && <strong style={{color:"#b91c1c"}}>❌ {horaParada(p.actualizado_at)}</strong>}
+          </div>
+          {nota && <div title={nota} style={{marginTop:3,color:p.estado === "no_entregado" ? "#b91c1c" : "#475569",fontSize:15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📝 {p.estado === "no_entregado" ? "Motivo / nota: " : "Nota: "}{nota}</div>}
+        </div>;
+      })}
     </div>
   </>;
 }
 
 // Recorridos enviados por los repartidores: consulta exclusivamente de lectura.
 function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas, pedidos }) {
-  const [abierto, setAbierto] = useState(false);
   const [rutasAbiertas, setRutasAbiertas] = useState({});
-  const [rutas, setRutas] = useState([]);
+  const [datos, setDatos] = useState([]);
+  const [gps, setGps] = useState({});
   const [error, setError] = useState("");
+  const [revision, setRevision] = useState(null);
+  useEffect(() => {
+    if (!empresaId || !repartidores.length) { setDatos([]); setGps({}); return; }
+    let vigente = true;
+    let consultando = false;
+    const consultar = async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const ids = repartidores.map(r => r.id);
+        const [resEntregas, resGps] = await Promise.all([
+          supabase.from("repartos_entregas")
+            .select("id,repartidor_id,estado,salida_at,entregado_at,actualizado_at")
+            .eq("empresa_id", empresaId).in("repartidor_id", ids),
+          supabase.from("perfiles")
+            .select("id,latitud,longitud,ultima_posicion_at")
+            .eq("empresa_id", empresaId).in("id", ids)
+        ]);
+        if (resEntregas.error) throw resEntregas.error;
+        if (resGps.error) throw resGps.error;
+        if (!vigente) return;
+        setDatos(resEntregas.data || []);
+        setGps(Object.fromEntries((resGps.data || []).map(p => [String(p.id), p])));
+        setRevision(new Date());
+        setError("");
+      } catch (e) { if (vigente) setError(e.message || "No se pudo actualizar el tablero."); }
+      finally { consultando = false; }
+    };
+    consultar();
+    const intervalo = window.setInterval(consultar, 30000);
+    return () => { vigente = false; window.clearInterval(intervalo); };
+  }, [empresaId, repartidores.map(r => r.id).join("|")]);
+  const hora = valor => valor && !Number.isNaN(new Date(valor).getTime())
+    ? new Date(valor).toLocaleTimeString("es-AR", { hour:"2-digit", minute:"2-digit" }) : "—";
+  const tiempoGps = valor => {
+    if (!valor) return "Sin posición reciente";
+    const minutos = Math.max(0, Math.floor((Date.now() - new Date(valor).getTime()) / 60000));
+    if (!Number.isFinite(minutos)) return "Hora GPS no disponible";
+    return minutos < 1 ? "hace menos de 1 min" : `hace ${minutos} min`;
+  };
+
+  const [rutas, setRutas] = useState([]);
   const [cargando, setCargando] = useState(false);
   const [ultimaRevision, setUltimaRevision] = useState(null);
   const [pendientes, setPendientes] = useState({});
@@ -520,52 +541,76 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
 
   const entregasPorId = new Map(entregas.map(e => [String(e.id), e]));
   const pedidosPorId = new Map(pedidos.map(p => [String(p.id), p]));
-  const cantidad = rutas.length;
-  const sinVer = Object.keys(pendientes).length;
   return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
-    <button type="button" onClick={() => setAbierto(v => !v)}
-      style={{width:"100%",padding:12,border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900,cursor:"pointer",textAlign:"left"}}>
-      📨 RUTAS ENVIADAS POR REPARTIDORES {cantidad ? `(${cantidad})` : ""} {sinVer ? `🔔 ${sinVer} nueva/s` : ""} {abierto ? "▲" : "▼"}
-    </button>
-    {abierto && <div style={{paddingTop:12}}>
-      <div style={{fontSize:12,color:"#475569",marginBottom:10}}>
-        Recorridos organizados por los repartidores · Solo lectura · Actualización automática cada 60 segundos.
-        {ultimaRevision && <span> Última consulta: {ultimaRevision.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}.</span>}
-      </div>
-      {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}
-      {cargando && !ultimaRevision && <p style={{fontSize:12}}>Consultando rutas...</p>}
-      {!error && !cargando && rutas.length === 0 && <p style={{fontSize:13}}>Todavía no se enviaron rutas.</p>}
-      <div style={{display:"grid",gap:12}}>
-        {rutas.map(r => {
-          const rep = repartidores.find(x => String(x.id) === String(r.repartidor_id));
-          const ids = Array.isArray(r.entrega_ids) ? r.entrega_ids : [];
-          const paradasMapa = ids.map((id, indice) => {
-            const e = entregasPorId.get(String(id));
-            const ped = e?.pedido_id ? pedidosPorId.get(String(e.pedido_id)) : null;
-            return {
-              id, numero: indice + 1,
-              nombre: e?.pedido_id ? (ped?.cliente || "Entrega de NVI") : (e?.destinatario || "Entrega manual"),
-              direccion: e?.pedido_id ? (ped?.direccion || [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", ")) : [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", "),
-              latitud: puntoValido(e?.latitud, e?.longitud) ? e.latitud : ped?.latitud,
-              longitud: puntoValido(e?.latitud, e?.longitud) ? e.longitud : ped?.longitud,
-              estado: e?.estado || null,
-            };
-          });
-          return <details key={r.repartidor_id} onToggle={e => { const estaAbierta = e.currentTarget.open; setRutasAbiertas(prev => ({...prev, [String(r.repartidor_id)]: estaAbierta})); if (estaAbierta) marcarVista(r); }} style={{border:"1px solid #bfdbfe",borderRadius:9,padding:12,background:"#eff6ff"}}>
-            <summary style={{fontWeight:900,cursor:"pointer",listStyle:"revert",padding:"4px 0"}}>
-              🚚 {rep?.nombre || rep?.email || "Repartidor"} · {ids.length} parada/s {pendientes[String(r.repartidor_id)] ? "🔴 NUEVA RUTA" : ""}
-              <div style={{fontSize:12,color:"#475569",fontWeight:400,marginTop:4}}>
-                Enviada: {r.actualizado_at ? new Date(r.actualizado_at).toLocaleString("es-AR") : "Sin fecha"} · Tocá para ver recorrido
-              </div>
-            </summary>
-            <RutaEnviadaViva empresaId={empresaId} repartidorId={r.repartidor_id}
-              nombreChofer={rep?.nombre || rep?.email || "Repartidor"}
-              paradasIniciales={paradasMapa} abierto={Boolean(rutasAbiertas[String(r.repartidor_id)])} />
-          </details>;
-        })}
-      </div>
-      <div style={{fontSize:11,color:"#64748b",marginTop:10}}>Para solicitar un cambio, hablá con el repartidor mediante RutaChat. Solo él puede modificar y volver a enviar su recorrido.</div>
-    </div>}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10}}>
+      <strong>🚚 CONTROL DE REPARTIDORES</strong>
+      <span style={{fontSize:11,color:"#64748b"}}>GPS y entregas: cada 30 s · Rutas: cada 60 s{revision ? ` · ${hora(revision)}` : ""}</span>
+    </div>
+    {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}
+    {cargando && !ultimaRevision && <p style={{fontSize:12}}>Consultando rutas...</p>}
+    {!repartidores.length && <p style={{fontSize:12}}>Todavía no hay repartidores habilitados.</p>}
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {repartidores.map(rep => {
+        const r = rutas.find(x => String(x.repartidor_id) === String(rep.id));
+        const ids = Array.isArray(r?.entrega_ids) ? r.entrega_ids : [];
+        const todas = datos.filter(e => String(e.repartidor_id) === String(rep.id));
+        const salidas = todas.filter(e => e.salida_at);
+        const ultimaSalida = salidas.reduce((max,e) => {
+          const t = new Date(e.salida_at).getTime();
+          return Number.isFinite(t) && t > max ? t : max;
+        }, 0);
+        // Priorizar las paradas de la ruta enviada para que cifras y detalle coincidan.
+        const base = ids.length ? ids.map(id => todas.find(e => String(e.id) === String(id))).filter(Boolean)
+          : (ultimaSalida ? salidas.filter(e => new Date(e.salida_at).getTime() === ultimaSalida) : todas.filter(e => ["asignado","recibido","en_reparto","reintentar"].includes(e.estado)));
+        const completadas = base.filter(e => e.estado === "entregado").length;
+        const fallidas = base.filter(e => e.estado === "no_entregado").length;
+        const pendientesRuta = base.filter(e => ["asignado","recibido","en_reparto","reintentar"].includes(e.estado)).length;
+        const enRuta = todas.some(e => ["en_reparto","reintentar"].includes(e.estado));
+        const porcentaje = base.length ? Math.round(completadas / base.length * 100) : 0;
+        const ubicacion = gps[String(rep.id)];
+        const paradasMapa = ids.map((id, indice) => {
+          const e = entregasPorId.get(String(id));
+          const ped = e?.pedido_id ? pedidosPorId.get(String(e.pedido_id)) : null;
+          return {
+            id, numero: indice + 1,
+            nombre: e?.pedido_id ? (ped?.cliente || "Entrega de NVI") : (e?.destinatario || "Entrega manual"),
+            direccion: e?.pedido_id ? (ped?.direccion || [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", ")) : [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", "),
+            latitud: puntoValido(e?.latitud,e?.longitud) ? e.latitud : ped?.latitud,
+            longitud: puntoValido(e?.latitud,e?.longitud) ? e.longitud : ped?.longitud,
+            estado: e?.estado || null,
+          };
+        });
+        return <details key={rep.id} onToggle={e => {
+          const estaAbierta = e.currentTarget.open;
+          setRutasAbiertas(prev => ({...prev,[String(rep.id)]:estaAbierta}));
+          if (estaAbierta && r) marcarVista(r);
+        }} style={{border:"1px solid #cbd5e1",borderRadius:9,background:"#f8fafc",padding:"10px 12px"}}>
+          <summary style={{cursor:"pointer",listStyle:"revert"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
+              <strong style={{minWidth:115,fontSize:14}}>🚚 {rep.nombre || rep.email || "Repartidor"}</strong>
+              <span style={{fontSize:12,color:enRuta?"#166534":"#475569"}}>{enRuta?"● En ruta":"Sin reparto activo"}</span>
+              <span style={{fontSize:12}}>🕐 Inicio del reparto: <b>{hora(ultimaSalida || null)}</b></span>
+              <span style={{fontSize:13,color:"#166534",fontWeight:800}}>✅ {completadas}/{base.length}</span>
+              <span style={{fontSize:12}}>📦 {pendientesRuta} pendientes</span>
+              <span style={{fontSize:12,color:fallidas?"#b91c1c":"#475569"}}>❌ {fallidas}</span>
+              <span style={{fontSize:12}}>📍 GPS: {tiempoGps(ubicacion?.ultima_posicion_at)}</span>
+              {pendientes[String(rep.id)] && <span style={{fontSize:11,color:"#b91c1c",fontWeight:900}}>🔔 NUEVA RUTA</span>}
+              <span style={{fontSize:12,color:"#1d4ed8",fontWeight:800}}>Ver ruta {rutasAbiertas[String(rep.id)]?"▲":"▼"}</span>
+            </div>
+            <div style={{height:5,background:"#e2e8f0",borderRadius:8,overflow:"hidden",marginTop:9}}>
+              <div style={{height:"100%",width:`${porcentaje}%`,background:"#16a34a"}} />
+            </div>
+          </summary>
+          {r ? <div style={{marginTop:10}}>
+            <div style={{fontSize:12,color:"#475569"}}>Ruta enviada: {r.actualizado_at ? new Date(r.actualizado_at).toLocaleString("es-AR") : "Sin fecha"} · {ids.length} paradas · Solo lectura</div>
+            <RutaEnviadaViva empresaId={empresaId} repartidorId={rep.id}
+              nombreChofer={rep.nombre || rep.email || "Repartidor"}
+              paradasIniciales={paradasMapa} abierto={Boolean(rutasAbiertas[String(rep.id)])} />
+          </div> : <p style={{fontSize:12,color:"#64748b"}}>Este repartidor todavía no envió una ruta.</p>}
+        </details>;
+      })}
+    </div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:10}}>Tocá el renglón para abrir el mapa, las entregas y sus horarios. Para solicitar cambios, usá RutaChat.</div>
   </section>;
 }
 
@@ -1522,7 +1567,6 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
             <button onClick={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }}
               style={{ padding: "12px 18px", background: "#16a34a", color: "white", border: 0, borderRadius: 8, fontWeight: 900, cursor: "pointer" }}>＋ NUEVA ENTREGA</button>
           </div>
-          <MapaPlanificacion filtro={filtroRepartidor} setFiltro={setFiltroRepartidor} destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const e = entregas.find(x => x.id === d.id); if (e) { setEntregaManualActiva(e); setRepartidorSeleccionado(e.repartidor_id || ""); } }} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))", gap: 8, marginBottom: 14 }}>
             {[["pendientes", "📦 PENDIENTES", cuenta("pendiente_preparacion")], ["preparados", "✅ PREPARADAS", cuenta("preparado")],
               ["asignados", "🚚 ASIGNADAS", cuenta("asignado") + cuenta("en_reparto")], ["todos", "📋 TODAS", manuales.length],
@@ -1979,7 +2023,6 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
       <main style={{ maxWidth: "1000px", margin: "0 auto", padding: "14px" }}>
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
           <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
-        <MapaPlanificacion filtro={filtroRepartidor} setFiltro={setFiltroRepartidor} destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const p = pedidos.find(x => x.id === d.id); if (p) abrirPedido(p); }} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[
             ["hoy", "📥 NVIs RECIBIDAS HOY", resumenHoy.recibidas],
