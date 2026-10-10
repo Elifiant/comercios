@@ -1130,6 +1130,9 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                   Finalizá el reparto cuando regreses al depósito para informar la devolución.
                 </div>
               )}
+              <button type="button" onClick={() => setActiva(null)} style={{...boton,width:"100%",marginTop:"10px",background:"#1d4ed8",color:"#fff",fontSize:"15px"}}>
+                🏠 VOLVER A MIS ENTREGAS
+              </button>
             </div>
           ) : activa.estado === "devolucion_informada" ? (
             <div style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#9a3412",textAlign:"center"}}>

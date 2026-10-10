@@ -292,30 +292,104 @@ function useRutaChatAviso(empresaId, usuarioId) {
 
 
 // Mapa exclusivo de la ruta enviada. Los números respetan el orden del repartidor.
-function MapaRutaEnviada({ paradas }) {
+function MapaRutaEnviada({ paradas, ubicacionChofer, nombreChofer }) {
   const ubicadas = paradas.filter(p => puntoValido(p.latitud, p.longitud));
   const puntos = ubicadas.map(p => [Number(p.latitud), Number(p.longitud)]);
-  if (!ubicadas.length) return <div style={{fontSize:12,padding:12,background:"#f8fafc",borderRadius:8}}>Las paradas todavía no tienen coordenadas para mostrarlas en el mapa.</div>;
+  if (!ubicadas.length && !puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud)) return <div style={{fontSize:12,padding:12,background:"#f8fafc",borderRadius:8}}>Todavía no hay coordenadas disponibles para mostrar el recorrido.</div>;
+  const centro = puntos[0] || [Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)];
+  const puntosEncuadre = puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud)
+    ? [...puntos, [Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)]] : puntos;
   return <div>
     <div style={{height:300,borderRadius:9,overflow:"hidden",marginTop:9}}>
-      <MapContainer center={puntos[0]} zoom={13} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
+      <MapContainer center={centro} zoom={13} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
         <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        <AjustarMapaRepartos puntos={puntos} />
+        <AjustarMapaRepartos puntos={puntosEncuadre.length ? puntosEncuadre : [centro]} />
         {ubicadas.length > 1 && <Polyline positions={puntos} pathOptions={{color:"#2563eb",weight:3,dashArray:"7,7"}} />}
         {ubicadas.map(p => <Marker key={p.id} position={[Number(p.latitud),Number(p.longitud)]}
-          icon={L.divIcon({className:"",html:`<div style="width:30px;height:30px;border-radius:50%;background:#1d4ed8;color:white;border:3px solid white;box-shadow:0 2px 6px #33415588;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900">${p.numero}</div>`,iconSize:[36,36],iconAnchor:[18,18]})}>
-          <Popup><strong>{p.numero}. {p.nombre}</strong><div>{p.direccion}</div></Popup>
+          icon={L.divIcon({className:"",html:`<div style="width:30px;height:30px;border-radius:50%;background:${p.estado === "entregado" ? "#16a34a" : p.estado === "no_entregado" ? "#dc2626" : p.estado === "reintentar" ? "#f59e0b" : "#1d4ed8"};color:white;border:3px solid white;box-shadow:0 2px 6px #33415588;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900">${p.numero}</div>`,iconSize:[36,36],iconAnchor:[18,18]})}>
+          <Popup><strong>{p.numero}. {p.nombre}</strong><div>{p.direccion}</div><div>Estado: {p.estado || "Pendiente"}</div></Popup>
         </Marker>)}
+        {puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud) &&
+          <Marker position={[Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)]}
+            icon={L.divIcon({className:"",html:'<div style="font-size:26px;filter:drop-shadow(0 2px 3px #334155);line-height:32px">🚚</div>',iconSize:[36,36],iconAnchor:[18,18]})}>
+            <Popup><strong>🚚 {nombreChofer || "Repartidor"}</strong><div>Última posición: {ubicacionChofer.ultima_posicion_at ? new Date(ubicacionChofer.ultima_posicion_at).toLocaleString("es-AR") : "Sin hora"}</div></Popup>
+          </Marker>}
       </MapContainer>
     </div>
+    <div style={{fontSize:11,color:"#475569",marginTop:6}}>🔵 Pendiente/en reparto · 🟢 Entregado · 🔴 No entregado · 🟠 Volver más tarde · 🚚 Última posición GPS</div>
     <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Los números indican el orden enviado. La línea une los puntos en ese orden; no representa calles ni navegación.</div>
     {ubicadas.length !== paradas.length && <div style={{fontSize:12,color:"#92400e",marginTop:5}}>⚠️ {paradas.length - ubicadas.length} parada/s sin coordenadas no aparecen en el mapa.</div>}
   </div>;
 }
 
+// Se consulta solo mientras se abre la ruta de un repartidor.
+// Las coordenadas se leen de perfiles; los estados, de las entregas.
+function RutaEnviadaViva({ empresaId, repartidorId, nombreChofer, paradasIniciales, abierto }) {
+  const [ubicacion, setUbicacion] = useState(null);
+  const [estados, setEstados] = useState({});
+  const [errorVivo, setErrorVivo] = useState("");
+  const [mapaAbierto, setMapaAbierto] = useState(false);
+  useEffect(() => {
+    if (!abierto || !empresaId || !repartidorId) return;
+    let vigente = true;
+    let consultando = false;
+    const consultar = async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const ids = paradasIniciales.map(p => p.id).filter(Boolean);
+        const consultas = [supabase.from("perfiles")
+          .select("id,latitud,longitud,ultima_posicion_at")
+          .eq("empresa_id", empresaId).eq("id", repartidorId).maybeSingle()];
+        if (ids.length) consultas.push(supabase.from("repartos_entregas")
+          .select("id,estado").eq("empresa_id", empresaId).in("id", ids));
+        const resultados = await Promise.all(consultas);
+        const error = resultados.find(r => r.error)?.error;
+        if (error) throw error;
+        if (!vigente) return;
+        setUbicacion(resultados[0].data || null);
+        if (ids.length) {
+          const nuevos = {};
+          (resultados[1].data || []).forEach(e => { nuevos[String(e.id)] = e.estado; });
+          setEstados(nuevos);
+        }
+        setErrorVivo("");
+      } catch (e) {
+        if (vigente) setErrorVivo(e?.message || "No se pudo actualizar el seguimiento.");
+      } finally { consultando = false; }
+    };
+    consultar();
+    const intervalo = window.setInterval(consultar, 30000);
+    return () => { vigente = false; window.clearInterval(intervalo); };
+  }, [abierto, empresaId, repartidorId, paradasIniciales.map(p => p.id).join("|")]);
+  if (!abierto) return null;
+  const paradas = paradasIniciales.map(p => ({...p, estado: estados[String(p.id)] || p.estado}));
+  return <>
+    <details open={mapaAbierto} onToggle={e => setMapaAbierto(e.currentTarget.open)} style={{marginTop:10,background:"white",border:"1px solid #bfdbfe",borderRadius:8,padding:10}}>
+      <summary style={{cursor:"pointer",fontWeight:800,color:"#1d4ed8"}}>🗺️ VER RECORRIDO EN MAPA</summary>
+      {mapaAbierto && <MapaRutaEnviada paradas={paradas} ubicacionChofer={ubicacion} nombreChofer={nombreChofer} />}
+    </details>
+    <div style={{fontSize:12,color:"#475569",marginTop:8}}>
+      🚚 {puntoValido(ubicacion?.latitud, ubicacion?.longitud)
+        ? `Última posición: ${ubicacion.ultima_posicion_at ? new Date(ubicacion.ultima_posicion_at).toLocaleTimeString("es-AR") : "hora no disponible"}`
+        : "Todavía no hay posición GPS registrada"} · Consulta cada 30 segundos
+    </div>
+    {errorVivo && <div style={{fontSize:12,color:"#b91c1c"}}>⚠️ {errorVivo}</div>}
+    <div style={{display:"grid",gap:6,marginTop:10}}>
+      {paradas.map(p => <div key={p.id} style={{background:"white",border:"1px solid #dbeafe",borderRadius:8,padding:9,display:"flex",gap:10}}>
+        <strong style={{color:p.estado === "entregado" ? "#16a34a" : p.estado === "no_entregado" ? "#dc2626" : p.estado === "reintentar" ? "#d97706" : "#1d4ed8",minWidth:24}}>{p.numero}.</strong>
+        <div style={{minWidth:0}}><div style={{fontWeight:800,fontSize:13}}>{p.nombre}</div>
+          <div style={{fontSize:12,color:"#475569"}}>📍 {p.direccion || "Dirección no disponible"}</div>
+          <div style={{fontSize:11,color:"#64748b"}}>Estado: {p.estado || "Sin estado"}</div></div>
+      </div>)}
+    </div>
+  </>;
+}
+
 // Recorridos enviados por los repartidores: consulta exclusivamente de lectura.
 function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas, pedidos }) {
   const [abierto, setAbierto] = useState(false);
+  const [rutasAbiertas, setRutasAbiertas] = useState({});
   const [rutas, setRutas] = useState([]);
   const [error, setError] = useState("");
   const [cargando, setCargando] = useState(false);
@@ -474,37 +548,19 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
               direccion: e?.pedido_id ? (ped?.direccion || [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", ")) : [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", "),
               latitud: puntoValido(e?.latitud, e?.longitud) ? e.latitud : ped?.latitud,
               longitud: puntoValido(e?.latitud, e?.longitud) ? e.longitud : ped?.longitud,
+              estado: e?.estado || null,
             };
           });
-          return <details key={r.repartidor_id} onToggle={e => { if (e.currentTarget.open) marcarVista(r); }} style={{border:"1px solid #bfdbfe",borderRadius:9,padding:12,background:"#eff6ff"}}>
+          return <details key={r.repartidor_id} onToggle={e => { const estaAbierta = e.currentTarget.open; setRutasAbiertas(prev => ({...prev, [String(r.repartidor_id)]: estaAbierta})); if (estaAbierta) marcarVista(r); }} style={{border:"1px solid #bfdbfe",borderRadius:9,padding:12,background:"#eff6ff"}}>
             <summary style={{fontWeight:900,cursor:"pointer",listStyle:"revert",padding:"4px 0"}}>
               🚚 {rep?.nombre || rep?.email || "Repartidor"} · {ids.length} parada/s {pendientes[String(r.repartidor_id)] ? "🔴 NUEVA RUTA" : ""}
               <div style={{fontSize:12,color:"#475569",fontWeight:400,marginTop:4}}>
                 Enviada: {r.actualizado_at ? new Date(r.actualizado_at).toLocaleString("es-AR") : "Sin fecha"} · Tocá para ver recorrido
               </div>
             </summary>
-            <details style={{marginTop:10,background:"white",border:"1px solid #bfdbfe",borderRadius:8,padding:10}}>
-              <summary style={{cursor:"pointer",fontWeight:800,color:"#1d4ed8"}}>🗺️ VER RECORRIDO EN MAPA</summary>
-              <MapaRutaEnviada paradas={paradasMapa} />
-            </details>
-            <div style={{display:"grid",gap:6,marginTop:10}}>
-              {ids.map((id, indice) => {
-                const e = entregasPorId.get(String(id));
-                const ped = e?.pedido_id ? pedidosPorId.get(String(e.pedido_id)) : null;
-                const nombre = e?.pedido_id ? (ped?.cliente || "Entrega de NVI") : (e?.destinatario || "Entrega manual");
-                const direccion = e?.pedido_id ? (ped?.direccion || [e.direccion,e.localidad,e.partido,e.provincia].filter(Boolean).join(", ")) : [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", ");
-                return <div key={id} style={{background:"white",border:"1px solid #dbeafe",borderRadius:8,padding:9,display:"flex",gap:10}}>
-                  <strong style={{color:"#1d4ed8",minWidth:24}}>{indice + 1}.</strong>
-                  <div style={{minWidth:0}}>
-                    <div style={{fontWeight:800,fontSize:13}}>{e ? nombre : "Entrega no disponible en la lista actual"}</div>
-                    {e?.pedido_id && ped?.numeroVisible && <div style={{fontSize:11}}>NVI #{ped.numeroVisible}</div>}
-                    <div style={{fontSize:12,color:"#475569"}}>📍 {direccion || "Dirección no disponible"}</div>
-                    {e && <div style={{fontSize:11,color:"#64748b"}}>Estado: {e.estado || "Sin estado"}</div>}
-                  </div>
-                </div>;
-              })}
-              {ids.length === 0 && <div style={{fontSize:12}}>La ruta enviada no contiene paradas.</div>}
-            </div>
+            <RutaEnviadaViva empresaId={empresaId} repartidorId={r.repartidor_id}
+              nombreChofer={rep?.nombre || rep?.email || "Repartidor"}
+              paradasIniciales={paradasMapa} abierto={Boolean(rutasAbiertas[String(r.repartidor_id)])} />
           </details>;
         })}
       </div>
