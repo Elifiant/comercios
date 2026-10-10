@@ -200,7 +200,7 @@ if (ruta.startsWith("/promotores")) {
 }
   // Ruta explícita del chofer, incluso si también tiene otros roles.
   if (ruta === "/repartos/chofer" || ruta.startsWith("/repartos/chofer/")) {
-    if (rolesExtra.includes("repartidor")) {
+    if (rol === "repartidor" || rolesExtra.includes("repartidor")) {
       return <Repartidor sesion={sesion} perfil={perfil} />;
     }
     window.location.replace("/");
@@ -213,7 +213,7 @@ if (ruta.startsWith("/promotores")) {
     if (puedeRepartos) {
       return <Repartos sesion={sesion} perfil={perfil} onVolver={puedeVentas && rol !== "superadmin" ? () => window.location.assign("/") : undefined} />;
     }
-    if (rolesExtra.includes("repartidor")) {
+    if (rol === "repartidor" || rolesExtra.includes("repartidor")) {
       return <Repartidor sesion={sesion} perfil={perfil} />;
     }
     window.location.replace("/");
@@ -292,6 +292,12 @@ if (ruta.startsWith("/promotores")) {
         </div>
       </div>
     );
+  }
+
+  // Repartidor exclusivo: abrir su módulo, nunca la app de preventistas.
+  // Los usuarios con doble rol preventista + repartidor conservan su selector anterior.
+  if (rol === "repartidor" || (rol !== "preventista" && rolesExtra.includes("repartidor"))) {
+    return <Repartidor sesion={sesion} perfil={perfil} />;
   }
 
   if (rol === "supervisorr" || rol === "supervisorv") {

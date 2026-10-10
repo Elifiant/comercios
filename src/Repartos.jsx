@@ -29,8 +29,7 @@ const iconoEntrega = (estado) => {
   return L.divIcon({ className: "", html: `<div style="width:19px;height:19px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 1px 5px #33415588"></div>`, iconSize:[25,25], iconAnchor:[12,12] });
 };
 
-function MapaPlanificacion({ destinos, repartidores, alElegirEntrega, ubicando, onUbicar }) {
-  const [filtro, setFiltro] = useState("todos");
+function MapaPlanificacion({ destinos, repartidores, alElegirEntrega, ubicando, onUbicar, filtro, setFiltro }) {
   const [filtroEstado, setFiltroEstado] = useState("todos");
   // Los filtros solo cambian la visualización; nunca guardan ni asignan entregas.
   const visibles = destinos.filter(d => {
@@ -49,7 +48,7 @@ function MapaPlanificacion({ destinos, repartidores, alElegirEntrega, ubicando, 
     <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:9}}>
       <strong>🗺️ MAPA DE PLANIFICACIÓN</strong>
       <select value={filtro} onChange={e => setFiltro(e.target.value)} style={{padding:8,borderRadius:7,border:"1px solid #cbd5e1"}}>
-        <option value="todos">Todas las entregas</option><option value="sin_asignar">Sin chofer asignado</option>
+        <option value="todos">Todos los choferes</option><option value="sin_asignar">Sin chofer asignado</option>
         {repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}
       </select>
       <select aria-label="Filtrar por estado" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{padding:8,borderRadius:7,border:"1px solid #cbd5e1"}}>
@@ -119,6 +118,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
   const [busqueda, setBusqueda] = useState("");
   const [bandeja, setBandeja] = useState("pendientes");
   const [repartidores, setRepartidores] = useState([]);
+  const [filtroRepartidor, setFiltroRepartidor] = useState("todos");
   const [ubicandoDestinos, setUbicandoDestinos] = useState(false);
   const [seleccionUbicacion, setSeleccionUbicacion] = useState(null);
   const [indiceUbicacion, setIndiceUbicacion] = useState("");
@@ -1017,7 +1017,9 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
         (bandeja === "hoy" && e.creado_at?.slice(0, 10) === hoy) ||
         (bandeja === "devoluciones_pendientes" && e.estado === "devolucion_informada") ||
         (bandeja === "volvieron_hoy" && e.estado === "vuelto_deposito");
-      return grupo && [e.destinatario, e.direccion, e.localidad, e.numero_remito, e.numero_factura]
+      const coincideRepartidor = filtroRepartidor === "todos" ||
+        (filtroRepartidor === "sin_asignar" ? !e.repartidor_id : String(e.repartidor_id) === filtroRepartidor);
+      return grupo && coincideRepartidor && [e.destinatario, e.direccion, e.localidad, e.numero_remito, e.numero_factura]
         .some(x => String(x || "").toLowerCase().includes(busqueda.toLowerCase().trim()));
     });
     const campo = (clave, titulo, tipo = "text", obligatorio = false) => (
@@ -1046,12 +1048,12 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
             <button onClick={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }}
               style={{ padding: "12px 18px", background: "#16a34a", color: "white", border: 0, borderRadius: 8, fontWeight: 900, cursor: "pointer" }}>＋ NUEVA ENTREGA</button>
           </div>
-          <MapaPlanificacion destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const e = entregas.find(x => x.id === d.id); if (e) { setEntregaManualActiva(e); setRepartidorSeleccionado(e.repartidor_id || ""); } }} />
+          <MapaPlanificacion filtro={filtroRepartidor} setFiltro={setFiltroRepartidor} destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const e = entregas.find(x => x.id === d.id); if (e) { setEntregaManualActiva(e); setRepartidorSeleccionado(e.repartidor_id || ""); } }} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))", gap: 8, marginBottom: 14 }}>
             {[["pendientes", "📦 PENDIENTES", cuenta("pendiente_preparacion")], ["preparados", "✅ PREPARADAS", cuenta("preparado")],
               ["asignados", "🚚 ASIGNADAS", cuenta("asignado") + cuenta("en_reparto")], ["todos", "📋 TODAS", manuales.length],
               ["devoluciones_pendientes", "📥 DEVOLUCIONES", cuenta("devolucion_informada")], ["volvieron_hoy", "🔄 VOLVIERON", cuenta("vuelto_deposito")]].map(([id, titulo, n]) => (
-              <button key={id} onClick={() => setBandeja(id)} style={{ padding: 12, textAlign: "left", background: bandeja === id ? "#dbeafe" : "white", border: bandeja === id ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
+              <button key={id} onClick={() => { setBandeja(id); setFiltroRepartidor(["pendientes", "preparados"].includes(id) ? "sin_asignar" : "todos"); }} style={{ padding: 12, textAlign: "left", background: bandeja === id ? "#dbeafe" : "white", border: bandeja === id ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
                 <div style={{ fontSize: 11, fontWeight: 800 }}>{titulo}</div><div style={{ fontSize: 24, fontWeight: 900 }}>{n}</div>
               </button>))}
           </div>
@@ -1501,7 +1503,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
       </header>
 
       <main style={{ maxWidth: "1000px", margin: "0 auto", padding: "14px" }}>
-        <MapaPlanificacion destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const p = pedidos.find(x => x.id === d.id); if (p) abrirPedido(p); }} />
+        <MapaPlanificacion filtro={filtroRepartidor} setFiltro={setFiltroRepartidor} destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const p = pedidos.find(x => x.id === d.id); if (p) abrirPedido(p); }} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[
             ["hoy", "📥 NVIs RECIBIDAS HOY", resumenHoy.recibidas],

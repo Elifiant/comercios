@@ -35,8 +35,17 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const [procesandoJornada, setProcesandoJornada] = useState(false);
   const [gpsEstado, setGpsEstado] = useState("Sin iniciar");
   const [ordenRuta, setOrdenRuta] = useState([]);
+  const [rutaGuardada, setRutaGuardada] = useState(false);
   const [arrastrandoId, setArrastrandoId] = useState(null);
   const [resumenSalida, setResumenSalida] = useState(null);
+  const [mapaAsignadasAbierto, setMapaAsignadasAbierto] = useState(false);
+  const [chatAbierto, setChatAbierto] = useState(false);
+  const [chatContactos, setChatContactos] = useState([]);
+  const [chatDestino, setChatDestino] = useState("");
+  const [chatMensajes, setChatMensajes] = useState([]);
+  const [chatTexto, setChatTexto] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [chatEnviando, setChatEnviando] = useState(false);
 
   const claveResumenSalida = () => {
     const uid = sesionProp?.user?.id || perfil?.id || "repartidor";
@@ -47,7 +56,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const claveOrdenRuta = () => {
     const uid = sesionProp?.user?.id || perfil?.id || "repartidor";
     const emp = perfil?.empresa_id || "empresa";
-    const fecha = recibidas[0]?.fecha_programada || "sin-fecha";
+    const fecha = "orden-entregas";
     return `rutacomercio:ruta:${emp}:${uid}:${fecha}`;
   };
 
@@ -124,19 +133,21 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       }
 
       const consolidadas = (rows || []).map(e => {
+        const esManual = !e.pedido_id;
         const ped = pedidos[String(e.pedido_id)] || {};
         const com = comercios[String(ped.comercio_id)] || {};
+        const direccionManual = [e.direccion, e.localidad, e.partido, e.provincia].filter(Boolean).join(", ");
         return {
           ...e,
-          numeroVisible: String(ped.numero_pedido || "").padStart(6, "0"),
-          cliente: ped.comercio_nombre || `Comercio #${ped.comercio_id || ""}`,
-          total: Number(ped.total || 0),
-          direccion: [com.direccion, com.localidad, com.provincia].filter(Boolean).join(", "),
-          latitud: com.ubicacion_exacta_latitud == null ? null : Number(com.ubicacion_exacta_latitud),
-          longitud: com.ubicacion_exacta_longitud == null ? null : Number(com.ubicacion_exacta_longitud),
-          telefono: com.telefono || "",
-          whatsapp: com.whatsapp || "",
-          contacto: com.contacto || "",
+          numeroVisible: esManual ? "" : String(ped.numero_pedido || "").padStart(6, "0"),
+          cliente: esManual ? (e.destinatario || "Destinatario") : (ped.comercio_nombre || `Comercio #${ped.comercio_id || ""}`),
+          total: esManual ? null : Number(ped.total || 0),
+          direccion: esManual ? direccionManual : ([com.direccion, com.localidad, com.provincia].filter(Boolean).join(", ") || e.direccion || ""),
+          latitud: esManual ? (e.latitud == null ? null : Number(e.latitud)) : (com.ubicacion_exacta_latitud == null ? (e.latitud == null ? null : Number(e.latitud)) : Number(com.ubicacion_exacta_latitud)),
+          longitud: esManual ? (e.longitud == null ? null : Number(e.longitud)) : (com.ubicacion_exacta_longitud == null ? (e.longitud == null ? null : Number(e.longitud)) : Number(com.ubicacion_exacta_longitud)),
+          telefono: esManual ? (e.telefono || "") : (com.telefono || e.telefono || ""),
+          whatsapp: esManual ? "" : (com.whatsapp || ""),
+          contacto: esManual ? "" : (com.contacto || ""),
           items: items[String(e.id)] || [],
         };
       });
@@ -224,7 +235,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   }, [entregas, resumenSalida]);
 
   useEffect(() => {
-    const idsRecibidas = recibidas.map(e => e.id);
+    const idsRecibidas = entregas.filter(e => ["asignado", "recibido", "en_reparto", "reintentar"].includes(e.estado)).map(e => e.id);
     if (!idsRecibidas.length) {
       setOrdenRuta([]);
       return;
@@ -245,17 +256,19 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       return [...conservadas, ...nuevas];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recibidas]);
+  }, [entregas]);
 
-  useEffect(() => {
-    if (!ordenRuta.length) return;
+  const guardarOrdenRuta = () => {
     try {
       localStorage.setItem(claveOrdenRuta(), JSON.stringify(ordenRuta));
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ordenRuta]);
+      setRutaGuardada(true);
+    } catch {
+      alert("No se pudo guardar la ruta en este dispositivo.");
+    }
+  };
 
   const moverEnRuta = (origenId, destinoId) => {
+    setRutaGuardada(false);
     if (!origenId || !destinoId || origenId === destinoId) return;
     setOrdenRuta(prev => {
       const nuevo = [...prev];
@@ -270,6 +283,9 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
   const recibidasOrdenadas = ordenRuta
     .map(id => recibidas.find(e => e.id === id))
+    .filter(Boolean);
+  const asignadasOrdenadas = ordenRuta
+    .map(id => asignadas.find(e => e.id === id))
     .filter(Boolean);
 
   const paradasConCoordenadas = recibidasOrdenadas
@@ -294,6 +310,12 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const otrasPendientes = entregas.filter(
     e => ["en_reparto", "reintentar"].includes(e.estado) && !ordenRuta.includes(e.id)
   );
+
+  // Vista previa: solo destinos asignados; no cambia estados ni organiza automáticamente la ruta.
+  const destinosAsignados = asignadasOrdenadas
+    .map((e, idx) => ({ ...e, numeroParada: idx + 1 }))
+    .filter(e => Number.isFinite(e.latitud) && Number.isFinite(e.longitud));
+  const puntosAsignados = destinosAsignados.map(e => [e.latitud, e.longitud]);
 
   const asignadasRecibidas = entregas.filter(e => ["asignado", "recibido"].includes(e.estado));
 
@@ -441,7 +463,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       return;
     }
     const ok = window.confirm(
-      `¿Confirmar que recibiste/cargaste la NVI #${entrega.numeroVisible}?\n\n${entrega.cliente}`
+      `¿Confirmar que recibiste/cargaste ${tituloEntrega(entrega)}?\n\n${entrega.cliente}`
     );
     if (!ok) return;
 
@@ -465,7 +487,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       return;
     }
     const ok = window.confirm(
-      `¿Quitar esta entrega de RECIBIDAS y devolverla a ASIGNADAS?\n\nNVI #${entrega.numeroVisible} · ${entrega.cliente}`
+      `¿Quitar esta entrega de RECIBIDAS y devolverla a ASIGNADAS?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}`
     );
     if (!ok) return;
 
@@ -504,7 +526,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
   const marcarEntregada = async (entrega) => {
     const ok = window.confirm(
-      `¿Confirmar ENTREGA REALIZADA?\n\nNVI #${entrega.numeroVisible} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s`
+      `¿Confirmar ENTREGA REALIZADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s`
     );
     if (!ok) return;
 
@@ -565,7 +587,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     }
 
     const ok = window.confirm(
-      `¿Marcar como NO ENTREGADA?\n\nNVI #${entrega.numeroVisible} · ${entrega.cliente}\nMotivo: ${motivo}`
+      `¿Marcar como NO ENTREGADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\nMotivo: ${motivo}`
     );
     if (!ok) return;
 
@@ -593,7 +615,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
   const informarDevolucion = async (entrega) => {
     const ok = window.confirm(
-      `¿Confirmar que devolvés al depósito la mercadería NO ENTREGADA?\n\nNVI #${entrega.numeroVisible} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s\n\nDepósito deberá confirmar luego la recepción física.`
+      `¿Confirmar que devolvés al depósito la mercadería NO ENTREGADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s\n\nDepósito deberá confirmar luego la recepción física.`
     );
     if (!ok) return;
 
@@ -690,6 +712,52 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     ? resumenSalida.recibidasTotal
     : recibidas.length;
 
+  const tituloEntrega = e => e.pedido_id ? `NVI #${e.numeroVisible}` : "Entrega manual";
+
+  const miIdChat = sesionProp?.user?.id || perfil?.id;
+  const cargarChat = async () => {
+    if (!perfil?.empresa_id || !miIdChat) return;
+    const {data,error:err} = await supabase.from("mensajes_operativos")
+      .select("id,empresa_id,remitente_id,destinatario_id,contenido,creado_at,leido_at")
+      .eq("empresa_id",perfil.empresa_id)
+      .or(`remitente_id.eq.${miIdChat},destinatario_id.eq.${miIdChat}`)
+      .order("creado_at",{ascending:true}).limit(300);
+    if (err) setChatError(err.message);
+    else {setChatError("");setChatMensajes(data || []);}
+  };
+  useEffect(()=>{
+    if (!chatAbierto || !perfil?.empresa_id) return;
+    let vivo=true;
+    supabase.from("perfiles").select("id,nombre,rol").eq("empresa_id",perfil.empresa_id)
+      .then(({data,error:err})=>{
+        if (!vivo) return;
+        if (err) {setChatError(err.message);return;}
+        const contactos=(data||[]).filter(x=>x.id!==miIdChat &&
+          ["supervisorr","supervisorv","supervisor","deposito","despacho"].includes(String(x.rol||"").toLowerCase()));
+        setChatContactos(contactos);
+        setChatDestino(actual=>actual || contactos[0]?.id || "");
+      });
+    cargarChat();
+    const intervalo=setInterval(cargarChat,10000);
+    return ()=>{vivo=false;clearInterval(intervalo);};
+  },[chatAbierto,perfil?.empresa_id,miIdChat]);
+  const enviarChat = async () => {
+    if (!chatDestino || !chatTexto.trim() || chatEnviando) return;
+    setChatEnviando(true);
+    try {
+      const {error:err}=await supabase.rpc("enviar_mensaje_operativo",{
+        p_destinatario:chatDestino,p_contenido:chatTexto.trim()
+      });
+      if(err) throw err;
+      setChatTexto("");
+      await cargarChat();
+    } catch(e){setChatError(e.message||"No se pudo enviar el mensaje.");}
+    finally {setChatEnviando(false);}
+  };
+  const conversacionChat=chatMensajes.filter(m=>
+    (m.remitente_id===miIdChat && m.destinatario_id===chatDestino) ||
+    (m.remitente_id===chatDestino && m.destinatario_id===miIdChat));
+
   const boton = {
     border: "none", borderRadius: "9px", minHeight: "46px", padding: "9px 12px",
     fontWeight: "900", cursor: "pointer"
@@ -702,7 +770,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
           <div style={{maxWidth:"760px",margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div>
               <div style={{fontSize:"11px",color:"#93c5fd",fontWeight:"900"}}>🚚 REPARTO</div>
-              <div style={{fontSize:"19px",fontWeight:"900"}}>NVI #{activa.numeroVisible}</div>
+              <div style={{fontSize:"19px",fontWeight:"900"}}>{tituloEntrega(activa)}</div>
             </div>
             <button onClick={()=>setActiva(null)} style={{...boton,background:"#1e293b",color:"#fff",border:"1px solid #64748b"}}>← VOLVER</button>
           </div>
@@ -720,8 +788,9 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             </div>
           </div>
 
+          {(activa.items || []).length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
-            <div style={{fontSize:"13px",fontWeight:"950",marginBottom:"9px"}}>ARTÍCULOS</div>
+            <div style={{fontSize:"13px",fontWeight:"950",marginBottom:"9px"}}>📦 DETALLE DE MERCADERÍA</div>
             {(activa.items || []).map((it,i)=>(
               <div key={i} style={{display:"flex",justifyContent:"space-between",gap:"10px",padding:"8px 0",borderBottom:"1px solid #e2e8f0"}}>
                 <div>
@@ -734,6 +803,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               </div>
             ))}
           </div>
+          )}
 
           {activa.estado === "asignado" ? (
             <div>
@@ -840,6 +910,48 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       </header>
 
       <main style={{maxWidth:"760px",margin:"0 auto",padding:"14px"}}>
+        <div style={{marginBottom:"12px",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"10px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+            <button type="button"
+              onClick={jornadaActiva ? finalizarJornada : comenzarJornada}
+              disabled={procesandoJornada || (!jornadaActiva && recibidas.length===0)}
+              style={{...boton,width:"100%",padding:"8px 5px",fontSize:"12px",
+                background:procesandoJornada||(!jornadaActiva&&recibidas.length===0)?"#94a3b8":jornadaActiva?"#0f172a":"#2563eb",
+                color:"#fff"}}>
+              {procesandoJornada?"⏳ PROCESANDO":jornadaActiva?"🏁 FINALIZAR REPARTO":"🚚 COMENZAR REPARTO"}
+            </button>
+            <button type="button" onClick={()=>setChatAbierto(v=>!v)}
+              style={{...boton,width:"100%",padding:"8px 5px",fontSize:"12px",background:"#166534",color:"#fff"}}>
+              💬 RUTACHAT {chatAbierto?"▲":"▼"}
+            </button>
+          </div>
+          {chatAbierto && (
+            <div style={{paddingTop:"10px"}}>
+              <div style={{fontSize:"12px",fontWeight:"800",marginBottom:"6px"}}>Mensajes al Supervisor</div>
+              <select value={chatDestino} onChange={e=>setChatDestino(e.target.value)}
+                style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1px solid #cbd5e1"}}>
+                {!chatContactos.length && <option value="">No hay supervisores disponibles</option>}
+                {chatContactos.map(c=><option key={c.id} value={c.id}>{c.nombre||"Supervisor"}</option>)}
+              </select>
+              {chatError && <div style={{color:"#b91c1c",fontSize:"12px",marginTop:"8px"}}>⚠️ {chatError}</div>}
+              <div style={{maxHeight:"230px",overflowY:"auto",background:"#f8fafc",borderRadius:"8px",padding:"8px",marginTop:"8px"}}>
+                {!conversacionChat.length && <div style={{fontSize:"12px",color:"#64748b"}}>Todavía no hay mensajes.</div>}
+                {conversacionChat.map(m=><div key={m.id} style={{marginBottom:"8px",textAlign:m.remitente_id===miIdChat?"right":"left"}}>
+                  <div style={{display:"inline-block",maxWidth:"90%",background:m.remitente_id===miIdChat?"#dcfce7":"#e2e8f0",padding:"8px",borderRadius:"8px",fontSize:"12px",overflowWrap:"anywhere"}}>
+                    {m.contenido}
+                    <div style={{fontSize:"10px",color:"#64748b",marginTop:"3px"}}>{new Date(m.creado_at).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</div>
+                  </div>
+                </div>)}
+              </div>
+              <textarea value={chatTexto} onChange={e=>setChatTexto(e.target.value)} rows={2}
+                placeholder="Escribí un mensaje..." style={{width:"100%",boxSizing:"border-box",marginTop:"8px",padding:"9px",border:"1px solid #cbd5e1",borderRadius:"8px"}} />
+              <button type="button" onClick={enviarChat} disabled={!chatDestino||!chatTexto.trim()||chatEnviando}
+                style={{...boton,width:"100%",background:"#166534",color:"#fff",opacity:!chatDestino||!chatTexto.trim()?.5:1}}>
+                {chatEnviando?"Enviando...":"ENVIAR MENSAJE"}
+              </button>
+            </div>
+          )}
+        </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:"8px",marginBottom:"12px"}}>
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
             <div style={{fontSize:"10px",fontWeight:"900",color:"#64748b"}}>ASIGNADAS</div>
@@ -860,6 +972,91 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             <div style={{fontSize:"25px",fontWeight:"950",color:"#9a3412"}}>{paraVolver.length}</div>
           </div>
         </div>
+
+        {!cargando && !error && !jornadaActiva && asignadas.length > 0 && (
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
+            <button type="button" onClick={() => setMapaAsignadasAbierto(v => !v)}
+              style={{...boton,width:"100%",background:"#eff6ff",color:"#1e40af",border:"1px solid #93c5fd"}}>
+              🗺️ {mapaAsignadasAbierto ? "OCULTAR MAPA DE ENTREGAS ▲" : "VER MAPA DE ENTREGAS ▼"}
+            </button>
+            {mapaAsignadasAbierto && (
+              <div style={{marginTop:"10px"}}>
+                <div style={{fontSize:"11px",color:"#475569",marginBottom:"8px"}}>
+                  Vista previa de {asignadas.length} entrega/s asignada/s. No inicia el reparto ni modifica el orden.
+                </div>
+                {destinosAsignados.length > 0 ? (
+                  <>
+                    <div style={{height:"320px",borderRadius:"10px",overflow:"hidden",border:"1px solid #cbd5e1"}}>
+                      <MapContainer center={[destinosAsignados[0].latitud,destinosAsignados[0].longitud]}
+                        zoom={14} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
+                        <TileLayer attribution="&copy; OpenStreetMap contributors"
+                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                        <AjustarMapa puntos={puntosAsignados} />
+                        {destinosAsignados.map(e => (
+                          <Marker key={e.id} position={[e.latitud,e.longitud]} icon={iconoNumero(e.numeroParada)}>
+                            <Popup>
+                              <strong>{e.cliente}</strong>
+                              <div>{e.direccion}</div>
+                              <div>{tituloEntrega(e)}</div>
+                            </Popup>
+                          </Marker>
+                        ))}
+                      </MapContainer>
+                    </div>
+                    {destinosAsignados.length < asignadas.length && (
+                      <div style={{fontSize:"11px",color:"#92400e",marginTop:"8px"}}>
+                        ⚠️ {asignadas.length - destinosAsignados.length} entrega/s sin coordenadas no aparecen en el mapa.
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{padding:"12px",background:"#fff7ed",borderRadius:"9px",fontSize:"12px"}}>
+                    Las entregas asignadas no tienen coordenadas guardadas. Consultá al Supervisor para corregir la ubicación.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!cargando && !error && !jornadaActiva && asignadas.length > 0 && (
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
+            <div style={{fontSize:"13px",fontWeight:"950",marginBottom:"5px"}}>🧭 ORGANIZAR MI RUTA</div>
+            <div style={{fontSize:"11px",color:"#64748b",marginBottom:"9px"}}>
+              Arrastrá los destinos desde ☰ o usá las flechas. El mapa mostrará los números en ese orden.
+              Esto no cambia las asignaciones del Supervisor.
+            </div>
+            <div style={{display:"grid",gap:"7px"}}>
+              {asignadasOrdenadas.map((e,idx) => (
+                <div key={e.id} draggable
+                  onDragStart={ev=>{setArrastrandoId(e.id);ev.dataTransfer.effectAllowed="move";ev.dataTransfer.setData("text/plain",e.id);}}
+                  onDragOver={ev=>ev.preventDefault()}
+                  onDrop={ev=>{ev.preventDefault();moverEnRuta(arrastrandoId||ev.dataTransfer.getData("text/plain"),e.id);setArrastrandoId(null);}}
+                  onDragEnd={()=>setArrastrandoId(null)}
+                  style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px",border:"1px solid #e2e8f0",borderRadius:"8px",
+                    cursor:"grab",background:arrastrandoId===e.id?"#dbeafe":"#fff"}}>
+                  <span title="Arrastrar destino" style={{fontSize:"20px",color:"#64748b",cursor:"grab"}}>☰</span>
+                  <strong style={{minWidth:"22px"}}>{idx+1}</strong>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:"12px",fontWeight:"800"}}>{e.cliente}</div>
+                    <div style={{fontSize:"10px",color:"#64748b"}}>{e.direccion}</div>
+                  </div>
+                  <button type="button" disabled={idx===0} onClick={()=>moverEnRuta(e.id,asignadasOrdenadas[idx-1].id)}
+                    style={{...boton,minHeight:"34px",background:"#e2e8f0",opacity:idx===0?.4:1}}>↑</button>
+                  <button type="button" disabled={idx===asignadasOrdenadas.length-1} onClick={()=>moverEnRuta(e.id,asignadasOrdenadas[idx+1].id)}
+                    style={{...boton,minHeight:"34px",background:"#e2e8f0",opacity:idx===asignadasOrdenadas.length-1?.4:1}}>↓</button>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={guardarOrdenRuta}
+              style={{...boton,width:"100%",marginTop:"10px",background:rutaGuardada?"#166534":"#2563eb",color:"#fff"}}>
+              {rutaGuardada ? "✅ RUTA GUARDADA" : "💾 GUARDAR ESTA RUTA"}
+            </button>
+            <div style={{fontSize:"10px",color:"#64748b",marginTop:"6px",textAlign:"center"}}>
+              Se conserva en este dispositivo al actualizar la página. No modifica las asignaciones.
+            </div>
+          </div>
+        )}
 
         {!cargando && !error && !jornadaActiva && recibidas.length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
@@ -895,7 +1092,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                   <div style={{fontSize:"18px",fontWeight:"950",textAlign:"center"}}>{idx+1}</div>
                   <div style={{fontSize:"18px",color:"#64748b",textAlign:"center"}}>☰</div>
                   <div>
-                    <div style={{fontSize:"12px",fontWeight:"900"}}>NVI #{e.numeroVisible} · {e.cliente}</div>
+                    <div style={{fontSize:"12px",fontWeight:"900"}}>{tituloEntrega(e)} · {e.cliente}</div>
                     <div style={{fontSize:"10px",color:"#64748b",marginTop:"3px"}}>📍 {e.direccion || "Sin dirección"}</div>
                   </div>
                   <div style={{display:"flex",gap:"4px",justifyContent:"flex-end"}}>
@@ -964,7 +1161,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                         <Popup>
                           <div style={{fontFamily:"Arial,sans-serif"}}>
                             <div style={{fontWeight:"900"}}>Parada {e.numeroParada} · {e.cliente}</div>
-                            <div style={{fontSize:"12px",marginTop:"4px"}}>NVI #{e.numeroVisible}</div>
+                            <div style={{fontSize:"12px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
                             <div style={{fontSize:"12px",marginTop:"4px"}}>{e.direccion}</div>
                           </div>
                         </Popup>
@@ -1013,7 +1210,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                     <Popup>
                       <div style={{fontFamily:"Arial,sans-serif"}}>
                         <div style={{fontWeight:"900"}}>Próxima {e.numeroParada} · {e.cliente}</div>
-                        <div style={{fontSize:"12px",marginTop:"4px"}}>NVI #{e.numeroVisible}</div>
+                        <div style={{fontSize:"12px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
                         <div style={{fontSize:"12px",marginTop:"4px"}}>{e.direccion}</div>
                       </div>
                     </Popup>
@@ -1033,7 +1230,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               {proximoDestino.cliente}
             </div>
             <div style={{fontSize:"11px",color:"#64748b",marginTop:"4px"}}>
-              NVI #{proximoDestino.numeroVisible} · {proximoDestino.direccion || "Sin dirección"}
+              {tituloEntrega(proximoDestino)} · {proximoDestino.direccion || "Sin dirección"}
             </div>
             <button
               type="button"
@@ -1045,53 +1242,6 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
           </div>
         )}
 
-        {!cargando && !error && (
-          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center",marginBottom:"9px"}}>
-              <div>
-                <div style={{fontSize:"12px",fontWeight:"950"}}>
-                  {jornadaActiva ? "🚚 REPARTO EN CURSO" : "📋 REPARTO TODAVÍA NO INICIADO"}
-                </div>
-                <div style={{fontSize:"10px",color:"#64748b",marginTop:"3px"}}>📍 {gpsEstado}</div>
-              </div>
-            </div>
-
-            {!jornadaActiva ? (
-              <>
-              <button
-                onClick={comenzarJornada}
-                disabled={procesandoJornada || recibidas.length === 0}
-                style={{
-                  ...boton,
-                  width:"100%",
-                  background: procesandoJornada || recibidas.length === 0 ? "#94a3b8" : "#2563eb",
-                  color:"#fff",
-                  fontSize:"15px"
-                }}
-              >
-                {procesandoJornada ? "⏳ INICIANDO..." : "🚚 COMENZAR REPARTO"}
-              </button>
-              {entregas.some(e => ["entregado","no_entregado"].includes(e.estado)) && (
-                <button
-                  onClick={finalizarJornada}
-                  disabled={procesandoJornada}
-                  style={{...boton,width:"100%",background:"#0f172a",color:"#fff",fontSize:"14px",marginTop:"8px"}}
-                >
-                  🏁 FINALIZAR REPARTO
-                </button>
-              )}
-              </>
-            ) : (
-              <button
-                onClick={finalizarJornada}
-                disabled={procesandoJornada}
-                style={{...boton,width:"100%",background:"#0f172a",color:"#fff",fontSize:"14px"}}
-              >
-                🏁 FINALIZAR REPARTO
-              </button>
-            )}
-          </div>
-        )}
 
         {cargando ? (
           <div style={{textAlign:"center",padding:"40px",color:"#64748b"}}>⏳ Cargando entregas...</div>
@@ -1107,7 +1257,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               <button key={e.id} onClick={()=>setActiva(e)} style={{width:"100%",textAlign:"left",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",cursor:"pointer",color:"#0f172a"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:"10px"}}>
                   <div>
-                    <div style={{fontWeight:"950"}}>🧾 NVI #{e.numeroVisible} · {e.cliente}</div>
+                    <div style={{fontWeight:"950"}}>🧾 {tituloEntrega(e)} · {e.cliente}</div>
                     <div style={{fontSize:"11px",color:"#64748b",marginTop:"4px"}}>📍 {e.direccion || "Sin dirección cargada"}</div>
                     <div style={{fontSize:"11px",color:"#64748b",marginTop:"4px"}}>
                       📅 {e.fecha_programada || "Sin fecha"} · 📦 {e.bultos ?? "—"} bulto/s
