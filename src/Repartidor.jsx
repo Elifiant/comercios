@@ -37,6 +37,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const [ordenRuta, setOrdenRuta] = useState([]);
   const [rutaGuardada, setRutaGuardada] = useState(false);
   const [arrastrandoId, setArrastrandoId] = useState(null);
+  const arrastreTactil = React.useRef(null);
   const [resumenSalida, setResumenSalida] = useState(null);
   const [mapaAsignadasAbierto, setMapaAsignadasAbierto] = useState(false);
   const [chatAbierto, setChatAbierto] = useState(false);
@@ -279,6 +280,30 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       nuevo.splice(hasta, 0, movido);
       return nuevo;
     });
+  };
+
+  // Arrastre táctil desde el símbolo ☰; el arrastre de mouse sigue siendo nativo.
+  const iniciarArrastreTactil = (ev, id) => {
+    if (ev.pointerType === "mouse") return;
+    ev.preventDefault();
+    arrastreTactil.current = { id, pointerId: ev.pointerId };
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    setArrastrandoId(id);
+  };
+
+  const terminarArrastreTactil = (ev) => {
+    const origen = arrastreTactil.current;
+    if (!origen || origen.pointerId !== ev.pointerId) return;
+    const debajo = document.elementFromPoint(ev.clientX, ev.clientY);
+    const destino = debajo?.closest('[data-ruta-entrega]')?.getAttribute('data-ruta-entrega');
+    if (destino) moverEnRuta(origen.id, destino);
+    arrastreTactil.current = null;
+    setArrastrandoId(null);
+  };
+
+  const cancelarArrastreTactil = () => {
+    arrastreTactil.current = null;
+    setArrastrandoId(null);
   };
 
   const recibidasOrdenadas = ordenRuta
@@ -1028,14 +1053,14 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             </div>
             <div style={{display:"grid",gap:"7px"}}>
               {asignadasOrdenadas.map((e,idx) => (
-                <div key={e.id} draggable
+                <div key={e.id} data-ruta-entrega={e.id} draggable
                   onDragStart={ev=>{setArrastrandoId(e.id);ev.dataTransfer.effectAllowed="move";ev.dataTransfer.setData("text/plain",e.id);}}
                   onDragOver={ev=>ev.preventDefault()}
                   onDrop={ev=>{ev.preventDefault();moverEnRuta(arrastrandoId||ev.dataTransfer.getData("text/plain"),e.id);setArrastrandoId(null);}}
                   onDragEnd={()=>setArrastrandoId(null)}
                   style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px",border:"1px solid #e2e8f0",borderRadius:"8px",
                     cursor:"grab",background:arrastrandoId===e.id?"#dbeafe":"#fff"}}>
-                  <span title="Arrastrar destino" style={{fontSize:"20px",color:"#64748b",cursor:"grab"}}>☰</span>
+                  <span title="Arrastrar destino" onPointerDown={ev=>iniciarArrastreTactil(ev,e.id)} onPointerUp={terminarArrastreTactil} onPointerCancel={cancelarArrastreTactil} style={{fontSize:"20px",color:"#64748b",cursor:"grab",touchAction:"none",userSelect:"none",padding:"8px 3px"}}>☰</span>
                   <strong style={{minWidth:"22px"}}>{idx+1}</strong>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:"12px",fontWeight:"800"}}>{e.cliente}</div>
@@ -1069,6 +1094,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               {recibidasOrdenadas.map((e, idx) => (
                 <div
                   key={e.id}
+                  data-ruta-entrega={e.id}
                   draggable
                   onDragStart={() => setArrastrandoId(e.id)}
                   onDragOver={(ev) => ev.preventDefault()}
@@ -1090,7 +1116,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                   }}
                 >
                   <div style={{fontSize:"18px",fontWeight:"950",textAlign:"center"}}>{idx+1}</div>
-                  <div style={{fontSize:"18px",color:"#64748b",textAlign:"center"}}>☰</div>
+                  <div onPointerDown={ev=>iniciarArrastreTactil(ev,e.id)} onPointerUp={terminarArrastreTactil} onPointerCancel={cancelarArrastreTactil} style={{fontSize:"18px",color:"#64748b",textAlign:"center",touchAction:"none",userSelect:"none",padding:"8px 0",cursor:"grab"}}>☰</div>
                   <div>
                     <div style={{fontSize:"12px",fontWeight:"900"}}>{tituloEntrega(e)} · {e.cliente}</div>
                     <div style={{fontSize:"10px",color:"#64748b",marginTop:"3px"}}>📍 {e.direccion || "Sin dirección"}</div>
