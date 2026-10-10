@@ -1111,9 +1111,9 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               </button>
             </div>
           ) : activa.estado === "entregado" ? (
-            <div style={{background:"#dcfce7",border:"1px solid #86efac",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#166534",textAlign:"center"}}>
-              ✅ ENTREGA COMPLETADA
-            </div>
+            <button type="button" onClick={() => setActiva(null)} style={{...boton,width:"100%",background:"#dcfce7",border:"1px solid #86efac",color:"#166534",fontSize:"16px"}}>
+              ✅ ENTREGA COMPLETADA · VOLVER A MIS ENTREGAS
+            </button>
           ) : activa.estado === "no_entregado" ? (
             <div>
               <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#991b1b",textAlign:"center",marginBottom:"9px"}}>
