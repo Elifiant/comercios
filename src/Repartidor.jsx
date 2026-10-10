@@ -758,7 +758,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         if (!vivo) return;
         if (err) {setChatError(err.message);return;}
         const contactos=(data||[]).filter(x=>x.id!==miIdChat &&
-          ["supervisorr","supervisorv","supervisor","deposito","despacho"].includes(String(x.rol||"").toLowerCase()));
+          String(x.rol||"").toLowerCase() === "supervisorr");
         setChatContactos(contactos);
         setChatDestino(actual=>actual || contactos[0]?.id || "");
       });

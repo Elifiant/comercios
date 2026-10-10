@@ -98,6 +98,104 @@ const fechaLocalISO = () => {
   return `${y}-${m}-${dia}`;
 };
 
+
+// RutaChat de Depósito y Repartos. No modifica entregas ni estados logísticos.
+function RutaChatSupervisor({ empresaId, repartidores }) {
+  const [abierto, setAbierto] = useState(false);
+  const [miId, setMiId] = useState(null);
+  const [destino, setDestino] = useState("");
+  const [mensajes, setMensajes] = useState([]);
+  const [texto, setTexto] = useState("");
+  const [error, setError] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    if (!abierto) return;
+    let vigente = true;
+    supabase.auth.getUser().then(({ data, error: err }) => {
+      if (!vigente) return;
+      if (err) setError(err.message);
+      else setMiId(data?.user?.id || null);
+    });
+    return () => { vigente = false; };
+  }, [abierto]);
+
+  useEffect(() => {
+    if (!repartidores.some(r => String(r.id) === destino)) {
+      setDestino(repartidores[0]?.id || "");
+    }
+  }, [repartidores, destino]);
+
+  const cargarMensajes = async () => {
+    if (!empresaId || !miId) return;
+    const { data, error: err } = await supabase.from("mensajes_operativos")
+      .select("id,empresa_id,remitente_id,destinatario_id,contenido,creado_at,leido_at")
+      .eq("empresa_id", empresaId)
+      .or(`remitente_id.eq.${miId},destinatario_id.eq.${miId}`)
+      .order("creado_at", { ascending: true }).limit(300);
+    if (err) setError(err.message);
+    else { setMensajes(data || []); setError(""); }
+  };
+
+  useEffect(() => {
+    if (!abierto || !empresaId || !miId) return;
+    cargarMensajes();
+    const intervalo = setInterval(cargarMensajes, 10000);
+    return () => clearInterval(intervalo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, empresaId, miId]);
+
+  const enviar = async () => {
+    if (!destino || !texto.trim() || enviando) return;
+    setEnviando(true);
+    try {
+      const { error: err } = await supabase.rpc("enviar_mensaje_operativo", {
+        p_destinatario: destino, p_contenido: texto.trim()
+      });
+      if (err) throw err;
+      setTexto("");
+      await cargarMensajes();
+    } catch (e) { setError(e.message || "No se pudo enviar el mensaje."); }
+    finally { setEnviando(false); }
+  };
+
+  const conversacion = mensajes.filter(m =>
+    (m.remitente_id === miId && m.destinatario_id === destino) ||
+    (m.remitente_id === destino && m.destinatario_id === miId));
+  const sinLeer = mensajes.filter(m => m.destinatario_id === miId && !m.leido_at).length;
+
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
+    <button type="button" onClick={() => setAbierto(v => !v)}
+      style={{width:"100%",padding:12,border:0,borderRadius:8,background:"#166534",color:"white",fontWeight:900,cursor:"pointer"}}>
+      💬 RUTACHAT {sinLeer ? `· ${sinLeer} sin leer` : ""} {abierto ? "▲" : "▼"}
+    </button>
+    {abierto && <div style={{paddingTop:12}}>
+      <strong>Mensajes con los repartidores</strong>
+      <select aria-label="Elegir repartidor" value={destino} onChange={e => setDestino(e.target.value)}
+        style={{width:"100%",padding:10,marginTop:8,borderRadius:8,border:"1px solid #cbd5e1"}}>
+        {!repartidores.length && <option value="">No hay repartidores disponibles</option>}
+        {repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email || "Repartidor"}</option>)}
+      </select>
+      {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}
+      <div style={{maxHeight:280,overflowY:"auto",background:"#f8fafc",padding:10,borderRadius:8,marginTop:10}}>
+        {!conversacion.length && <div style={{fontSize:12,color:"#64748b"}}>Todavía no hay mensajes con este repartidor.</div>}
+        {conversacion.map(m => <div key={m.id} style={{textAlign:m.remitente_id === miId ? "right" : "left",marginBottom:8}}>
+          <div style={{display:"inline-block",maxWidth:"90%",background:m.remitente_id === miId ? "#dcfce7" : "#e2e8f0",padding:9,borderRadius:8,fontSize:13,overflowWrap:"anywhere"}}>
+            {m.contenido}
+            <div style={{fontSize:10,color:"#64748b",marginTop:4}}>{new Date(m.creado_at).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</div>
+          </div>
+        </div>)}
+      </div>
+      <textarea value={texto} onChange={e => setTexto(e.target.value)} maxLength={1000} rows={2}
+        placeholder="Escribí un mensaje al repartidor..." style={{width:"100%",boxSizing:"border-box",marginTop:10,padding:10,border:"1px solid #cbd5e1",borderRadius:8}} />
+      <button type="button" disabled={!destino || !texto.trim() || enviando} onClick={enviar}
+        style={{width:"100%",padding:12,background:"#166534",color:"white",border:0,borderRadius:8,fontWeight:900,opacity:!destino || !texto.trim() || enviando ? .5 : 1}}>
+        {enviando ? "ENVIANDO..." : "ENVIAR MENSAJE"}
+      </button>
+    </div>}
+  </section>;
+}
+
 export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
   const [perfil, setPerfil] = useState(perfilProp || null);
   const [empresaId, setEmpresaId] = useState(perfilProp?.empresa_id || null);
@@ -1043,6 +1141,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
           </div>
         </header>
         <main style={{ maxWidth: 1000, margin: "auto", padding: 14 }}>
+          <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
             <strong>Gestión de entregas</strong>
             <button onClick={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }}
@@ -1503,6 +1602,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
       </header>
 
       <main style={{ maxWidth: "1000px", margin: "0 auto", padding: "14px" }}>
+          <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
         <MapaPlanificacion filtro={filtroRepartidor} setFiltro={setFiltroRepartidor} destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const p = pedidos.find(x => x.id === d.id); if (p) abrirPedido(p); }} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[
