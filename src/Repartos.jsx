@@ -314,15 +314,82 @@ function MapaRutaEnviada({ paradas }) {
 }
 
 // Recorridos enviados por los repartidores: consulta exclusivamente de lectura.
-function RutasEnviadasSupervisor({ empresaId, repartidores, entregas, pedidos }) {
+function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas, pedidos }) {
   const [abierto, setAbierto] = useState(false);
   const [rutas, setRutas] = useState([]);
   const [error, setError] = useState("");
   const [cargando, setCargando] = useState(false);
   const [ultimaRevision, setUltimaRevision] = useState(null);
+  const [pendientes, setPendientes] = useState({});
+  const versionesVistasRef = React.useRef(null);
+  const pendientesRef = React.useRef({});
+  const audioRutasRef = React.useRef(null);
+  const claveAvisos = empresaId && usuarioId ? `rutacomercio_rutas_vistas_${empresaId}_${usuarioId}` : null;
+
+  // Aviso independiente de RutaChat. El audio requiere interacción previa del navegador.
+  useEffect(() => {
+    if (!claveAvisos) return;
+    versionesVistasRef.current = null;
+    pendientesRef.current = {};
+    setPendientes({});
+    const habilitar = () => {
+      try {
+        const Constructor = window.AudioContext || window.webkitAudioContext;
+        if (!Constructor) return;
+        if (!audioRutasRef.current) audioRutasRef.current = new Constructor();
+        if (audioRutasRef.current.state === "suspended") audioRutasRef.current.resume().catch(() => {});
+      } catch (e) { console.warn("Aviso de rutas: audio no disponible", e); }
+    };
+    window.addEventListener("pointerdown", habilitar, true);
+    window.addEventListener("keydown", habilitar, true);
+    return () => {
+      window.removeEventListener("pointerdown", habilitar, true);
+      window.removeEventListener("keydown", habilitar, true);
+      if (audioRutasRef.current) {
+        audioRutasRef.current.close().catch(() => {});
+        audioRutasRef.current = null;
+      }
+    };
+  }, [claveAvisos]);
+
+  const sonarRuta = () => {
+    const contexto = audioRutasRef.current;
+    if (!contexto || contexto.state !== "running") return;
+    try {
+      const ahora = contexto.currentTime;
+      [0, 0.35, 0.70].forEach((desfase, i) => {
+        const inicio = ahora + desfase;
+        const osc = contexto.createOscillator();
+        const gain = contexto.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(i === 1 ? 880 : 740, inicio);
+        gain.gain.setValueAtTime(0.0001, inicio);
+        gain.gain.linearRampToValueAtTime(0.28, inicio + 0.02);
+        gain.gain.setValueAtTime(0.28, inicio + 0.21);
+        gain.gain.linearRampToValueAtTime(0.0001, inicio + 0.28);
+        osc.connect(gain);
+        gain.connect(contexto.destination);
+        osc.start(inicio);
+        osc.stop(inicio + 0.29);
+      });
+    } catch (e) { console.warn("Aviso de rutas: no se pudo reproducir", e); }
+  };
+
+  const marcarVista = (ruta) => {
+    if (!claveAvisos || !versionesVistasRef.current) return;
+    const id = String(ruta.repartidor_id);
+    const fecha = String(ruta.actualizado_at || "");
+    versionesVistasRef.current[id] = fecha;
+    try { window.localStorage.setItem(claveAvisos, JSON.stringify(versionesVistasRef.current)); }
+    catch (e) { console.warn("Aviso de rutas: no se pudo conservar lectura", e); }
+    const siguiente = { ...pendientesRef.current };
+    delete siguiente[id];
+    pendientesRef.current = siguiente;
+    setPendientes(siguiente);
+  };
 
   useEffect(() => {
-    if (!empresaId) return;
+    if (!empresaId || !claveAvisos) return;
     let vigente = true;
     let consultando = false;
     const consultar = async () => {
@@ -337,7 +404,31 @@ function RutasEnviadasSupervisor({ empresaId, repartidores, entregas, pedidos })
           .order("actualizado_at", { ascending: false });
         if (err) throw err;
         if (vigente) {
-          setRutas(data || []);
+          const recibidas = data || [];
+          if (versionesVistasRef.current === null) {
+            // Primera consulta: establecer base, sin avisar por rutas antiguas.
+            let guardadas = {};
+            try { guardadas = JSON.parse(window.localStorage.getItem(claveAvisos) || "{}") || {}; }
+            catch (e) { guardadas = {}; }
+            recibidas.forEach(r => {
+              const id = String(r.repartidor_id);
+              if (!(id in guardadas)) guardadas[id] = String(r.actualizado_at || "");
+            });
+            versionesVistasRef.current = guardadas;
+            try { window.localStorage.setItem(claveAvisos, JSON.stringify(guardadas)); }
+            catch (e) { console.warn("Aviso de rutas: no se pudo conservar base", e); }
+          } else {
+            const nuevas = {};
+            recibidas.forEach(r => {
+              const id = String(r.repartidor_id);
+              if (String(r.actualizado_at || "") !== versionesVistasRef.current[id]) nuevas[id] = true;
+            });
+            const pendientesAnteriores = pendientesRef.current;
+            if (Object.keys(nuevas).some(id => !pendientesAnteriores[id])) sonarRuta();
+            pendientesRef.current = nuevas;
+            setPendientes(nuevas);
+          }
+          setRutas(recibidas);
           setError("");
           setUltimaRevision(new Date());
         }
@@ -351,15 +442,16 @@ function RutasEnviadasSupervisor({ empresaId, repartidores, entregas, pedidos })
     consultar();
     const intervalo = window.setInterval(consultar, 15000);
     return () => { vigente = false; window.clearInterval(intervalo); };
-  }, [empresaId]);
+  }, [empresaId, claveAvisos]);
 
   const entregasPorId = new Map(entregas.map(e => [String(e.id), e]));
   const pedidosPorId = new Map(pedidos.map(p => [String(p.id), p]));
   const cantidad = rutas.length;
+  const sinVer = Object.keys(pendientes).length;
   return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
     <button type="button" onClick={() => setAbierto(v => !v)}
       style={{width:"100%",padding:12,border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900,cursor:"pointer",textAlign:"left"}}>
-      📨 RUTAS ENVIADAS POR REPARTIDORES {cantidad ? `(${cantidad})` : ""} {abierto ? "▲" : "▼"}
+      📨 RUTAS ENVIADAS POR REPARTIDORES {cantidad ? `(${cantidad})` : ""} {sinVer ? `🔔 ${sinVer} nueva/s` : ""} {abierto ? "▲" : "▼"}
     </button>
     {abierto && <div style={{paddingTop:12}}>
       <div style={{fontSize:12,color:"#475569",marginBottom:10}}>
@@ -384,9 +476,9 @@ function RutasEnviadasSupervisor({ empresaId, repartidores, entregas, pedidos })
               longitud: puntoValido(e?.latitud, e?.longitud) ? e.longitud : ped?.longitud,
             };
           });
-          return <details key={r.repartidor_id} style={{border:"1px solid #bfdbfe",borderRadius:9,padding:12,background:"#eff6ff"}}>
+          return <details key={r.repartidor_id} onToggle={e => { if (e.currentTarget.open) marcarVista(r); }} style={{border:"1px solid #bfdbfe",borderRadius:9,padding:12,background:"#eff6ff"}}>
             <summary style={{fontWeight:900,cursor:"pointer",listStyle:"revert",padding:"4px 0"}}>
-              🚚 {rep?.nombre || rep?.email || "Repartidor"} · {ids.length} parada/s
+              🚚 {rep?.nombre || rep?.email || "Repartidor"} · {ids.length} parada/s {pendientes[String(r.repartidor_id)] ? "🔴 NUEVA RUTA" : ""}
               <div style={{fontSize:12,color:"#475569",fontWeight:400,marginTop:4}}>
                 Enviada: {r.actualizado_at ? new Date(r.actualizado_at).toLocaleString("es-AR") : "Sin fecha"} · Tocá para ver recorrido
               </div>
@@ -1368,7 +1460,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
         </header>
         <main style={{ maxWidth: 1000, margin: "auto", padding: 14 }}>
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
-          <RutasEnviadasSupervisor empresaId={empresaId} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
             <strong>Gestión de entregas</strong>
             <button onClick={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }}
@@ -1830,7 +1922,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
 
       <main style={{ maxWidth: "1000px", margin: "0 auto", padding: "14px" }}>
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
-          <RutasEnviadasSupervisor empresaId={empresaId} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
         <MapaPlanificacion filtro={filtroRepartidor} setFiltro={setFiltroRepartidor} destinos={destinosMapa} repartidores={repartidores} ubicando={ubicandoDestinos} onUbicar={ubicarDirecciones} alElegirEntrega={d => { const p = pedidos.find(x => x.id === d.id); if (p) abrirPedido(p); }} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[
