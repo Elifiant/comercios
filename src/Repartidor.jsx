@@ -885,7 +885,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
   const pasarMasTarde = async (entrega) => {
     const nota = window.prompt(
-      "🕐 ¿Querés dejar una indicación para volver?\n\nEj.: volver después de las 16, pasar al regreso, dueño vuelve en una hora.\n\nPodés dejarlo vacío."
+      "🔄 ¿Querés dejar una indicación para reintentar la entrega?\n\nEj.: volver después de las 16, pasar al regreso, dueño vuelve en una hora.\n\nPodés dejarlo vacío."
     );
     if (nota === null) return;
 
@@ -1261,11 +1261,11 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
   return (
     <div style={{minHeight:"100vh",background:"#f1f5f9",fontFamily:"Arial,sans-serif",color:"#0f172a"}}>
-      <header style={{background:"#0f172a",color:"#fff",padding:"12px 14px"}}>
-        <div style={{maxWidth:"760px",margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div>
-            <div style={{fontSize:"20px",fontWeight:"950"}}>🚚 RutaComercio · Repartos</div>
-            <div style={{fontSize:"15px",color:"#334155",marginTop:"2px"}}>{perfil?.nombre || "Repartidor"} · Mis entregas</div>
+      <header style={{background:"#0f172a",color:"#fff",padding:"8px 10px"}}>
+        <div style={{maxWidth:"760px",margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"6px"}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:"clamp(15px,4.3vw,20px)",fontWeight:"950",whiteSpace:"nowrap"}}>🚚 RutaComercios</div>
+            <div style={{fontSize:"13px",color:"#cbd5e1",marginTop:"1px"}}>{perfil?.nombre || "Repartidor"} · Repartos</div>
           </div>
           <div style={{display:"flex",gap:"6px"}}>
             {onVolver && <button onClick={onVolver} style={{...boton,background:"#1e293b",color:"#fff",border:"1px solid #64748b"}}>← VOLVER</button>}
@@ -1274,19 +1274,19 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         </div>
       </header>
 
-      <main style={{maxWidth:"760px",margin:"0 auto",padding:"14px"}}>
-        <div style={{marginBottom:"12px",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"10px"}}>
+      <main style={{maxWidth:"760px",margin:"0 auto",padding:"9px"}}>
+        <div style={{marginBottom:"8px",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"10px",padding:"7px"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
             <button type="button"
               onClick={jornadaActiva ? finalizarJornada : comenzarJornada}
               disabled={procesandoJornada || (!jornadaActiva && recibidas.length===0)}
-              style={{...boton,width:"100%",padding:"8px 5px",fontSize:"16px",
+              style={{...boton,width:"100%",minHeight:"44px",padding:"6px 4px",fontSize:"14px",lineHeight:1.15,
                 background:procesandoJornada||(!jornadaActiva&&recibidas.length===0)?"#94a3b8":jornadaActiva?"#0f172a":"#2563eb",
                 color:"#fff"}}>
               {procesandoJornada?"⏳ PROCESANDO":jornadaActiva?"🏁 FINALIZAR REPARTO":"🚚 COMENZAR REPARTO"}
             </button>
             <button type="button" onClick={()=>setChatAbierto(v=>!v)}
-              style={{...boton,width:"100%",padding:"8px 5px",fontSize:"16px",background:"#166534",color:"#fff"}}>
+              style={{...boton,width:"100%",minHeight:"44px",padding:"6px 4px",fontSize:"14px",lineHeight:1.15,background:"#166534",color:"#fff"}}>
               💬 RUTACHAT {chatAbierto?"▲":"▼"}
             </button>
           </div>
@@ -1317,25 +1317,16 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             </div>
           )}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:"8px",marginBottom:"12px"}}>
-          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
-            <div style={{fontSize:"10px",fontWeight:"900",color:"#334155"}}>ASIGNADAS</div>
-            <div style={{fontSize:"25px",fontWeight:"950"}}>{asignadasMostradas}</div>
-          </div>
-          <div style={{background:"#ecfeff",border:"1px solid #67e8f9",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
-            <div style={{fontSize:"10px",fontWeight:"900",color:"#155e75"}}>RECIBIDAS</div>
-            <div style={{fontSize:"25px",fontWeight:"950",color:"#155e75"}}>{recibidasMostradas}</div>
-          </div>
-          <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
-            <div style={{fontSize:"10px",fontWeight:"900",color:"#166534"}}>ENTREGADAS</div>
-            <div style={{fontSize:"25px",fontWeight:"950",color:"#166534"}}>{jornadaActiva
-              ? `${entregadasEstaSalida} de ${totalSalidaMostrado}`
-              : "0"}</div>
-          </div>
-          <div style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
-            <div style={{fontSize:"10px",fontWeight:"900",color:"#9a3412"}}>VOLVER MÁS TARDE</div>
-            <div style={{fontSize:"25px",fontWeight:"950",color:"#9a3412"}}>{paraVolver.length}</div>
-          </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:"5px",marginBottom:"8px"}}>
+          {[
+            {etiqueta:"ASIGNADAS",valor:asignadasMostradas,fondo:"#fff",borde:"#cbd5e1",color:"#334155"},
+            {etiqueta:"RECIBIDAS",valor:recibidasMostradas,fondo:"#ecfeff",borde:"#67e8f9",color:"#155e75"},
+            {etiqueta:"ENTREGADAS",valor:jornadaActiva ? `${entregadasEstaSalida} de ${totalSalidaMostrado}` : "0",fondo:"#f0fdf4",borde:"#86efac",color:"#166534"},
+            {etiqueta:"REINTENTAR",valor:paraVolver.length,fondo:"#fff7ed",borde:"#fdba74",color:"#9a3412"}
+          ].map(dato=><div key={dato.etiqueta} style={{background:dato.fondo,border:`1px solid ${dato.borde}`,borderRadius:"9px",padding:"7px 2px",textAlign:"center",minWidth:0}}>
+            <div style={{fontSize:"clamp(9px,2.3vw,12px)",fontWeight:900,color:dato.color,whiteSpace:"nowrap"}}>{dato.etiqueta}</div>
+            <div style={{fontSize:"clamp(19px,5vw,25px)",fontWeight:950,color:dato.color,lineHeight:1.25}}>{dato.valor}</div>
+          </div>)}
         </div>
 
         {!cargando && !error && !jornadaActiva && asignadas.length > 0 && (
@@ -1654,33 +1645,33 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                       </div>
                     </div>
                     <div style={{fontSize:"13px",fontWeight:"900",whiteSpace:"nowrap",color:e.estado==="entregado"?"#166534":e.estado==="no_entregado"?"#991b1b":"#1d4ed8"}}>
-                      {e.estado==="reintentar" ? "🕐 VOLVER" : e.estado==="entregado" ? "✅ ENTREGADA" :
+                      {e.estado==="reintentar" ? "🔄 REINTENTAR" : e.estado==="entregado" ? "✅ ENTREGADA" :
                        e.estado==="no_entregado" ? "❌ NO ENTREGADA" : e.estado==="devolucion_informada" ? "📦 DEVOLUCIÓN" :
                        e.estado==="recibido" ? "📦 RECIBIDA" : e.estado==="en_reparto" ? "🚚 EN REPARTO" : "📋 ASIGNADA"}
                     </div>
                   </div>
                 </button>
               ))}
-              {!entregasActualesPantalla.length && <div style={{padding:"16px",background:"#fff",borderRadius:"10px",textAlign:"center",color:"#111827"}}>No hay entregas en el reparto actual.</div>}
+              {!entregasActualesPantalla.length && <div style={{padding:"10px",background:"#fff",borderRadius:"10px",textAlign:"center",color:"#111827",fontSize:"15px"}}>No hay entregas en el reparto actual.</div>}
             </div>
-            <div style={{marginTop:"18px",marginBottom:"20px",border:"1px solid #94a3b8",borderRadius:"11px",background:"#fff",overflow:"hidden"}}>
+            <div style={{marginTop:"9px",marginBottom:"12px",border:"1px solid #94a3b8",borderRadius:"11px",background:"#fff",overflow:"hidden"}}>
               <button type="button" onClick={()=>setHistorialAbierto(v=>!v)}
                 aria-expanded={historialAbierto}
-                style={{width:"100%",padding:"16px",background:"#e2e8f0",color:"#111827",fontSize:"18px",fontWeight:950,border:"none",cursor:"pointer",textAlign:"left"}}>
+                style={{width:"100%",padding:"10px",background:"#e2e8f0",color:"#111827",fontSize:"16px",fontWeight:950,border:"none",cursor:"pointer",textAlign:"left"}}>
                 📚 ENTREGAS ANTERIORES ({entregasAnterioresPantalla.length}) {historialAbierto ? "▲" : "▼"}
               </button>
-              {historialAbierto && <div style={{padding:"8px",display:"grid",gap:"5px"}}>
+              {historialAbierto && <div style={{padding:"8px",display:"grid",gap:"5px",minWidth:0}}>
                 {entregasAnterioresPantalla.length === 0 && <div style={{color:"#111827",fontSize:"16px",padding:"8px"}}>Todavía no hay entregas anteriores.</div>}
                 {entregasAnterioresPantalla.map(e=>(
                   <button key={e.id} type="button" onClick={()=>setActiva(e)}
-                    style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"7px",padding:"7px 9px",textAlign:"left",color:"#111827",cursor:"pointer",width:"100%"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"6px",fontSize:"15px",fontWeight:900,minWidth:0}}>
+                    style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"7px",padding:"7px 8px",textAlign:"left",color:"#111827",cursor:"pointer",width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",overflow:"hidden"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:"5px",fontSize:"15px",fontWeight:900,minWidth:0}}>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>📦 {e.cliente}</span>
                       <span style={{color:e.estado==="entregado"?"#166534":"#991b1b",whiteSpace:"nowrap",fontSize:"13px",flexShrink:0}}>{e.estado==="entregado"?"✓ ENTREGADA":e.estado==="no_entregado"?"✕ NO ENTREGADA":"↩ DEVOLUCIÓN"}</span>
                     </div>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"6px",marginTop:"3px",fontSize:"14px",fontWeight:800,minWidth:0}}>
-                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}} title={e.ordenReparto?.numero || "Sin número (sistema anterior)"}>🚚 {e.ordenReparto?.numero || "Sin número (sistema anterior)"}</span>
-                      <span style={{whiteSpace:"nowrap",flexShrink:0}}>📅 {fechaEntregaHistorial(e)}</span>
+                    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:"5px",marginTop:"3px",fontSize:"13px",fontWeight:800,minWidth:0}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}} title={e.ordenReparto?.numero || "Sin número (sistema anterior)"}>🚚 {e.ordenReparto?.numero || "Sin número anterior"}</span>
+                      <span style={{whiteSpace:"nowrap",fontSize:"12px",flexShrink:0}}>{fechaEntregaHistorial(e).slice(0, 6) + fechaEntregaHistorial(e).slice(-2)}</span>
                     </div>
                   </button>
                 ))}
