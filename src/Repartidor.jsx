@@ -113,6 +113,101 @@ function useRutaChatAviso(empresaId, usuarioId) {
 
 export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
   const [perfil, setPerfil] = useState(perfilProp || null);
+  // Cola local de resoluciones. Nunca se borra hasta confirmación de Supabase.
+  const [colaOffline, setColaOffline] = useState([]);
+  const [sinConexion, setSinConexion] = useState(typeof navigator !== "undefined" && !navigator.onLine);
+  const [sincronizandoOffline, setSincronizandoOffline] = useState(false);
+  const [errorOffline, setErrorOffline] = useState("");
+  const colaRef = React.useRef([]);
+  const sincronizandoRef = React.useRef(false);
+  const claveColaOffline = () => {
+    const uid = sesionProp?.user?.id || perfil?.id;
+    const emp = perfil?.empresa_id;
+    return uid && emp ? `rutacomercios:entregas-pendientes:v1:${emp}:${uid}` : null;
+  };
+  const guardarColaOffline = (items) => {
+    const clave = claveColaOffline();
+    if (!clave) throw new Error("No se identificó la empresa o el repartidor.");
+    // Si el navegador no permite almacenamiento, NO se confirma la operación.
+    localStorage.setItem(clave, JSON.stringify(items));
+    colaRef.current = items;
+    setColaOffline(items);
+  };
+  const sincronizarPendientes = async () => {
+    if (sincronizandoRef.current || !navigator.onLine || !colaRef.current.length) return;
+    sincronizandoRef.current = true;
+    setSincronizandoOffline(true);
+    setErrorOffline("");
+    try {
+      while (colaRef.current.length && navigator.onLine) {
+        const op = colaRef.current[0];
+        const { data, error: err } = await supabase.rpc("repartos_resolver_entrega_segura", {
+          p_operacion_id: op.operacionId,
+          p_entrega_id: op.entregaId,
+          p_estado: op.estado,
+          p_motivo: op.motivo || null,
+          p_fecha_cliente: op.fecha,
+        });
+        if (err) throw err;
+        if (data !== "registrado" && data !== "ya_registrado")
+          throw new Error("Supabase no confirmó la operación.");
+        guardarColaOffline(colaRef.current.slice(1));
+      }
+      await cargar();
+    } catch (e) {
+      setErrorOffline(e?.message || "No se pudo sincronizar. Se conserva pendiente.");
+    } finally {
+      sincronizandoRef.current = false;
+      setSincronizandoOffline(false);
+    }
+  };
+  const registrarResolucion = async (entrega, estado, motivo = null) => {
+    if (colaRef.current.some(x => x.entregaId === entrega.id)) {
+      alert("Esta entrega ya está pendiente de sincronizar. No la registres otra vez.");
+      return;
+    }
+    if (!entrega.reparto_orden_id || !perfil?.empresa_id) {
+      alert("No se pudo identificar el reparto numerado.");
+      return;
+    }
+    const operacionId = crypto.randomUUID();
+    const op = { operacionId, entregaId: entrega.id, estado, motivo, fecha: new Date().toISOString() };
+    try {
+      guardarColaOffline([...colaRef.current, op]);
+    } catch (e) {
+      alert("No se pudo guardar en este dispositivo. No se registró la entrega: " + e.message);
+      return;
+    }
+    setActiva(null);
+    if (!navigator.onLine) {
+      alert("📴 Guardada en este dispositivo. PENDIENTE DE SINCRONIZAR. No borres los datos del navegador ni cambies de teléfono.");
+    } else {
+      await sincronizarPendientes();
+    }
+  };
+  useEffect(() => {
+    const clave = claveColaOffline();
+    if (!clave) return;
+    try {
+      const items = JSON.parse(localStorage.getItem(clave) || "[]");
+      const validos = Array.isArray(items) ? items : [];
+      colaRef.current = validos;
+      setColaOffline(validos);
+    } catch {
+      setErrorOffline("No se pudo leer la cola local. No borres los datos del navegador.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perfil?.empresa_id, sesionProp?.user?.id, perfil?.id]);
+  useEffect(() => {
+    const conectado = () => { setSinConexion(false); sincronizarPendientes(); };
+    const desconectado = () => setSinConexion(true);
+    window.addEventListener("online", conectado);
+    window.addEventListener("offline", desconectado);
+    const intervalo = setInterval(() => { if (navigator.onLine) sincronizarPendientes(); }, 12000);
+    return () => { window.removeEventListener("online", conectado); window.removeEventListener("offline", desconectado); clearInterval(intervalo); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perfil?.empresa_id, sesionProp?.user?.id, perfil?.id]);
+
   const [entregas, setEntregas] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
@@ -664,6 +759,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   // El cierre normal lo realiza Supabase al registrar la ultima entrega.
   // La unica accion manual es suspender una salida que no pudo completarse.
   const suspenderJornada = async () => {
+    if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
     if (procesandoJornada || !observacionesSuspension.trim() || observacionesSuspension.trim().length < 3) return;
     setProcesandoJornada(true);
     try {
@@ -783,95 +879,38 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   };
 
   const marcarEntregada = async (entrega) => {
-    const ok = window.confirm(
-      `¿Confirmar ENTREGA REALIZADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s`
-    );
-    if (!ok) return;
-
-    try {
-      pedirUbicacionAhora();
-      const ahora = new Date().toISOString();
-
-      const { error } = await supabase
-        .from("repartos_entregas")
-        .update({
-          estado: "entregado",
-          entregado_at: ahora,
-          motivo_no_entrega: null,
-          actualizado_at: ahora,
-        })
-        .eq("id", entrega.id);
-
-      if (error) throw error;
-
-      setActiva(null);
-      await cargar();
-    } catch (e) {
-      alert("❌ No se pudo confirmar la entrega: " + (e?.message || "error desconocido"));
+    if (colaRef.current.some(x => x.entregaId === entrega.id)) {
+      alert("Esta entrega está PENDIENTE DE SINCRONIZAR."); return;
     }
+    const ok = window.confirm(`¿Confirmar ENTREGA REALIZADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s`);
+    if (!ok) return;
+    pedirUbicacionAhora();
+    await registrarResolucion(entrega, "entregado");
   };
 
   const marcarNoEntregada = async (entrega) => {
-    const opciones =
-      "Motivo de NO ENTREGA:\n\n" +
-      "1 - Comercio cerrado\n" +
-      "2 - Cliente rechazó la mercadería\n" +
-      "3 - Dirección incorrecta / no encontrada\n" +
-      "4 - Problema con documentación\n" +
-      "5 - Otro\n\n" +
-      "Escribí 1, 2, 3, 4 o 5.";
-
+    if (colaRef.current.some(x => x.entregaId === entrega.id)) {
+      alert("Esta entrega está PENDIENTE DE SINCRONIZAR."); return;
+    }
+    const opciones = "Motivo de NO ENTREGA:\n\n1 - Comercio cerrado\n2 - Cliente rechazó la mercadería\n3 - Dirección incorrecta / no encontrada\n4 - Problema con documentación\n5 - Otro\n\nEscribí 1, 2, 3, 4 o 5.";
     const eleccion = window.prompt(opciones);
     if (eleccion === null) return;
-
-    const motivos = {
-      "1": "Comercio cerrado",
-      "2": "Cliente rechazó la mercadería",
-      "3": "Dirección incorrecta / no encontrada",
-      "4": "Problema con documentación",
-    };
-
+    const motivos = { "1":"Comercio cerrado", "2":"Cliente rechazó la mercadería", "3":"Dirección incorrecta / no encontrada", "4":"Problema con documentación" };
     let motivo = motivos[String(eleccion).trim()] || "";
-
     if (String(eleccion).trim() === "5") {
       const otro = window.prompt("Escribí el motivo de la no entrega:");
       if (otro === null) return;
       motivo = otro.trim();
     }
-
-    if (!motivo) {
-      alert("⚠️ Elegí un motivo válido.");
-      return;
-    }
-
-    const ok = window.confirm(
-      `¿Marcar como NO ENTREGADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\nMotivo: ${motivo}`
-    );
+    if (!motivo) { alert("⚠️ Elegí un motivo válido."); return; }
+    const ok = window.confirm(`¿Marcar como NO ENTREGADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\nMotivo: ${motivo}`);
     if (!ok) return;
-
-    try {
-      pedirUbicacionAhora();
-      const ahora = new Date().toISOString();
-
-      const { error } = await supabase
-        .from("repartos_entregas")
-        .update({
-          estado: "no_entregado",
-          motivo_no_entrega: motivo,
-          actualizado_at: ahora,
-        })
-        .eq("id", entrega.id);
-
-      if (error) throw error;
-
-      setActiva(null);
-      await cargar();
-    } catch (e) {
-      alert("❌ No se pudo registrar la no entrega: " + (e?.message || "error desconocido"));
-    }
+    pedirUbicacionAhora();
+    await registrarResolucion(entrega, "no_entregado", motivo);
   };
 
   const informarDevolucion = async (entrega) => {
+    if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
     const ok = window.confirm(
       `¿Confirmar que devolvés al depósito la mercadería NO ENTREGADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s\n\nDepósito deberá confirmar luego la recepción física.`
     );
@@ -897,6 +936,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   };
 
   const pasarMasTarde = async (entrega) => {
+    if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
     const nota = window.prompt(
       "🔄 ¿Querés dejar una indicación para reintentar la entrega?\n\nEj.: volver después de las 16, pasar al regreso, dueño vuelve en una hora.\n\nPodés dejarlo vacío."
     );
@@ -929,6 +969,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   };
 
   const retomarEntrega = async (entrega) => {
+    if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
     const ok = window.confirm(`¿Retomar ahora la entrega de ${entrega.cliente}?`);
     if (!ok) return;
 
@@ -1113,6 +1154,15 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
           </div>
         </header>
         <main style={{maxWidth:"760px",margin:"0 auto",padding:"14px"}}>
+          {(sinConexion || colaOffline.length > 0 || errorOffline) && (
+            <div style={{padding:12,marginBottom:10,background:"#fff7ed",border:"2px solid #f97316",borderRadius:10,fontWeight:800,color:"#7c2d12"}}>
+              {sinConexion ? "📴 SIN CONEXIÓN · " : ""}{colaOffline.length} entrega/s PENDIENTE/S DE SINCRONIZAR
+              <div style={{fontSize:14,fontWeight:500,marginTop:5}}>Todavía no están confirmadas por Supabase. Mantené este teléfono y no borres los datos del navegador.</div>
+              {errorOffline && <div style={{fontSize:14,marginTop:5}}>⚠️ {errorOffline}</div>}
+              {colaOffline.length > 0 && <button type="button" disabled={sinConexion || sincronizandoOffline} onClick={sincronizarPendientes} style={{padding:10,marginTop:8,width:"100%",border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900}}>{sincronizandoOffline ? "⏳ SINCRONIZANDO..." : "🔄 SINCRONIZAR AHORA"}</button>}
+            </div>
+          )}
+
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
             <div style={{fontSize:"21px",fontWeight:"950"}}>{activa.cliente}</div>
             <div style={{marginTop:"6px",color:"#475569"}}>📍 {activa.direccion || "Sin dirección cargada"}</div>
@@ -1180,6 +1230,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             </button>
           </section>
 
+          {colaOffline.some(x => x.entregaId === activa.id) && <div style={{padding:12,marginBottom:10,background:"#fef3c7",fontWeight:900}}>📴 Esta entrega está pendiente de sincronizar. No vuelvas a marcarla.</div>}
           {activa.estado === "asignado" ? (
             <div>
               <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#1e3a8a",textAlign:"center",marginBottom:"9px"}}>
@@ -1284,6 +1335,15 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       </header>
 
       <main style={{maxWidth:"760px",margin:"0 auto",padding:"9px"}}>
+          {(sinConexion || colaOffline.length > 0 || errorOffline) && (
+            <div style={{padding:12,marginBottom:10,background:"#fff7ed",border:"2px solid #f97316",borderRadius:10,fontWeight:800,color:"#7c2d12"}}>
+              {sinConexion ? "📴 SIN CONEXIÓN · " : ""}{colaOffline.length} entrega/s PENDIENTE/S DE SINCRONIZAR
+              <div style={{fontSize:14,fontWeight:500,marginTop:5}}>Todavía no están confirmadas por Supabase. Mantené este teléfono y no borres los datos del navegador.</div>
+              {errorOffline && <div style={{fontSize:14,marginTop:5}}>⚠️ {errorOffline}</div>}
+              {colaOffline.length > 0 && <button type="button" disabled={sinConexion || sincronizandoOffline} onClick={sincronizarPendientes} style={{padding:10,marginTop:8,width:"100%",border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900}}>{sincronizandoOffline ? "⏳ SINCRONIZANDO..." : "🔄 SINCRONIZAR AHORA"}</button>}
+            </div>
+          )}
+
         <div style={{marginBottom:"8px",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"10px",padding:"7px"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
             <button type="button"

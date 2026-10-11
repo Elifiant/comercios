@@ -663,7 +663,7 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
             <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
               <strong style={{minWidth:115,fontSize:14}}>🚚 {rep.nombre || rep.email || "Repartidor"}</strong>
               <span style={{fontSize:12,color:enRuta?"#166534":"#475569"}}>{enRuta?"● En ruta":"Sin reparto activo"}</span>
-              <span style={{fontSize:12}}>🕐 Inicio del reparto: <b>{hora(ultimaSalida || null)}</b></span>
+              {ordenActual && <span style={{fontSize:12}}>🕐 Inicio del reparto: <b>{hora(ordenActual.salida_at || ultimaSalida || null)}</b></span>}
               <span style={{fontSize:13,color:"#166534",fontWeight:800}}>✅ {completadas}/{base.length}</span>
               <span style={{fontSize:12}}>📦 {pendientesRuta} pendientes</span>
               <span style={{fontSize:12,color:fallidas?"#b91c1c":"#475569"}}>❌ {fallidas}</span>
