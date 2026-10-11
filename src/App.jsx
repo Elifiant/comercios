@@ -806,11 +806,38 @@ useEffect(() => {
   };
   const miIdRutaChat = sesion?.user?.id || sesionProp?.user?.id;
   const mensajesSinLeer = mensajesOperativos.filter(m => m.destinatario_id === miIdRutaChat && !m.leido_at);
-  const supervisorRutaChatId = [...mensajesOperativos].reverse().find(m => m.remitente_id && m.remitente_id !== miIdRutaChat)?.remitente_id;
+  // Resolver al Supervisor de Ventas de la misma empresa para permitir
+  // que el preventista inicie una conversación sin mensaje previo.
+  const [supervisorVentasId, setSupervisorVentasId] = useState(null);
+  const [errorDestinoRutaChat, setErrorDestinoRutaChat] = useState("");
+  useEffect(() => {
+    const empresaId = perfil?.empresa_id || perfilProp?.empresa_id;
+    let vigente = true;
+    setSupervisorVentasId(null);
+    setErrorDestinoRutaChat("");
+    if (!empresaId) return;
+    (async () => {
+      const { data, error } = await supabase.from("perfiles")
+        .select("id,rol")
+        .eq("empresa_id", empresaId)
+        .in("rol", ["supervisorv", "supervisor"]);
+      if (!vigente) return;
+      if (error) {
+        setErrorDestinoRutaChat("No se pudo encontrar al Supervisor de Ventas: " + error.message);
+        return;
+      }
+      const elegido = (data || []).find(p => p.rol === "supervisorv") || (data || [])[0];
+      if (elegido?.id) setSupervisorVentasId(elegido.id);
+      else setErrorDestinoRutaChat("No hay un Supervisor de Ventas disponible en esta empresa.");
+    })();
+    return () => { vigente = false; };
+  }, [perfil?.empresa_id, perfilProp?.empresa_id]);
+  const supervisorRutaChatId = supervisorVentasId ||
+    [...mensajesOperativos].reverse().find(m => m.remitente_id && m.remitente_id !== miIdRutaChat)?.remitente_id;
   const enviarRespuestaRutaChat = async () => {
     const contenido = respuestaRutaChat.trim();
     if (!contenido || enviandoRespuestaRutaChat) return;
-    if (!supervisorRutaChatId) { alert("Primero necesitás recibir un mensaje del Supervisor para responderle."); return; }
+    if (!supervisorRutaChatId) { alert(errorDestinoRutaChat || "No se encontró un Supervisor de Ventas para esta empresa."); return; }
     setEnviandoRespuestaRutaChat(true);
     try {
       const { error } = await supabase.rpc('enviar_mensaje_operativo', {
@@ -3592,7 +3619,7 @@ onChange={(e) =>
                 ))}
               </div>
               <form onSubmit={e => {e.preventDefault();enviarRespuestaRutaChat();}} style={{display:"flex",gap:"5px",marginTop:"8px"}}>
-                <input aria-label="Responder en RutaChat" value={respuestaRutaChat} onChange={e => setRespuestaRutaChat(e.target.value)} placeholder={supervisorRutaChatId ? "Escribí tu respuesta…" : "Esperando mensaje del Supervisor"} disabled={!supervisorRutaChatId || enviandoRespuestaRutaChat} maxLength={2000} style={{flex:1,minWidth:0,background:"#202c33",color:"white",border:"1px solid #334155",borderRadius:"18px",padding:"8px 10px",fontSize:"12px"}} />
+                <input aria-label="Responder en RutaChat" value={respuestaRutaChat} onChange={e => setRespuestaRutaChat(e.target.value)} placeholder={supervisorRutaChatId ? "Escribí tu respuesta…" : "Buscando Supervisor de Ventas..."} disabled={!supervisorRutaChatId || enviandoRespuestaRutaChat} maxLength={2000} style={{flex:1,minWidth:0,background:"#202c33",color:"white",border:"1px solid #334155",borderRadius:"18px",padding:"8px 10px",fontSize:"12px"}} />
                 <button type="submit" disabled={!supervisorRutaChatId || !respuestaRutaChat.trim() || enviandoRespuestaRutaChat} style={{border:0,borderRadius:"50%",background:"#16a34a",color:"white",width:"34px",height:"34px",cursor:"pointer",opacity:!supervisorRutaChatId || !respuestaRutaChat.trim() ? .5 : 1}} aria-label="Enviar respuesta">➤</button>
               </form>
             </div>}

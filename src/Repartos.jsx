@@ -90,6 +90,45 @@ function RutaChatSupervisor({ empresaId, repartidores }) {
     else { setMensajes(data || []); setError(""); }
   };
 
+  // Leer una conversación debe marcar sus mensajes recibidos como leídos
+  // en Supabase, no solamente mostrarlos en pantalla.
+  const marcandoLecturaRef = React.useRef(false);
+  useEffect(() => {
+    if (!abierto || !empresaId || !miId || !destino || marcandoLecturaRef.current) return;
+    const pendientes = mensajes.filter(m =>
+      String(m.destinatario_id) === String(miId) &&
+      String(m.remitente_id) === String(destino) && !m.leido_at);
+    if (!pendientes.length) return;
+    let vigente = true;
+    marcandoLecturaRef.current = true;
+    (async () => {
+      try {
+        const ids = pendientes.map(m => m.id);
+        const { data, error: err } = await supabase.from("mensajes_operativos")
+          .update({ leido_at: new Date().toISOString() })
+          .eq("empresa_id", empresaId)
+          .eq("destinatario_id", miId)
+          .eq("remitente_id", destino)
+          .is("leido_at", null)
+          .in("id", ids)
+          .select("id,leido_at");
+        if (err) throw err;
+        if (!vigente) return;
+        if (!data?.length) {
+          setError("No se pudieron marcar los mensajes como leídos. Revisar permisos de RutaChat.");
+          return;
+        }
+        const actualizados = new Map(data.map(m => [String(m.id), m.leido_at]));
+        setMensajes(prev => prev.map(m =>
+          actualizados.has(String(m.id)) ? {...m, leido_at: actualizados.get(String(m.id))} : m));
+        setError("");
+      } catch (e) {
+        if (vigente) setError("No se pudo registrar la lectura: " + (e.message || "error desconocido"));
+      } finally { marcandoLecturaRef.current = false; }
+    })();
+    return () => { vigente = false; };
+  }, [abierto, empresaId, miId, destino, mensajes]);
+
   useEffect(() => {
     if (!abierto || !empresaId || !miId) return;
     cargarMensajes();
