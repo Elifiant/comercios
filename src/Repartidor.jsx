@@ -453,15 +453,34 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     );
   };
 
+  // La base de datos manda: una salida guardada en el teléfono no puede
+  // reabrir un reparto FINALIZADO o SUSPENDIDO.
   useEffect(() => {
-    const hayEnReparto = entregas.some(e => ["en_reparto", "reintentar"].includes(e.estado));
-    let salidaGuardada = false;
-    try {
-      salidaGuardada = Boolean(localStorage.getItem(claveResumenSalida()));
-    } catch {}
-    setJornadaActiva(hayEnReparto || salidaGuardada || Boolean(resumenSalida));
+    if (cargando || error) return;
+    const idsGuardados = resumenSalida?.idsSalida || [];
+    const entregasSalida = entregas.filter(e => idsGuardados.includes(e.id));
+    const ordenesSalida = [...new Set(entregasSalida.map(e => e.reparto_orden_id).filter(Boolean))];
+    const salidaCerrada = idsGuardados.length > 0 &&
+      ordenesSalida.length === 1 &&
+      entregasSalida.some(e => ["finalizado", "suspendido"].includes(e.ordenReparto?.estado));
+    if (salidaCerrada) {
+      // No borrar nunca las operaciones offline aún no sincronizadas.
+      if (colaRef.current.length > 0) {
+        setErrorOffline("Hay operaciones locales pendientes de revisar. No borres los datos del navegador.");
+      }
+      setResumenSalida(null);
+      try { localStorage.removeItem(claveResumenSalida()); } catch {}
+      setJornadaActiva(false);
+      setModalSuspension(false);
+      return;
+    }
+    const hayEnReparto = entregas.some(e =>
+      e.ordenReparto?.estado === "en_reparto" &&
+      ["en_reparto", "reintentar"].includes(e.estado));
+    const salidaVigente = entregasSalida.some(e => e.ordenReparto?.estado === "en_reparto");
+    setJornadaActiva(hayEnReparto || salidaVigente);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entregas, resumenSalida]);
+  }, [entregas, resumenSalida, cargando, error]);
 
   useEffect(() => {
     const idsRecibidas = entregas.filter(e => ["asignado", "recibido", "en_reparto", "reintentar"].includes(e.estado)).map(e => e.id);
@@ -619,7 +638,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   // completadas pasan al historial sin perder su número ni su fecha.
   const ordenActualId = (() => {
     const abiertas = entregas.filter(e => e.reparto_orden_id &&
-      e.ordenReparto?.estado !== "finalizado" &&
+      !["finalizado", "suspendido"].includes(e.ordenReparto?.estado) &&
       ["asignado", "recibido", "en_reparto", "reintentar"].includes(e.estado));
     const enCamino = abiertas.find(e => e.ordenReparto?.estado === "en_reparto" &&
       ["en_reparto", "reintentar"].includes(e.estado));
@@ -628,14 +647,15 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     // pertenecen al reparto actual, incluso si no quedan paradas pendientes.
     if (jornadaActiva) {
       const deSalida = entregas.find(e => e.reparto_orden_id &&
-        e.ordenReparto?.estado !== "finalizado" &&
+        !["finalizado", "suspendido"].includes(e.ordenReparto?.estado) &&
         (resumenSalida?.idsSalida || []).includes(e.id));
       if (deSalida) return deSalida.reparto_orden_id;
     }
     return abiertas[0]?.reparto_orden_id || null;
   })();
   const esEntregaActual = e => ordenActualId
-    ? e.reparto_orden_id === ordenActualId
+    ? e.reparto_orden_id === ordenActualId &&
+      !["finalizado", "suspendido"].includes(e.ordenReparto?.estado)
     : !e.reparto_orden_id && !["entregado", "no_entregado", "devolucion_informada"].includes(e.estado);
   const entregasActualesPantalla = [...pendientesOrdenadas, ...otrasPendientes,
     ...asignadasRecibidas, ...finalizadas].filter(esEntregaActual).sort((a, b) => {
@@ -1002,7 +1022,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const inicioSalidaActual = salidasEnCurso.length
     ? salidasEnCurso.map(e => new Date(e.salida_at).getTime()).filter(Number.isFinite).sort((a,b)=>b-a)[0]
     : null;
-  const idsSalidaActiva = resumenSalida?.idsSalida?.length
+  const idsSalidaActiva = jornadaActiva && resumenSalida?.idsSalida?.length
     ? resumenSalida.idsSalida
     : inicioSalidaActual == null ? [] : entregasConSalida
       .filter(e => new Date(e.salida_at).getTime() === inicioSalidaActual)
