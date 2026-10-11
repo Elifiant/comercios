@@ -640,6 +640,121 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
 }
 
 
+
+// Consulta compacta de repartos terminados, separada de las rutas en curso.
+function HistorialRepartosSupervisor({ empresaId, repartidores }) {
+  const [abierto, setAbierto] = useState(false);
+  const [ordenes, setOrdenes] = useState([]);
+  const [entregasHistoricas, setEntregasHistoricas] = useState([]);
+  const [codigo, setCodigo] = useState(null);
+  const [busqueda, setBusqueda] = useState("");
+  const [chofer, setChofer] = useState("");
+  const [fecha, setFecha] = useState("");
+  const [detalleId, setDetalleId] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+  const [limite, setLimite] = useState(30);
+
+  useEffect(() => {
+    if (!abierto || !empresaId) return;
+    let vigente = true;
+    const consultar = async () => {
+      setCargando(true); setError("");
+      try {
+        const [resOrdenes, resEntregas, resPrefijo] = await Promise.all([
+          supabase.from("repartos_ordenes")
+            .select("id,numero,estado,repartidor_id,creado_at,salida_at,finalizado_at")
+            .eq("empresa_id", empresaId).order("numero", {ascending:false}).limit(500),
+          supabase.from("repartos_entregas")
+            .select("id,reparto_orden_id,repartidor_id,pedido_id,destinatario,direccion,localidad,estado,entregado_at,actualizado_at,motivo_no_entrega")
+            .eq("empresa_id", empresaId).not("reparto_orden_id", "is", null).limit(5000),
+          supabase.from("repartos_prefijos_empresa").select("codigo").eq("empresa_id", empresaId).maybeSingle()
+        ]);
+        if (resOrdenes.error) throw resOrdenes.error;
+        if (resEntregas.error) throw resEntregas.error;
+        if (resPrefijo.error) throw resPrefijo.error;
+        if (!vigente) return;
+        setOrdenes(resOrdenes.data || []);
+        setEntregasHistoricas(resEntregas.data || []);
+        setCodigo(resPrefijo.data?.codigo ?? null);
+      } catch (e) { if (vigente) setError(e?.message || "No se pudo consultar el historial."); }
+      finally { if (vigente) setCargando(false); }
+    };
+    consultar();
+    return () => { vigente = false; };
+  }, [abierto, empresaId]);
+
+  const numeroVisible = o => `REP${codigo == null ? "???" : String(codigo).padStart(3,"0")}-${String(o.numero).padStart(6,"0")}`;
+  const fechaVisible = valor => valor ? new Date(valor).toLocaleDateString("es-AR") : "Sin fecha";
+  const porOrden = useMemo(() => {
+    const mapa = new Map();
+    entregasHistoricas.forEach(e => {
+      if (!mapa.has(e.reparto_orden_id)) mapa.set(e.reparto_orden_id, []);
+      mapa.get(e.reparto_orden_id).push(e);
+    });
+    return mapa;
+  }, [entregasHistoricas]);
+  const historicas = ordenes.filter(o => {
+    const items = porOrden.get(o.id) || [];
+    // También contemplar órdenes antiguas cuyas entregas ya terminaron,
+    // aunque el estado de la orden no haya sido actualizado al finalizar.
+    const terminada = o.estado === "finalizado" || (items.length > 0 &&
+      items.every(e => ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado)));
+    if (!terminada) return false;
+    const texto = `${numeroVisible(o)} ${o.numero}`.toLowerCase();
+    const nombre = repartidores.find(r => String(r.id) === String(o.repartidor_id))?.nombre || "";
+    const fechaOrden = o.finalizado_at || items.map(e => e.entregado_at || e.actualizado_at).filter(Boolean).sort().at(-1) || o.salida_at || o.creado_at;
+    return (!busqueda || texto.includes(busqueda.toLowerCase().trim()) || nombre.toLowerCase().includes(busqueda.toLowerCase().trim())) &&
+      (!chofer || String(o.repartidor_id) === chofer) &&
+      (!fecha || fechaOrden?.slice(0,10) === fecha);
+  });
+  const campo = {padding:"7px 9px",fontSize:15,border:"1px solid #94a3b8",borderRadius:7,color:"#111827",background:"white",minWidth:0};
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:10,marginBottom:14,color:"#111827"}}>
+    <button type="button" onClick={() => setAbierto(v => !v)} style={{width:"100%",background:"#334155",color:"white",border:0,borderRadius:8,padding:11,fontWeight:900,fontSize:16,cursor:"pointer"}}>
+      📚 HISTORIAL DE REPARTOS {abierto ? "▲" : "▼"}
+    </button>
+    {abierto && <div style={{marginTop:10}}>
+      <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:10}}>
+        <input aria-label="Buscar número de reparto o chofer" placeholder="🔎 Número o chofer" value={busqueda} onChange={e=>{setBusqueda(e.target.value);setLimite(30);}} style={{...campo,flex:"2 1 170px"}} />
+        <input aria-label="Filtrar por fecha" type="date" value={fecha} onChange={e=>{setFecha(e.target.value);setLimite(30);}} style={{...campo,flex:"1 1 145px"}} />
+        <select aria-label="Filtrar por repartidor" value={chofer} onChange={e=>{setChofer(e.target.value);setLimite(30);}} style={{...campo,flex:"1 1 145px"}}>
+          <option value="">Todos los choferes</option>
+          {repartidores.map(r=><option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}
+        </select>
+      </div>
+      {cargando && <div>Consultando historial...</div>}
+      {error && <div style={{color:"#b91c1c"}}>⚠️ {error}</div>}
+      {!cargando && !error && !historicas.length && <div style={{fontSize:15}}>No hay repartos finalizados con estos filtros.</div>}
+      {historicas.slice(0,limite).map(o => {
+        const items = porOrden.get(o.id) || [];
+        const nombre = repartidores.find(r => String(r.id) === String(o.repartidor_id))?.nombre || "Sin chofer";
+        const cierre = o.finalizado_at || items.map(e => e.entregado_at || e.actualizado_at).filter(Boolean).sort().at(-1) || o.salida_at || o.creado_at;
+        const entregadas = items.filter(e=>e.estado === "entregado").length;
+        return <div key={o.id} style={{borderBottom:"1px solid #cbd5e1"}}>
+          <button type="button" onClick={()=>setDetalleId(v=>v===o.id?null:o.id)} style={{width:"100%",textAlign:"left",padding:"9px 5px",background:"transparent",border:0,cursor:"pointer",color:"#111827",fontSize:15,display:"flex",flexWrap:"wrap",alignItems:"center",gap:"5px 14px"}}>
+            <strong style={{color:"#1d4ed8"}}>🚚 {numeroVisible(o)}</strong>
+            <span>📅 {fechaVisible(cierre)}</span><span>👤 {nombre}</span>
+            <strong>📦 {entregadas}/{items.length} entregadas</strong>
+            <span style={{marginLeft:"auto",fontWeight:800}}>{detalleId===o.id?"▲":"▼"}</span>
+          </button>
+          {detalleId===o.id && <div style={{background:"#f8fafc",padding:"5px 10px 9px",borderRadius:7}}>
+            {!items.length && <div>Sin entregas vinculadas.</div>}
+            {items.map(e=><div key={e.id} style={{padding:"5px 0",borderBottom:"1px solid #e2e8f0",display:"flex",flexWrap:"wrap",gap:"4px 12px",fontSize:15}}>
+              <strong>📦 {e.destinatario || (e.pedido_id ? "Entrega NVI" : "Destinatario")}</strong>
+              <span>📍 {[e.direccion,e.localidad].filter(Boolean).join(", ") || "Sin dirección"}</span>
+              <strong style={{color:e.estado==="entregado"?"#166534":"#991b1b"}}>{e.estado==="entregado"?"✓ Entregada":e.estado.replaceAll("_"," ")}</strong>
+              <span>📅 {fechaVisible(e.entregado_at || e.actualizado_at)}</span>
+              {e.motivo_no_entrega && <span title={e.motivo_no_entrega}>📝 {e.motivo_no_entrega}</span>}
+            </div>)}
+          </div>}
+        </div>;
+      })}
+      {historicas.length>limite && <button type="button" onClick={()=>setLimite(v=>v+30)} style={{...campo,marginTop:9,cursor:"pointer",fontWeight:800}}>Mostrar 30 repartos más ({historicas.length-limite} restantes)</button>}
+      {ordenes.length===500 && <div style={{fontSize:13,marginTop:7}}>Se muestran hasta los últimos 500 repartos. Para consultar anteriores será necesario ampliar la búsqueda.</div>}
+    </div>}
+  </section>;
+}
+
 // Confirmación de salida: agrupa entregas ya asignadas en una orden única.
 // La RPC confirma y numera en una transacción; nunca se calcula el número en el navegador.
 function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaEntrega, modoIndependiente }) {
@@ -1651,6 +1766,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
           <GestionRepartos modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
           <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
             <strong>Gestión de entregas</strong>
             <button onClick={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }}
@@ -2113,6 +2229,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
           <GestionRepartos modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
           <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[
             ["hoy", "📥 NVIs RECIBIDAS HOY", resumenHoy.recibidas],
