@@ -516,10 +516,26 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
   // Reparto actual: agrupa las entregas de la orden numerada que está en curso.
   // El historial queda separado, incluso cuando una entrega antigua comparte domicilio.
-  const ordenActualId = entregas.find(e => e.reparto_orden_id &&
-    e.ordenReparto?.estado === "en_reparto")?.reparto_orden_id ||
-    (jornadaActiva ? entregas.find(e => e.reparto_orden_id &&
-      ["en_reparto", "reintentar", "recibido"].includes(e.estado))?.reparto_orden_id : null);
+  // Una orden cerrada no es "actual" aunque conserve el estado en_reparto
+  // en una base de datos anterior. Al finalizar la jornada, las entregas
+  // completadas pasan al historial sin perder su número ni su fecha.
+  const ordenActualId = (() => {
+    const abiertas = entregas.filter(e => e.reparto_orden_id &&
+      e.ordenReparto?.estado !== "finalizado" &&
+      ["asignado", "recibido", "en_reparto", "reintentar"].includes(e.estado));
+    const enCamino = abiertas.find(e => e.ordenReparto?.estado === "en_reparto" &&
+      ["en_reparto", "reintentar"].includes(e.estado));
+    if (enCamino) return enCamino.reparto_orden_id;
+    // Mientras la salida sigue abierta, sus entregas ya realizadas también
+    // pertenecen al reparto actual, incluso si no quedan paradas pendientes.
+    if (jornadaActiva) {
+      const deSalida = entregas.find(e => e.reparto_orden_id &&
+        e.ordenReparto?.estado !== "finalizado" &&
+        (resumenSalida?.idsSalida || []).includes(e.id));
+      if (deSalida) return deSalida.reparto_orden_id;
+    }
+    return abiertas[0]?.reparto_orden_id || null;
+  })();
   const esEntregaActual = e => ordenActualId
     ? e.reparto_orden_id === ordenActualId
     : !e.reparto_orden_id && !["entregado", "no_entregado", "devolucion_informada"].includes(e.estado);
@@ -1653,18 +1669,19 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                 style={{width:"100%",padding:"16px",background:"#e2e8f0",color:"#111827",fontSize:"18px",fontWeight:950,border:"none",cursor:"pointer",textAlign:"left"}}>
                 📚 ENTREGAS ANTERIORES ({entregasAnterioresPantalla.length}) {historialAbierto ? "▲" : "▼"}
               </button>
-              {historialAbierto && <div style={{padding:"12px",display:"grid",gap:"10px"}}>
-                {entregasAnterioresPantalla.length === 0 && <div style={{color:"#111827",fontSize:"16px"}}>Todavía no hay entregas anteriores.</div>}
+              {historialAbierto && <div style={{padding:"8px",display:"grid",gap:"5px"}}>
+                {entregasAnterioresPantalla.length === 0 && <div style={{color:"#111827",fontSize:"16px",padding:"8px"}}>Todavía no hay entregas anteriores.</div>}
                 {entregasAnterioresPantalla.map(e=>(
                   <button key={e.id} type="button" onClick={()=>setActiva(e)}
-                    style={{background:"#fff",border:"1px solid #94a3b8",borderRadius:"10px",padding:"13px",textAlign:"left",color:"#111827",cursor:"pointer",width:"100%"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:"8px",flexWrap:"wrap",fontSize:"16px",fontWeight:900}}>
-                      <span>📦 {e.cliente}</span>
-                      <span style={{color:e.estado==="entregado"?"#166534":"#991b1b"}}>{e.estado==="entregado"?"✅ ENTREGADA":e.estado==="no_entregado"?"❌ NO ENTREGADA":"📦 DEVOLUCIÓN"}</span>
+                    style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"7px",padding:"7px 9px",textAlign:"left",color:"#111827",cursor:"pointer",width:"100%"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"6px",fontSize:"15px",fontWeight:900,minWidth:0}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>📦 {e.cliente}</span>
+                      <span style={{color:e.estado==="entregado"?"#166534":"#991b1b",whiteSpace:"nowrap",fontSize:"13px",flexShrink:0}}>{e.estado==="entregado"?"✓ ENTREGADA":e.estado==="no_entregado"?"✕ NO ENTREGADA":"↩ DEVOLUCIÓN"}</span>
                     </div>
-                    <div style={{fontSize:"16px",marginTop:"7px"}}>📍 {e.direccion || "Sin dirección cargada"}</div>
-                    <div style={{fontSize:"17px",fontWeight:950,marginTop:"8px"}}>🚚 {e.ordenReparto?.numero || "Sin número (sistema anterior)"}</div>
-                    <div style={{fontSize:"17px",fontWeight:950,marginTop:"5px"}}>📅 {fechaEntregaHistorial(e)}</div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"6px",marginTop:"3px",fontSize:"14px",fontWeight:800,minWidth:0}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}} title={e.ordenReparto?.numero || "Sin número (sistema anterior)"}>🚚 {e.ordenReparto?.numero || "Sin número (sistema anterior)"}</span>
+                      <span style={{whiteSpace:"nowrap",flexShrink:0}}>📅 {fechaEntregaHistorial(e)}</span>
+                    </div>
                   </button>
                 ))}
               </div>}
