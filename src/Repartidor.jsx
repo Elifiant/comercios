@@ -126,6 +126,9 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
   const [jornadaActiva, setJornadaActiva] = useState(false);
   const [procesandoJornada, setProcesandoJornada] = useState(false);
+  const [modalSuspension, setModalSuspension] = useState(false);
+  const [motivoSuspension, setMotivoSuspension] = useState("vehiculo");
+  const [observacionesSuspension, setObservacionesSuspension] = useState("");
   const [gpsEstado, setGpsEstado] = useState("Sin iniciar");
   const [ordenRuta, setOrdenRuta] = useState([]);
   const [rutaGuardada, setRutaGuardada] = useState(false);
@@ -540,7 +543,12 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     ? e.reparto_orden_id === ordenActualId
     : !e.reparto_orden_id && !["entregado", "no_entregado", "devolucion_informada"].includes(e.estado);
   const entregasActualesPantalla = [...pendientesOrdenadas, ...otrasPendientes,
-    ...asignadasRecibidas, ...finalizadas].filter(esEntregaActual);
+    ...asignadasRecibidas, ...finalizadas].filter(esEntregaActual).sort((a, b) => {
+      // Durante la carga, lo todavía ASIGNADO va primero y lo RECIBIDO al final.
+      if (jornadaActiva) return 0;
+      const prioridad = e => e.estado === "asignado" ? 0 : e.estado === "recibido" ? 2 : 1;
+      return prioridad(a) - prioridad(b);
+    });
   const entregasAnterioresPantalla = entregas.filter(e =>
     !esEntregaActual(e) && ["entregado", "no_entregado", "devolucion_informada"].includes(e.estado)
   ).sort((a,b) => new Date(b.entregado_at || b.actualizado_at || b.creado_at || 0).getTime() -
@@ -653,51 +661,56 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     }
   };
 
-  const finalizarJornada = async () => {
-    if (procesandoJornada) return;
-
-    const pendientes = entregas.filter(e => ["en_reparto", "reintentar"].includes(e.estado));
-    const volver = pendientes.filter(e => e.estado === "reintentar").length;
-
-    const mensaje = pendientes.length
-      ? `¿FINALIZAR REPARTO AHORA?\n\nQuedan ${pendientes.length} entrega/s pendientes.` +
-        (volver ? `\n🕐 ${volver} marcada/s para volver.` : "") +
-        `\n\nEsas entregas volverán a quedar ASIGNADAS a este repartidor para que el Supervisor de Repartos pueda reprogramarlas.`
-      : "¿FINALIZAR REPARTO?\n\nLa salida quedará cerrada.";
-
-    const ok = window.confirm(mensaje);
-    if (!ok) return;
-
+  // El cierre normal lo realiza Supabase al registrar la ultima entrega.
+  // La unica accion manual es suspender una salida que no pudo completarse.
+  const suspenderJornada = async () => {
+    if (procesandoJornada || !observacionesSuspension.trim() || observacionesSuspension.trim().length < 3) return;
     setProcesandoJornada(true);
     try {
-      const ahora = new Date().toISOString();
-
-      if (pendientes.length > 0) {
-        const idsPendientes = pendientes.map(e => e.id);
-        const { error } = await supabase
-          .from("repartos_entregas")
-          .update({
-            estado: "asignado",
-            salida_at: null,
-            actualizado_at: ahora,
-          })
-          .in("id", idsPendientes);
-
-        if (error) throw error;
-      }
-
-      setJornadaActiva(false);
-      setGpsEstado("Reparto finalizado");
+      const ids = resumenSalida?.idsSalida || [];
+      const ordenes = [...new Set(entregas.filter(e => ids.includes(e.id)).map(e => e.reparto_orden_id).filter(Boolean))];
+      if (ordenes.length !== 1) throw new Error("No se pudo identificar un unico reparto. Actualiza la pantalla.");
+      const { data, error: err } = await supabase.rpc("repartos_suspender", {
+        p_orden_id: ordenes[0], p_motivo: motivoSuspension,
+        p_observaciones: observacionesSuspension.trim()
+      });
+      if (err) throw err;
+      if (data === "ya_finalizado") alert("Este reparto ya finalizo automaticamente.");
+      else alert(data === "ya_suspendido" ? "Este reparto ya estaba suspendido." : "Reparto suspendido. El Supervisor recibira el aviso.");
+      setModalSuspension(false);
       setResumenSalida(null);
       try { localStorage.removeItem(claveResumenSalida()); } catch {}
+      setJornadaActiva(false);
       setActiva(null);
       await cargar();
-    } catch (e) {
-      alert("❌ No se pudo finalizar el reparto: " + (e?.message || "error desconocido"));
-    } finally {
-      setProcesandoJornada(false);
-    }
+    } catch (e) { alert("No se pudo suspender: " + (e?.message || "Error desconocido")); }
+    finally { setProcesandoJornada(false); }
   };
+
+  // Releer el estado real: el trigger puede cerrar el reparto en la ultima entrega.
+  useEffect(() => {
+    if (!jornadaActiva || !perfil?.empresa_id || !resumenSalida?.idsSalida?.length) return;
+    let vigente = true;
+    const verificar = async () => {
+      const ids = resumenSalida.idsSalida;
+      const ordenId = entregas.find(e => ids.includes(e.id) && e.reparto_orden_id)?.reparto_orden_id;
+      if (!ordenId) return;
+      const { data, error: err } = await supabase.from("repartos_ordenes")
+        .select("estado,finalizado_at").eq("empresa_id",perfil.empresa_id).eq("id",ordenId).maybeSingle();
+      if (err || !vigente || !["finalizado","suspendido"].includes(data?.estado)) return;
+      setResumenSalida(null);
+      try { localStorage.removeItem(claveResumenSalida()); } catch {}
+      setJornadaActiva(false);
+      setModalSuspension(false);
+      setGpsEstado(data.estado === "finalizado" ? "Reparto completado" : "Reparto suspendido");
+      await cargar();
+      if (data.estado === "finalizado") alert("Recorrido completado. El reparto se cerro automaticamente y se aviso al Supervisor.");
+    };
+    verificar();
+    const intervalo = window.setInterval(verificar, 8000);
+    return () => { vigente = false; window.clearInterval(intervalo); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jornadaActiva, perfil?.empresa_id, resumenSalida?.idsSalida?.join("|")]);
 
   const marcarRecibida = async (entrega) => {
     if (!entrega.reparto_orden_id || !entrega.ordenReparto) {
@@ -1195,16 +1208,12 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                 ❌ NO ENTREGADA
                 {activa.motivo_no_entrega ? <div style={{fontSize:"16px",fontWeight:"700",marginTop:"5px"}}>{activa.motivo_no_entrega}</div> : null}
               </div>
-              {!jornadaActiva && (
-                <button onClick={()=>informarDevolucion(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"16px"}}>
-                  📦 DEVOLVÍ MERCADERÍA NO ENTREGADA
-                </button>
-              )}
-              {jornadaActiva && (
-                <div style={{fontSize:"15px",color:"#334155",textAlign:"center"}}>
-                  Finalizá el reparto cuando regreses al depósito para informar la devolución.
-                </div>
-              )}
+              <div style={{fontSize:"15px",color:"#334155",textAlign:"center",marginBottom:10}}>
+                La visita ya quedó resuelta. El recorrido puede finalizar automáticamente; la devolución se registra por separado cuando regreses al depósito.
+              </div>
+              <button onClick={()=>informarDevolucion(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"16px"}}>
+                📦 INFORMAR MERCADERÍA DEVUELTA AL DEPÓSITO
+              </button>
               <button type="button" onClick={() => setActiva(null)} style={{...boton,width:"100%",marginTop:"10px",background:"#1d4ed8",color:"#fff",fontSize:"15px"}}>
                 🏠 VOLVER A MIS ENTREGAS
               </button>
@@ -1278,18 +1287,32 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         <div style={{marginBottom:"8px",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"10px",padding:"7px"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
             <button type="button"
-              onClick={jornadaActiva ? finalizarJornada : comenzarJornada}
+              onClick={jornadaActiva ? () => setModalSuspension(true) : comenzarJornada}
               disabled={procesandoJornada || (!jornadaActiva && recibidas.length===0)}
               style={{...boton,width:"100%",minHeight:"44px",padding:"6px 4px",fontSize:"14px",lineHeight:1.15,
                 background:procesandoJornada||(!jornadaActiva&&recibidas.length===0)?"#94a3b8":jornadaActiva?"#0f172a":"#2563eb",
                 color:"#fff"}}>
-              {procesandoJornada?"⏳ PROCESANDO":jornadaActiva?"🏁 FINALIZAR REPARTO":"🚚 COMENZAR REPARTO"}
+              {procesandoJornada?"⏳ PROCESANDO":jornadaActiva?"⚠️ SUSPENDER REPARTO":"🚚 COMENZAR REPARTO"}
             </button>
             <button type="button" onClick={()=>setChatAbierto(v=>!v)}
               style={{...boton,width:"100%",minHeight:"44px",padding:"6px 4px",fontSize:"14px",lineHeight:1.15,background:"#166534",color:"#fff"}}>
               💬 RUTACHAT {chatAbierto?"▲":"▼"}
             </button>
           </div>
+          {modalSuspension && <div role="dialog" aria-label="Suspender reparto" style={{background:"#fff7ed",border:"2px solid #f97316",borderRadius:9,padding:12,marginTop:10}}>
+            <strong>⚠️ SUSPENDER REPARTO</strong>
+            <p style={{fontSize:13}}>Si terminaste todas las entregas, el reparto se cierra solo. Suspendelo unicamente si no podes continuar.</p>
+            <select value={motivoSuspension} onChange={e=>setMotivoSuspension(e.target.value)} style={{width:"100%",padding:10,marginBottom:8}}>
+              <option value="vehiculo">🚚 Vehiculo averiado</option>
+              <option value="salud">🏥 Problema de salud</option>
+              <option value="otros">📝 Otro motivo</option>
+            </select>
+            <textarea aria-label="Explicacion obligatoria" value={observacionesSuspension} onChange={e=>setObservacionesSuspension(e.target.value)} placeholder="Explica lo ocurrido (obligatorio)" rows={3} style={{width:"100%",boxSizing:"border-box",padding:9}} />
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              <button type="button" onClick={()=>setModalSuspension(false)} disabled={procesandoJornada} style={{...boton,flex:1}}>CANCELAR</button>
+              <button type="button" onClick={suspenderJornada} disabled={procesandoJornada || observacionesSuspension.trim().length < 3} style={{...boton,flex:1,background:"#b91c1c",color:"white"}}>CONFIRMAR SUSPENSION</button>
+            </div>
+          </div>}
           {chatAbierto && (
             <div style={{paddingTop:"10px"}}>
               <div style={{fontSize:"16px",fontWeight:"800",marginBottom:"6px"}}>Mensajes al Supervisor</div>

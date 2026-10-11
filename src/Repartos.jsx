@@ -36,6 +36,7 @@ const ESTADO_LABEL = {
   en_reparto: "🚚 EN REPARTO",
   entregado: "✅ ENTREGADO",
   no_entregado: "❌ NO ENTREGADO",
+  devolucion_informada: "📥 DEVOLUCIÓN INFORMADA",
   vuelto_deposito: "🔄 VOLVIÓ A DEPÓSITO",
   anulacion_solicitada: "⏳ ANULACIÓN SOLICITADA",
 };
@@ -605,13 +606,26 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
         // La orden numerada activa tiene prioridad sobre cualquier ruta histórica.
         const ordenActual = ordenesActuales
           .filter(o => String(o.repartidor_id) === String(rep.id))
-          .sort((a,b) => {
-            const prioridad = o => o.estado === "en_reparto" ? 2 : 1;
-            return prioridad(b) - prioridad(a) || new Date(b.salida_at || b.confirmado_at || 0) - new Date(a.salida_at || a.confirmado_at || 0);
-          })[0] || null;
-        const idsRutaAnterior = Array.isArray(r?.entrega_ids) ? r.entrega_ids : [];
+          // Una orden antigua puede conservar "en_reparto" por el error de cierre
+          // anterior. Si todas sus entregas están resueltas, no es la actual.
+          .filter(o => {
+            const items = datos.filter(e => String(e.reparto_orden_id) === String(o.id));
+            return !items.length || items.some(e => !["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado));
+          })
+          // El número más nuevo prevalece sobre el estado obsoleto de una orden anterior.
+          .sort((a,b) => Number(b.numero) - Number(a.numero))[0] || null;
+        // La orden numerada define QUÉ entregas pertenecen al reparto;
+        // la ruta enviada por el chofer define EN QUÉ ORDEN visitarlas.
+        // Intersecar por ID impide mezclar paradas de repartos anteriores.
+        const idsRutaEnviada = Array.isArray(r?.entrega_ids) ? r.entrega_ids : [];
         const idsOrden = ordenActual ? datos.filter(e => String(e.reparto_orden_id) === String(ordenActual.id)).map(e => e.id) : [];
-        const ids = ordenActual ? idsOrden : idsRutaAnterior;
+        const idsPermitidos = new Set(idsOrden.map(String));
+        const idsEnviadosActuales = idsRutaEnviada.filter(id => idsPermitidos.has(String(id)));
+        const idsEnviadosSet = new Set(idsEnviadosActuales.map(String));
+        const ids = ordenActual ? [
+          ...idsEnviadosActuales,
+          ...idsOrden.filter(id => !idsEnviadosSet.has(String(id)))
+        ] : [];
         const todas = datos.filter(e => String(e.repartidor_id) === String(rep.id));
         const salidas = todas.filter(e => e.salida_at);
         const ultimaSalida = salidas.reduce((max,e) => {
@@ -620,12 +634,11 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
         }, 0);
         // Priorizar las paradas de la ruta enviada para que cifras y detalle coincidan.
         const base = ordenActual ? ids.map(id => todas.find(e => String(e.id) === String(id))).filter(Boolean)
-          : ids.length ? ids.map(id => todas.find(e => String(e.id) === String(id))).filter(Boolean)
-          : (ultimaSalida ? salidas.filter(e => new Date(e.salida_at).getTime() === ultimaSalida) : todas.filter(e => ["asignado","recibido","en_reparto","reintentar"].includes(e.estado)));
+          : todas.filter(e => !e.reparto_orden_id && ["asignado","recibido","en_reparto","reintentar"].includes(e.estado));
         const completadas = base.filter(e => e.estado === "entregado").length;
         const fallidas = base.filter(e => e.estado === "no_entregado").length;
         const pendientesRuta = base.filter(e => ["asignado","recibido","en_reparto","reintentar"].includes(e.estado)).length;
-        const enRuta = ordenActual ? ordenActual.estado === "en_reparto" || base.some(e => ["en_reparto","reintentar"].includes(e.estado)) : todas.some(e => ["en_reparto","reintentar"].includes(e.estado));
+        const enRuta = ordenActual ? ordenActual.estado === "en_reparto" || base.some(e => ["en_reparto","reintentar"].includes(e.estado)) : false;
         const numeroReparto = ordenActual && codigoEmpresaRepartos != null ? `REP${String(codigoEmpresaRepartos).padStart(3,"0")}-${String(ordenActual.numero).padStart(6,"0")}` : null;
         const porcentaje = base.length ? Math.round(completadas / base.length * 100) : 0;
         const ubicacion = gps[String(rep.id)];
@@ -662,11 +675,11 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
               <div style={{height:"100%",width:`${porcentaje}%`,background:"#16a34a"}} />
             </div>
           </summary>
-          {(ordenActual || r) ? <div style={{marginTop:10}}>
-            {ordenActual ? <div style={{fontSize:17,color:"#111827",fontWeight:900,marginBottom:8}}>
+          {ordenActual ? <div style={{marginTop:10}}>
+            <div style={{fontSize:17,color:"#111827",fontWeight:900,marginBottom:8}}>
               🚚 {numeroReparto ? `Reparto ${numeroReparto} (Actual)` : "Reparto actual"}
-              <div style={{fontSize:14,fontWeight:600,marginTop:4}}>{ids.length} entrega/s · {ordenActual.estado === "en_reparto" ? "En reparto" : "Preparado"}</div>
-            </div> : <div style={{fontSize:13,color:"#334155"}}>Ruta enviada: {r.actualizado_at ? new Date(r.actualizado_at).toLocaleString("es-AR") : "Sin fecha"} · {ids.length} paradas · Solo lectura</div>}
+              <div style={{fontSize:14,fontWeight:600,marginTop:4}}>{ids.length} entrega/s · {ordenActual.estado === "en_reparto" ? "En reparto" : "En preparación"}</div>
+            </div>
             <RutaEnviadaViva empresaId={empresaId} repartidorId={rep.id}
               nombreChofer={rep.nombre || rep.email || "Repartidor"}
               paradasIniciales={paradasMapa} abierto={Boolean(rutasAbiertas[String(rep.id)])} />
@@ -679,6 +692,47 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
 }
 
 
+
+// Avisos persistentes de cierre o suspension; lectura aislada por empresa.
+function AvisosRepartosSupervisor({ empresaId, repartidores }) {
+  const [avisos,setAvisos] = useState([]);
+  const [error,setError] = useState("");
+  const [vistoHasta,setVistoHasta] = useState(0);
+  useEffect(() => {
+    if (!empresaId) return;
+    try { setVistoHasta(Number(localStorage.getItem(`rutacomercios:avisos:${empresaId}`) || 0)); } catch {}
+    let vigente = true;
+    const cargar = async () => {
+      const {data,error:err} = await supabase.from("repartos_avisos")
+        .select("id,reparto_orden_id,tipo,creado_at")
+        .eq("empresa_id",empresaId).order("creado_at",{ascending:false}).limit(40);
+      if (!vigente) return;
+      if (err) {setError(err.message);return;}
+      setAvisos(data || []);setError("");
+    };
+    cargar(); const timer = window.setInterval(cargar,15000);
+    return ()=>{vigente=false;window.clearInterval(timer);};
+  },[empresaId]);
+  const nuevos = avisos.filter(a=>new Date(a.creado_at).getTime()>vistoHasta);
+  const marcar = () => {
+    const max = Math.max(Date.now(),...avisos.map(a=>new Date(a.creado_at).getTime()));
+    setVistoHasta(max);
+    try {localStorage.setItem(`rutacomercios:avisos:${empresaId}`,String(max));}catch{}
+  };
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:10,padding:10,marginBottom:12}}>
+    <details>
+      <summary style={{fontWeight:900,cursor:"pointer",fontSize:16}}>🔔 AVISOS DE REPARTOS {nuevos.length ? `· ${nuevos.length} nuevos` : ""}</summary>
+      {error && <p style={{color:"#b91c1c"}}>No se pudieron cargar avisos: {error}</p>}
+      {!avisos.length && !error && <p>Sin avisos registrados.</p>}
+      {avisos.map(a=><div key={a.id} style={{padding:"8px 0",borderBottom:"1px solid #e2e8f0",fontSize:14}}>
+        <strong>{a.tipo==="suspendido"?"⚠️ Reparto suspendido":"✅ Reparto finalizado"}</strong>
+        <span> · {new Date(a.creado_at).toLocaleString("es-AR")}</span>
+        <div style={{fontSize:12,color:"#64748b"}}>Identificador de reparto: {a.reparto_orden_id}</div>
+      </div>)}
+      <button type="button" onClick={marcar} style={{marginTop:8,padding:9,borderRadius:7,border:"1px solid #94a3b8",background:"#f8fafc",fontWeight:800}}>MARCAR COMO VISTOS</button>
+    </details>
+  </section>;
+}
 
 // Consulta compacta de repartos terminados, separada de las rutas en curso.
 function HistorialRepartosSupervisor({ empresaId, repartidores }) {
@@ -702,7 +756,7 @@ function HistorialRepartosSupervisor({ empresaId, repartidores }) {
       try {
         const [resOrdenes, resEntregas, resPrefijo] = await Promise.all([
           supabase.from("repartos_ordenes")
-            .select("id,numero,estado,repartidor_id,creado_at,salida_at,finalizado_at")
+            .select("id,numero,estado,repartidor_id,creado_at,salida_at,finalizado_at,motivo_suspension,observaciones_suspension")
             .eq("empresa_id", empresaId).order("numero", {ascending:false}).limit(500),
           supabase.from("repartos_entregas")
             .select("id,reparto_orden_id,repartidor_id,pedido_id,destinatario,direccion,localidad,estado,entregado_at,actualizado_at,motivo_no_entrega")
@@ -737,7 +791,7 @@ function HistorialRepartosSupervisor({ empresaId, repartidores }) {
     const items = porOrden.get(o.id) || [];
     // También contemplar órdenes antiguas cuyas entregas ya terminaron,
     // aunque el estado de la orden no haya sido actualizado al finalizar.
-    const terminada = o.estado === "finalizado" || (items.length > 0 &&
+    const terminada = ["finalizado","suspendido"].includes(o.estado) || (items.length > 0 &&
       items.every(e => ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado)));
     if (!terminada) return false;
     const texto = `${numeroVisible(o)} ${o.numero}`.toLowerCase();
@@ -773,16 +827,23 @@ function HistorialRepartosSupervisor({ empresaId, repartidores }) {
           <button type="button" onClick={()=>setDetalleId(v=>v===o.id?null:o.id)} style={{width:"100%",textAlign:"left",padding:"9px 5px",background:"transparent",border:0,cursor:"pointer",color:"#111827",fontSize:15,display:"flex",flexWrap:"wrap",alignItems:"center",gap:"5px 14px"}}>
             <strong style={{color:"#1d4ed8"}}>🚚 {numeroVisible(o)}</strong>
             <span>📅 {fechaVisible(cierre)}</span><span>👤 {nombre}</span>
+            <strong>{o.estado === "suspendido" ? "⚠️ SUSPENDIDO" : "✅ FINALIZADO"}</strong>
             <strong>📦 {entregadas}/{items.length} entregadas</strong>
             <span style={{marginLeft:"auto",fontWeight:800}}>{detalleId===o.id?"▲":"▼"}</span>
           </button>
           {detalleId===o.id && <div style={{background:"#f8fafc",padding:"5px 10px 9px",borderRadius:7}}>
+            <div style={{fontSize:14,marginBottom:8}}>
+              <strong>Inicio:</strong> {o.salida_at ? new Date(o.salida_at).toLocaleString("es-AR") : "Sin horario registrado"}
+              {" · "}<strong>Fin:</strong> {o.finalizado_at ? new Date(o.finalizado_at).toLocaleString("es-AR") : "Sin horario registrado"}
+              {o.salida_at && o.finalizado_at && new Date(o.finalizado_at)>=new Date(o.salida_at) && <span> · <strong>Duracion:</strong> {Math.floor((new Date(o.finalizado_at)-new Date(o.salida_at))/60000)} min</span>}
+              {o.estado === "suspendido" && <div style={{color:"#9a3412"}}>⚠️ Motivo: {({vehiculo:"Vehiculo averiado",salud:"Problema de salud",otros:"Otro motivo"})[o.motivo_suspension] || "No registrado"} · {o.observaciones_suspension || "Sin observaciones"}</div>}
+            </div>
             {!items.length && <div>Sin entregas vinculadas.</div>}
             {items.map(e=><div key={e.id} style={{padding:"5px 0",borderBottom:"1px solid #e2e8f0",display:"flex",flexWrap:"wrap",gap:"4px 12px",fontSize:15}}>
               <strong>📦 {e.destinatario || (e.pedido_id ? "Entrega NVI" : "Destinatario")}</strong>
               <span>📍 {[e.direccion,e.localidad].filter(Boolean).join(", ") || "Sin dirección"}</span>
               <strong style={{color:e.estado==="entregado"?"#166534":"#991b1b"}}>{e.estado==="entregado"?"✓ Entregada":e.estado.replaceAll("_"," ")}</strong>
-              <span>📅 {fechaVisible(e.entregado_at || e.actualizado_at)}</span>
+              <span>🕐 {e.entregado_at || e.actualizado_at ? new Date(e.entregado_at || e.actualizado_at).toLocaleString("es-AR") : "Sin horario registrado"}</span>
               {e.motivo_no_entrega && <span title={e.motivo_no_entrega}>📝 {e.motivo_no_entrega}</span>}
             </div>)}
           </div>}
@@ -826,9 +887,18 @@ function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaE
   };
   useEffect(() => { recargar(); }, [empresaId]);
   const formato = o => `REP${codigo == null ? "???" : String(codigo).padStart(3,"0")}-${String(o.numero).padStart(6,"0")}`;
-  const orden = ordenes.find(o => o.id === seleccion);
+  // Los repartos cerrados (y los antiguos con todas sus entregas resueltas)
+  // se consultan en Historial, no en el selector de gestión activa.
+  const ordenesActivas = ordenes.filter(o => {
+    if (o.estado === "finalizado") return false;
+    const items = entregas.filter(e => e.reparto_orden_id === o.id);
+    const historicaPorEntregas = items.length > 0 &&
+      items.every(e => ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado));
+    return !historicaPorEntregas;
+  });
+  const orden = ordenesActivas.find(o => o.id === seleccion);
   
-  const incluidas = entregas.filter(e => e.reparto_orden_id === seleccion);
+  const incluidas = orden ? entregas.filter(e => e.reparto_orden_id === seleccion) : [];
   const yaSalio = Boolean(orden?.salida_at) || incluidas.some(e => Boolean(e.salida_at) || ["en_reparto","reintentar","entregado","no_entregado","devolucion_informada"].includes(e.estado));
   const disponibles = entregas.filter(e => !e.reparto_orden_id && !e.salida_at &&
     ["preparado","asignado"].includes(e.estado) &&
@@ -871,20 +941,19 @@ function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaE
     {abierto && <div style={{marginTop:12}}>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8}}>
         <button type="button" disabled={ocupado} onClick={crear} style={{padding:13,border:0,borderRadius:8,background:"#166534",color:"white",fontWeight:900}}>🚚 NUEVO REPARTO</button>
-        <button type="button" disabled={!modoIndependiente || !seleccion || !orden || orden.estado !== "preparado" || yaSalio}
-          onClick={onNuevaEntrega} style={{padding:13,border:0,borderRadius:8,background:"#0f766e",color:"white",fontWeight:900,opacity:seleccion && orden?.estado === "preparado" && !yaSalio ? 1 : .5}}>📦 NUEVA ENTREGA</button>
+
       </div>
-      <div style={{fontSize:12,color:"#475569",marginTop:8}}>{modoIndependiente ? "La entrega nueva se crea con el formulario habitual. Después elegila abajo para incorporarla al reparto." : "Para las NVI, primero prepará la entrega desde Depósito; luego incorporala a este reparto."}</div>
+      <div style={{fontSize:12,color:"#475569",marginTop:8}}>{modoIndependiente ? "Podés crear entregas sin reparto desde Gestión de entregas. Cuando estén preparadas, incorporalas aquí." : "Para las NVI, primero prepará la entrega desde Depósito; luego incorporala a este reparto."}</div>
       <label style={{display:"block",fontSize:13,fontWeight:800,marginTop:12}}>Elegir reparto
         <select value={seleccion} onChange={e => {setSeleccion(e.target.value);setEntregaId("");}} style={{display:"block",width:"100%",padding:10,marginTop:5}}>
           <option value="">Seleccionar reparto...</option>
-          {ordenes.map(o => <option key={o.id} value={o.id}>{formato(o)} · {o.estado} · {repartidores.find(r=>r.id===o.repartidor_id)?.nombre || "Sin chofer"}</option>)}
+          {ordenesActivas.map(o => <option key={o.id} value={o.id}>{formato(o)} · {o.estado === "preparado" ? "En preparación" : o.estado.replaceAll("_", " ")} · {repartidores.find(r=>r.id===o.repartidor_id)?.nombre || "Sin chofer"}</option>)}
         </select>
       </label>
       {cargandoOrdenes && <p style={{fontSize:12}}>Actualizando repartos...</p>}
       {orden && <div style={{border:"1px solid #bfdbfe",background:"#eff6ff",padding:12,borderRadius:8,marginTop:12}}>
         <strong style={{fontSize:18}}>{formato(orden)}</strong>
-        <div style={{fontSize:12,marginTop:4}}>Estado: {orden.estado} · {incluidas.length} entrega/s</div>
+        <div style={{fontSize:12,marginTop:4}}>Estado: {orden.estado === "preparado" ? "En preparación" : orden.estado.replaceAll("_", " ")} · {incluidas.length} entrega/s</div>
         <div style={{fontWeight:800,fontSize:13,marginTop:12}}>Entregas del reparto</div>
         {incluidas.length ? incluidas.map(e => <div key={e.id} style={{padding:"6px 0",borderBottom:"1px solid #bfdbfe",fontSize:13}}>{nombreEntrega(e)} · {e.estado}</div>) : <div style={{fontSize:12,color:"#64748b"}}>Todavía no hay entregas.</div>}
         {orden.estado === "preparado" && !yaSalio && <>
@@ -929,11 +998,14 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
   const [guardando, setGuardando] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [bandeja, setBandeja] = useState("pendientes");
+  const [fechaConsultaEntregas, setFechaConsultaEntregas] = useState(fechaLocalISO());
   const [repartidores, setRepartidores] = useState([]);
   const [filtroRepartidor, setFiltroRepartidor] = useState("todos");
   const [ubicandoDestinos, setUbicandoDestinos] = useState(false);
   const [seleccionUbicacion, setSeleccionUbicacion] = useState(null);
   const [indiceUbicacion, setIndiceUbicacion] = useState("");
+  const [geoEntregaId, setGeoEntregaId] = useState("");
+  const [geoProgreso, setGeoProgreso] = useState("");
   const [municipios, setMunicipios] = useState([]);
   const [cargandoMunicipios, setCargandoMunicipios] = useState(false);
   const [municipiosError, setMunicipiosError] = useState("");
@@ -1548,6 +1620,30 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
     }
   };
 
+  // Repartos independientes: confirmar recepción física de una entrega manual.
+  // No modifica el estado del recorrido, que ya terminó con la última visita.
+  const recibirDevolucionManual = async () => {
+    const entrega = entregaManualActiva;
+    if (!entrega || entrega.estado !== "devolucion_informada" || guardandoManual) return;
+    if (!window.confirm(`¿Confirmar recepción física en Depósito de ${entrega.bultos || "los"} bulto/s de ${entrega.destinatario || "esta entrega"}?\n\nEl recorrido ya finalizado NO se modificará.`)) return;
+    setGuardandoManual(true);
+    try {
+      const ahora = new Date().toISOString();
+      const { data, error: err } = await supabase.from("repartos_entregas")
+        .update({ estado:"vuelto_deposito", devolucion_recibida_at:ahora,
+          devolucion_recibida_por: perfil?.id || sesionProp?.user?.id || null, actualizado_at:ahora })
+        .eq("id", entrega.id).eq("empresa_id", empresaId)
+        .eq("estado", "devolucion_informada").select("id");
+      if (err) throw err;
+      if (!data?.length) throw new Error("La entrega cambió de estado. Actualizá la pantalla.");
+      setEntregaManualActiva(null);
+      setBandeja("volvieron_hoy");
+      await cargarDatos();
+      alert("✅ Mercadería recibida en Depósito. El recorrido no se modificó.");
+    } catch (e) { alert("❌ No se pudo confirmar la devolución: " + (e.message || e)); }
+    finally { setGuardandoManual(false); }
+  };
+
   const crearEntregaManual = async () => {
     if (guardandoManual || !empresaId) return;
     if (!manual.destinatario.trim() || !manual.direccion.trim() || !manual.provincia.trim() || !manual.partido.trim() || !manual.localidad.trim()) {
@@ -1688,25 +1784,74 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
     finally { setGuardandoManual(false); }
   };
 
-  // Buscar candidatos y permitir elección explícita, nunca aceptar el primero automáticamente.
-  const ubicarDirecciones = async () => {
+  // Las búsquedas individuales permiten revisar y elegir el punto.
+  // La búsqueda masiva solo guarda resultados con número y localidad verificables.
+  const pendientesGeo = entregas.filter(e => !e.pedido_id && !puntoValido(e.latitud, e.longitud) && e.direccion);
+  const textoDireccionGeo = e => [e.direccion, e.localidad, e.partido, e.provincia, "Argentina"].filter(Boolean).join(", ");
+  const normalizarGeo = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const buscarGeo = async (e, clave) => {
+    const texto = textoDireccionGeo(e);
+    const params = new URLSearchParams({text:texto,filter:"countrycode:ar",format:"json",limit:"10",apiKey:clave});
+    const respuesta = await fetch(`https://api.geoapify.com/v1/geocode/search?${params}`);
+    if (!respuesta.ok) throw new Error(`Geoapify respondió ${respuesta.status}`);
+    const data = await respuesta.json();
+    return {texto, candidatos:(data.results || []).filter(r => puntoValido(r.lat,r.lon))};
+  };
+  const ubicarUnaDireccion = async () => {
     const clave = import.meta.env.VITE_GEOAPIFY_API_KEY;
     if (!clave) { alert("Falta configurar VITE_GEOAPIFY_API_KEY."); return; }
-    const faltantes = entregas.filter(e => !e.pedido_id && !puntoValido(e.latitud, e.longitud) && e.direccion);
-    if (!faltantes.length) { alert("No hay direcciones pendientes de ubicar."); return; }
+    const e = pendientesGeo.find(x => String(x.id) === geoEntregaId) || pendientesGeo[0];
+    if (!e) { alert("No hay direcciones pendientes de ubicar."); return; }
     setUbicandoDestinos(true);
     try {
-      const e = faltantes[0];
-      const texto = [e.direccion, e.localidad, e.partido, e.provincia, "Argentina"].filter(Boolean).join(", ");
-      const params = new URLSearchParams({text:texto,filter:"countrycode:ar",format:"json",limit:"10",apiKey:clave});
-      const respuesta = await fetch(`https://api.geoapify.com/v1/geocode/search?${params}`);
-      if (!respuesta.ok) throw new Error(`Geoapify respondió ${respuesta.status}`);
-      const data = await respuesta.json();
-      const candidatos = (data.results || []).filter(r => puntoValido(r.lat,r.lon));
+      const resultado = await buscarGeo(e, clave);
       setIndiceUbicacion("");
-      setSeleccionUbicacion({ entrega:e, texto, candidatos });
+      setSeleccionUbicacion({entrega:e,...resultado});
     } catch (err) { alert("No se pudo buscar la dirección: " + (err.message || err)); }
     finally { setUbicandoDestinos(false); }
+  };
+  const ubicarTodasDirecciones = async () => {
+    const clave = import.meta.env.VITE_GEOAPIFY_API_KEY;
+    if (!clave) { alert("Falta configurar VITE_GEOAPIFY_API_KEY."); return; }
+    if (!pendientesGeo.length) { alert("No hay direcciones pendientes de ubicar."); return; }
+    if (!window.confirm(`¿Buscar automáticamente ${pendientesGeo.length} domicilio/s sin coordenadas?\n\nSolo se guardarán coincidencias precisas. Las dudosas quedarán pendientes para revisión manual.`)) return;
+    setUbicandoDestinos(true);
+    let guardadas=0, revisar=0, fallidas=0;
+    try {
+      for (let i=0;i<pendientesGeo.length;i++) {
+        const e = pendientesGeo[i];
+        setGeoProgreso(`Buscando ${i+1} de ${pendientesGeo.length}: ${e.destinatario || e.direccion}`);
+        try {
+          const {candidatos} = await buscarGeo(e, clave);
+          const calleNumero = String(e.direccion || "").match(/\b(\d{1,6})\b/);
+          const numero = calleNumero?.[1];
+          const aceptables = candidatos.filter(r => {
+            const texto = normalizarGeo([r.formatted,r.city,r.county,r.suburb,r.state].join(" "));
+            const ciudadOk = (!e.localidad || texto.includes(normalizarGeo(e.localidad))) &&
+              (!e.partido || texto.includes(normalizarGeo(e.partido)));
+            const numeroOk = numero && String(r.housenumber || "") === numero;
+            const precisa = r.result_type === "building" || r.result_type === "amenity" || r.result_type === "street" && Boolean(r.housenumber);
+            return ciudadOk && numeroOk && precisa && Number(r.rank?.confidence ?? 0) >= 0.85;
+          });
+          if (aceptables.length !== 1) { revisar++; continue; }
+          const r = aceptables[0];
+          const {data,error} = await supabase.from("repartos_entregas")
+            .update({latitud:Number(r.lat),longitud:Number(r.lon)})
+            .eq("id",e.id).eq("empresa_id",empresaId)
+            .is("latitud",null).is("longitud",null).select("id");
+          if (error) throw error;
+          if (data?.length !== 1) { revisar++; continue; }
+          guardadas++;
+        } catch (err) {
+          fallidas++;
+          if (String(err.message || err).includes("429")) { alert("Geoapify alcanzó su límite de consultas. Podés continuar más tarde."); break; }
+        }
+        // Evita lanzar muchas consultas seguidas contra el proveedor.
+        if (i < pendientesGeo.length-1) await new Promise(resolve => setTimeout(resolve, 450));
+      }
+      await cargarDatos();
+      alert(`Geolocalización terminada.\n\n✅ Ubicadas: ${guardadas}\n📍 Para revisar individualmente: ${revisar}\n⚠️ Errores: ${fallidas}\n\nNo se modificaron ubicaciones existentes.`);
+    } finally { setGeoProgreso(""); setUbicandoDestinos(false); }
   };
 
   const guardarCandidato = async () => {
@@ -1767,20 +1912,53 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
   if (modoIndependiente) {
     const hoy = fechaLocalISO();
     const manuales = entregas.filter(e => !e.pedido_id);
+    // La jornada se define por la fecha programada, no por cuándo se cargó.
+    // Las bandejas operativas conservan los pendientes de cualquier día.
+    const fechaDeEntrega = e => String(e.fecha_programada || e.creado_at || "").slice(0, 10);
+    const entregasFecha = manuales.filter(e => fechaDeEntrega(e) === fechaConsultaEntregas);
+    // Bandeja independiente: todas las entregas programadas desde mañana.
+    const entregasFuturas = manuales.filter(e => fechaDeEntrega(e) > hoy);
     const cuenta = estado => manuales.filter(e => e.estado === estado).length;
     const filtradas = manuales.filter(e => {
-      const grupo = bandeja === "todos" ||
+      const grupo = (bandeja === "todos" && fechaDeEntrega(e) === fechaConsultaEntregas) ||
+        (bandeja === "futuras" && fechaDeEntrega(e) > hoy) ||
         (bandeja === "pendientes" && e.estado === "pendiente_preparacion") ||
         (bandeja === "preparados" && e.estado === "preparado") ||
         (bandeja === "asignados" && ["asignado", "en_reparto"].includes(e.estado)) ||
         (bandeja === "hoy" && e.creado_at?.slice(0, 10) === hoy) ||
         (bandeja === "devoluciones_pendientes" && e.estado === "devolucion_informada") ||
+        (bandeja === "no_entregadas" && e.estado === "no_entregado") ||
         (bandeja === "volvieron_hoy" && e.estado === "vuelto_deposito");
       const coincideRepartidor = filtroRepartidor === "todos" ||
         (filtroRepartidor === "sin_asignar" ? !e.repartidor_id : String(e.repartidor_id) === filtroRepartidor);
       return grupo && coincideRepartidor && [e.destinatario, e.direccion, e.localidad, e.numero_remito, e.numero_factura]
         .some(x => String(x || "").toLowerCase().includes(busqueda.toLowerCase().trim()));
     });
+    // Prioridad operativa: atrasadas, hoy y futuras; sin cambiar fechas ni estados.
+    const prioridadFecha = e => {
+      const fecha = String(e.fecha_programada || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return [3, "9999-99-99"];
+      return [fecha < hoy ? 0 : fecha === hoy ? 1 : 2, fecha];
+    };
+    if (["pendientes", "preparados", "futuras"].includes(bandeja)) {
+      filtradas.sort((a, b) => {
+        const pa = prioridadFecha(a), pb = prioridadFecha(b);
+        return (bandeja === "futuras" ? 0 : pa[0] - pb[0]) || pa[1].localeCompare(pb[1]) ||
+          String(a.destinatario || "").localeCompare(String(b.destinatario || ""), "es");
+      });
+    }
+    const avisoFecha = e => {
+      const fecha = String(e.fecha_programada || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return {texto:"⚠️ SIN FECHA PROGRAMADA",fondo:"#fef2f2",borde:"#b91c1c"};
+      const legible = `${fecha.slice(8, 10)}/${fecha.slice(5, 7)}/${fecha.slice(0, 4)}`;
+      if (e.estado === "no_entregado") return {texto:`❌ NO ENTREGADA · ${legible} · DEVOLUCIÓN SIN INFORMAR`,fondo:"#fee2e2",borde:"#b91c1c"};
+      if (e.estado === "devolucion_informada") return {texto:`📥 DEVOLUCIÓN INFORMADA · ${legible} · PENDIENTE DE RECEPCIÓN`,fondo:"#ffedd5",borde:"#c2410c"};
+      if (e.estado === "vuelto_deposito") return {texto:`🔄 DEVUELTA AL DEPÓSITO · ${legible}`,fondo:"#ccfbf1",borde:"#0f766e"};
+      if (e.estado === "entregado") return {texto:`✅ ENTREGADA · ${legible}`,fondo:"#dcfce7",borde:"#15803d"};
+      if (fecha < hoy) return {texto:`⚠️ ENTREGA ATRASADA · ${legible}`,fondo:"#fee2e2",borde:"#dc2626"};
+      if (fecha === hoy) return {texto:`🟢 ENTREGAR HOY · ${legible}`,fondo:"#dcfce7",borde:"#15803d"};
+      return {texto:`📅 ENTREGAR ${legible}`,fondo:"#ffedd5",borde:"#ea580c"};
+    };
     const campo = (clave, titulo, tipo = "text", obligatorio = false) => (
       <label style={{ display: "block", fontSize: 12, fontWeight: 800 }} key={clave}>
         {titulo}
@@ -1802,33 +1980,84 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
           </div>
         </header>
         <main style={{ maxWidth: 1000, margin: "auto", padding: 14 }}>
-          <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
-          <GestionRepartos modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
-          <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
-          <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
-            <strong>Gestión de entregas</strong>
-            <button onClick={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }}
-              style={{ padding: "12px 18px", background: "#16a34a", color: "white", border: 0, borderRadius: 8, fontWeight: 900, cursor: "pointer" }}>＋ NUEVA ENTREGA</button>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:14}}>
+            <div style={{fontSize:19,fontWeight:900}}>📦 Gestión de entregas</div>
+            <button type="button" onClick={() => {setNuevaEntregaAbierta(true);setEntregaManualActiva(null);}}
+              style={{background:"#16a34a",color:"white",border:0,borderRadius:8,padding:"12px 16px",fontWeight:900,cursor:"pointer"}}>
+              ＋ NUEVA ENTREGA
+            </button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))", gap: 8, marginBottom: 14 }}>
-            {[["pendientes", "📦 PENDIENTES", cuenta("pendiente_preparacion")], ["preparados", "✅ PREPARADAS", cuenta("preparado")],
-              ["asignados", "🚚 ASIGNADAS", cuenta("asignado") + cuenta("en_reparto")], ["todos", "📋 TODAS", manuales.length],
-              ["devoluciones_pendientes", "📥 DEVOLUCIONES", cuenta("devolucion_informada")], ["volvieron_hoy", "🔄 VOLVIERON", cuenta("vuelto_deposito")]].map(([id, titulo, n]) => (
-              <button key={id} onClick={() => { setBandeja(id); setFiltroRepartidor(["pendientes", "preparados"].includes(id) ? "sin_asignar" : "todos"); }} style={{ padding: 12, textAlign: "left", background: bandeja === id ? "#dbeafe" : "white", border: bandeja === id ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
-                <div style={{ fontSize: 11, fontWeight: 800 }}>{titulo}</div><div style={{ fontSize: 24, fontWeight: 900 }}>{n}</div>
-              </button>))}
+          {/* Ocho tarjetas en una sola fila; cada título ocupa exactamente dos renglones. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(8,minmax(0,1fr))", gap: 5, marginBottom: 14, overflowX: "auto" }}>
+            {[
+              ["pendientes", "📦 PENDIENTES", "DE PREPARAR", cuenta("pendiente_preparacion"), "Pendientes de preparar"],
+              ["preparados", "✅ PREPARADAS", "PARA ASIGNAR", cuenta("preparado"), "Preparadas para asignar a repartidores"],
+              ["asignados", "🚚 ASIGNADAS", "A REPARTIDORES", cuenta("asignado") + cuenta("en_reparto"), "Asignadas a repartidores"],
+              ["todos", "🗓️ TODAS", fechaConsultaEntregas === fechaLocalISO() ? "(HOY)" : `(${fechaConsultaEntregas.slice(8, 10)}/${fechaConsultaEntregas.slice(5, 7)})`, entregasFecha.length, "Todas las entregas de la fecha seleccionada"],
+              ["futuras", "📅 ENTREGAS", "FUTURAS", entregasFuturas.length, "Entregas futuras, desde mañana"],
+              ["no_entregadas", "❌ NO ENTREGADAS", "POR REPARTIDORES", cuenta("no_entregado"), "No entregadas por los repartidores"],
+              ["devoluciones_pendientes", "📥 DEVOLUCIONES", "PENDIENTES", cuenta("devolucion_informada"), "Devoluciones informadas, pendientes de recepción física"],
+              ["volvieron_hoy", "🔄 VOLVIERON", "AL DEPÓSITO", cuenta("vuelto_deposito"), "Volvieron al depósito: recepción confirmada"],
+            ].map(([id, linea1, linea2, n, descripcion]) => (
+              <button key={id} type="button" title={descripcion}
+                onClick={() => { setBandeja(id); setFiltroRepartidor(["pendientes", "preparados"].includes(id) ? "sin_asignar" : "todos"); }}
+                style={{ padding: "8px 4px", minWidth: 0, textAlign: "left", background: bandeja === id ? "#dbeafe" : "white", border: bandeja === id ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
+                <div style={{ color: "#111111", fontSize: 9, fontWeight: 900, lineHeight: 1.35 }}>
+                  <div style={{ whiteSpace: "nowrap" }}>{linea1}</div>
+                  <div style={{ whiteSpace: "nowrap" }}>{linea2}</div>
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: "#111111", marginTop: 2 }}>{n}</div>
+              </button>
+            ))}
           </div>
+          <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:12}}>
+            <label htmlFor="fecha-entregas-repartos" style={{fontWeight:800,fontSize:13}}>📅 Fecha de entregas:</label>
+            <input id="fecha-entregas-repartos" type="date" value={fechaConsultaEntregas}
+              onChange={e => {setFechaConsultaEntregas(e.target.value || fechaLocalISO());setBandeja("todos");setFiltroRepartidor("todos");}}
+              style={{padding:"9px 11px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",color:"#0f172a"}} />
+            <button type="button" onClick={() => {setFechaConsultaEntregas(fechaLocalISO());setBandeja("todos");setFiltroRepartidor("todos");}}
+              style={{padding:"9px 12px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",cursor:"pointer"}}>Hoy</button>
+            <span style={{fontSize:12,color:"#64748b"}}>La fecha filtra «Todas». «Entregas futuras» muestra todas las programadas desde mañana, ordenadas por fecha.</span>
+          </div>
+          <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:10}}>
+            <select aria-label="Entrega para geolocalizar" value={geoEntregaId} onChange={e=>setGeoEntregaId(e.target.value)}
+              style={{padding:"10px 8px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",maxWidth:"100%",minWidth:180}}>
+              <option value="">Elegir entrega sin ubicación...</option>
+              {pendientesGeo.map(e=><option key={e.id} value={e.id}>{e.destinatario || "Sin nombre"} · {e.direccion}</option>)}
+            </select>
+            <button type="button" disabled={ubicandoDestinos || !pendientesGeo.length} onClick={ubicarUnaDireccion}
+              style={{padding:"10px 14px",border:"1px solid #2563eb",borderRadius:8,background:"#dbeafe",color:"#1d4ed8",fontWeight:900,opacity:pendientesGeo.length?1:.5}}>
+              📍 GEOLOCALIZAR UNA
+            </button>
+            <button type="button" disabled={ubicandoDestinos || !pendientesGeo.length} onClick={ubicarTodasDirecciones}
+              style={{padding:"10px 14px",border:"1px solid #166534",borderRadius:8,background:"#dcfce7",color:"#166534",fontWeight:900,opacity:pendientesGeo.length?1:.5}}>
+              📍 GEOLOCALIZAR TODAS ({pendientesGeo.length})
+            </button>
+          </div>
+          {geoProgreso && <div style={{fontSize:12,color:"#1d4ed8",marginBottom:10}}>⏳ {geoProgreso}</div>}
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><input placeholder="🔎 Destinatario, dirección, remito o factura..." value={busqueda} onChange={e => setBusqueda(e.target.value)} style={inputStyle} />
             <button onClick={cargarDatos} style={{ padding: "0 14px" }}>↻</button></div>
           {cargando ? <p>Cargando entregas...</p> : errorCarga ? <p style={{ color: "#b91c1c" }}>❌ {errorCarga}</p> : filtradas.length === 0 ?
             <div style={{ background: "white", padding: 25, borderRadius: 9, textAlign: "center" }}>No hay entregas en esta bandeja.</div> :
-            <div style={{ display: "grid", gap: 8 }}>{filtradas.map(e => <button key={e.id} onClick={() => { setEntregaManualActiva(e); setNuevaEntregaAbierta(false); setRepartidorSeleccionado(e.repartidor_id || ""); }}
-              style={{ textAlign: "left", padding: 14, background: "white", border: "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}><strong>📦 {e.destinatario || "Sin destinatario"}</strong><strong>{ESTADO_LABEL[e.estado] || e.estado}</strong></div>
-              <div style={{ fontSize: 12, color: "#475569", marginTop: 6 }}>📍 {[e.direccion, e.localidad, e.partido, e.provincia].filter(Boolean).join(", ")}</div>
-              <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{e.bultos || "—"} bulto/s · {e.fecha_programada || "Sin fecha"} · {e.numero_remito ? `Remito ${e.numero_remito}` : "Sin remito"}</div>
-            </button>)}</div>}
+            <div style={{ display: "grid", gap: 8 }}>{filtradas.map(e => {
+              const aviso = avisoFecha(e);
+              return <button key={e.id} onClick={() => { setEntregaManualActiva(e); setNuevaEntregaAbierta(false); setRepartidorSeleccionado(e.repartidor_id || ""); }}
+                style={{ textAlign: "left", padding: 14, background: "white", color: "#111111", border: "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", color: "#111111" }}><strong>📦 {e.destinatario || "Sin destinatario"}</strong><strong>{ESTADO_LABEL[e.estado] || e.estado}</strong></div>
+                <div style={{ marginTop: 9, padding: "9px 12px", borderRadius: 8, background: aviso.fondo, border: `2px solid ${aviso.borde}`, color: "#111111", fontSize: 17, fontWeight: 900, lineHeight: 1.35 }}>
+                  {aviso.texto}
+                </div>
+                <div style={{ fontSize: 13, color: "#111111", marginTop: 7 }}>📍 {[e.direccion, e.localidad, e.partido, e.provincia].filter(Boolean).join(", ")}</div>
+                <div style={{ fontSize: 13, color: "#111111", marginTop: 4 }}>{e.bultos || "—"} bulto/s · {e.numero_remito ? `Remito ${e.numero_remito}` : "Sin remito"}</div>
+              </button>;
+            })}</div>}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, alignItems: "start", marginBottom: 14 }}>
+            <div style={{ minWidth: 0 }}><RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} /></div>
+            <div style={{ minWidth: 0 }}><GestionRepartos modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} /></div>
+          </div>
+          <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          <AvisosRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
+          <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
           {seleccionUbicacion && <div style={{position:"fixed",inset:0,zIndex:3000,background:"#000a",padding:16,overflowY:"auto"}}>
             <div style={{maxWidth:680,margin:"25px auto",padding:20,background:"white",borderRadius:12}}>
               <h3>📍 Elegir ubicación — {seleccionUbicacion.entrega.destinatario}</h3>
@@ -1911,6 +2140,20 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
               <p>☎ {entregaManualActiva.telefono || "Sin teléfono"} · {entregaManualActiva.bultos || "—"} bultos</p>
               <p><strong>{ESTADO_LABEL[entregaManualActiva.estado] || entregaManualActiva.estado}</strong></p>
               {entregaManualActiva.observaciones && <p>📝 {entregaManualActiva.observaciones}</p>}
+              {entregaManualActiva.estado === "no_entregado" && <div style={{background:"#fef2f2",border:"2px solid #fca5a5",borderRadius:9,padding:12,color:"#111111",fontWeight:800,marginTop:10}}>
+                ❌ VISITA NO ENTREGADA · 📦 DEVOLUCIÓN SIN INFORMAR
+                <div style={{fontSize:13,fontWeight:500,marginTop:5}}>El recorrido puede estar finalizado, pero falta que el repartidor informe el regreso de la mercadería.</div>
+              </div>}
+              {entregaManualActiva.estado === "devolucion_informada" && <div style={{background:"#fff7ed",border:"2px solid #fb923c",borderRadius:9,padding:12,marginTop:10,color:"#111111"}}>
+                <strong>📥 DEVOLUCIÓN INFORMADA · PENDIENTE DE RECEPCIÓN</strong>
+                <div style={{fontSize:13,margin:"8px 0"}}>Confirmá únicamente cuando los bultos estén físicamente en Depósito.</div>
+                <button type="button" disabled={guardandoManual} onClick={recibirDevolucionManual} style={{padding:12,width:"100%",background:"#0f766e",color:"white",border:0,borderRadius:8,fontWeight:900}}>
+                  {guardandoManual ? "REGISTRANDO..." : "📥 CONFIRMAR MERCADERÍA RECIBIDA"}
+                </button>
+              </div>}
+              {entregaManualActiva.estado === "vuelto_deposito" && <div style={{background:"#dcfce7",border:"2px solid #16a34a",borderRadius:9,padding:12,marginTop:10,color:"#111111",fontWeight:900}}>
+                ✅ MERCADERÍA RECIBIDA EN DEPÓSITO
+              </div>}
               {entregaManualActiva.estado === "pendiente_preparacion" && <button disabled={guardandoManual} onClick={() => actualizarEntregaManual("preparado")} style={{ padding: 12, background: "#16a34a", color: "white", border: 0, borderRadius: 8, fontWeight: 800 }}>✅ MARCAR PREPARADA</button>}
               {entregaManualActiva.estado === "preparado" && <div style={{ display: "grid", gap: 10 }}>
                 {repartidores.length === 0 ? <p>No hay repartidores habilitados para esta empresa.</p> : <><label>Elegir repartidor<select value={repartidorSeleccionado} onChange={e => setRepartidorSeleccionado(e.target.value)} style={inputStyle}><option value="">Seleccionar...</option>{repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}</select></label>
@@ -2268,6 +2511,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
           <GestionRepartos modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
           <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          <AvisosRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
           <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[
