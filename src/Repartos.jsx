@@ -370,6 +370,8 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
   const [rutasAbiertas, setRutasAbiertas] = useState({});
   const [datos, setDatos] = useState([]);
   const [gps, setGps] = useState({});
+  const [ordenesActuales, setOrdenesActuales] = useState([]);
+  const [codigoEmpresaRepartos, setCodigoEmpresaRepartos] = useState(null);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(null);
   useEffect(() => {
@@ -381,18 +383,27 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
       consultando = true;
       try {
         const ids = repartidores.map(r => r.id);
-        const [resEntregas, resGps] = await Promise.all([
+        const [resEntregas, resGps, resOrdenes, resPrefijo] = await Promise.all([
           supabase.from("repartos_entregas")
-            .select("id,repartidor_id,estado,salida_at,entregado_at,actualizado_at")
+            .select("id,repartidor_id,reparto_orden_id,estado,salida_at,entregado_at,actualizado_at")
             .eq("empresa_id", empresaId).in("repartidor_id", ids),
           supabase.from("perfiles")
             .select("id,latitud,longitud,ultima_posicion_at")
-            .eq("empresa_id", empresaId).in("id", ids)
+            .eq("empresa_id", empresaId).in("id", ids),
+          supabase.from("repartos_ordenes")
+            .select("id,numero,repartidor_id,estado,salida_at,confirmado_at")
+            .eq("empresa_id", empresaId).in("repartidor_id", ids)
+            .in("estado", ["preparado", "en_reparto"]),
+          supabase.from("repartos_prefijos_empresa").select("codigo").eq("empresa_id", empresaId).maybeSingle()
         ]);
         if (resEntregas.error) throw resEntregas.error;
         if (resGps.error) throw resGps.error;
+        if (resOrdenes.error) throw resOrdenes.error;
+        if (resPrefijo.error) throw resPrefijo.error;
         if (!vigente) return;
         setDatos(resEntregas.data || []);
+        setOrdenesActuales(resOrdenes.data || []);
+        setCodigoEmpresaRepartos(resPrefijo.data?.codigo ?? null);
         setGps(Object.fromEntries((resGps.data || []).map(p => [String(p.id), p])));
         setRevision(new Date());
         setError("");
@@ -552,7 +563,16 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       {repartidores.map(rep => {
         const r = rutas.find(x => String(x.repartidor_id) === String(rep.id));
-        const ids = Array.isArray(r?.entrega_ids) ? r.entrega_ids : [];
+        // La orden numerada activa tiene prioridad sobre cualquier ruta histórica.
+        const ordenActual = ordenesActuales
+          .filter(o => String(o.repartidor_id) === String(rep.id))
+          .sort((a,b) => {
+            const prioridad = o => o.estado === "en_reparto" ? 2 : 1;
+            return prioridad(b) - prioridad(a) || new Date(b.salida_at || b.confirmado_at || 0) - new Date(a.salida_at || a.confirmado_at || 0);
+          })[0] || null;
+        const idsRutaAnterior = Array.isArray(r?.entrega_ids) ? r.entrega_ids : [];
+        const idsOrden = ordenActual ? datos.filter(e => String(e.reparto_orden_id) === String(ordenActual.id)).map(e => e.id) : [];
+        const ids = ordenActual ? idsOrden : idsRutaAnterior;
         const todas = datos.filter(e => String(e.repartidor_id) === String(rep.id));
         const salidas = todas.filter(e => e.salida_at);
         const ultimaSalida = salidas.reduce((max,e) => {
@@ -560,12 +580,14 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
           return Number.isFinite(t) && t > max ? t : max;
         }, 0);
         // Priorizar las paradas de la ruta enviada para que cifras y detalle coincidan.
-        const base = ids.length ? ids.map(id => todas.find(e => String(e.id) === String(id))).filter(Boolean)
+        const base = ordenActual ? ids.map(id => todas.find(e => String(e.id) === String(id))).filter(Boolean)
+          : ids.length ? ids.map(id => todas.find(e => String(e.id) === String(id))).filter(Boolean)
           : (ultimaSalida ? salidas.filter(e => new Date(e.salida_at).getTime() === ultimaSalida) : todas.filter(e => ["asignado","recibido","en_reparto","reintentar"].includes(e.estado)));
         const completadas = base.filter(e => e.estado === "entregado").length;
         const fallidas = base.filter(e => e.estado === "no_entregado").length;
         const pendientesRuta = base.filter(e => ["asignado","recibido","en_reparto","reintentar"].includes(e.estado)).length;
-        const enRuta = todas.some(e => ["en_reparto","reintentar"].includes(e.estado));
+        const enRuta = ordenActual ? ordenActual.estado === "en_reparto" || base.some(e => ["en_reparto","reintentar"].includes(e.estado)) : todas.some(e => ["en_reparto","reintentar"].includes(e.estado));
+        const numeroReparto = ordenActual && codigoEmpresaRepartos != null ? `REP${String(codigoEmpresaRepartos).padStart(3,"0")}-${String(ordenActual.numero).padStart(6,"0")}` : null;
         const porcentaje = base.length ? Math.round(completadas / base.length * 100) : 0;
         const ubicacion = gps[String(rep.id)];
         const paradasMapa = ids.map((id, indice) => {
@@ -601,16 +623,135 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
               <div style={{height:"100%",width:`${porcentaje}%`,background:"#16a34a"}} />
             </div>
           </summary>
-          {r ? <div style={{marginTop:10}}>
-            <div style={{fontSize:12,color:"#475569"}}>Ruta enviada: {r.actualizado_at ? new Date(r.actualizado_at).toLocaleString("es-AR") : "Sin fecha"} · {ids.length} paradas · Solo lectura</div>
+          {(ordenActual || r) ? <div style={{marginTop:10}}>
+            {ordenActual ? <div style={{fontSize:17,color:"#111827",fontWeight:900,marginBottom:8}}>
+              🚚 {numeroReparto ? `Reparto ${numeroReparto} (Actual)` : "Reparto actual"}
+              <div style={{fontSize:14,fontWeight:600,marginTop:4}}>{ids.length} entrega/s · {ordenActual.estado === "en_reparto" ? "En reparto" : "Preparado"}</div>
+            </div> : <div style={{fontSize:13,color:"#334155"}}>Ruta enviada: {r.actualizado_at ? new Date(r.actualizado_at).toLocaleString("es-AR") : "Sin fecha"} · {ids.length} paradas · Solo lectura</div>}
             <RutaEnviadaViva empresaId={empresaId} repartidorId={rep.id}
               nombreChofer={rep.nombre || rep.email || "Repartidor"}
               paradasIniciales={paradasMapa} abierto={Boolean(rutasAbiertas[String(rep.id)])} />
-          </div> : <p style={{fontSize:12,color:"#64748b"}}>Este repartidor todavía no envió una ruta.</p>}
+          </div> : <p style={{fontSize:14,color:"#334155"}}>Este repartidor no tiene un reparto numerado activo ni una ruta enviada.</p>}
         </details>;
       })}
     </div>
     <div style={{fontSize:11,color:"#64748b",marginTop:10}}>Tocá el renglón para abrir el mapa, las entregas y sus horarios. Para solicitar cambios, usá RutaChat.</div>
+  </section>;
+}
+
+
+// Confirmación de salida: agrupa entregas ya asignadas en una orden única.
+// La RPC confirma y numera en una transacción; nunca se calcula el número en el navegador.
+function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaEntrega, modoIndependiente }) {
+  const [abierto, setAbierto] = useState(true);
+  const [ordenes, setOrdenes] = useState([]);
+  const [codigo, setCodigo] = useState(null);
+  const [seleccion, setSeleccion] = useState("");
+  const [entregaId, setEntregaId] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [mensaje, setMensaje] = useState("");
+  const [cargandoOrdenes, setCargandoOrdenes] = useState(false);
+
+  const recargar = async () => {
+    if (!empresaId) return;
+    setCargandoOrdenes(true);
+    try {
+      const [resOrdenes, resPrefijo] = await Promise.all([
+        supabase.from("repartos_ordenes")
+          .select("id,numero,repartidor_id,estado,confirmado_at,salida_at")
+          .eq("empresa_id", empresaId).order("numero", {ascending:false}).limit(100),
+        supabase.from("repartos_prefijos_empresa")
+          .select("codigo").eq("empresa_id",empresaId).maybeSingle(),
+      ]);
+      if (resOrdenes.error) throw resOrdenes.error;
+      if (resPrefijo.error) throw resPrefijo.error;
+      setOrdenes(resOrdenes.data || []);
+      setCodigo(resPrefijo.data?.codigo ?? null);
+    } catch (e) { setMensaje("❌ " + (e.message || "No se pudieron consultar los repartos.")); }
+    finally { setCargandoOrdenes(false); }
+  };
+  useEffect(() => { recargar(); }, [empresaId]);
+  const formato = o => `REP${codigo == null ? "???" : String(codigo).padStart(3,"0")}-${String(o.numero).padStart(6,"0")}`;
+  const orden = ordenes.find(o => o.id === seleccion);
+  
+  const incluidas = entregas.filter(e => e.reparto_orden_id === seleccion);
+  const yaSalio = Boolean(orden?.salida_at) || incluidas.some(e => Boolean(e.salida_at) || ["en_reparto","reintentar","entregado","no_entregado","devolucion_informada"].includes(e.estado));
+  const disponibles = entregas.filter(e => !e.reparto_orden_id && !e.salida_at &&
+    ["preparado","asignado"].includes(e.estado) &&
+    (!e.repartidor_id || String(e.repartidor_id) === String(orden?.repartidor_id || "")));
+  const nombreEntrega = e => [e.destinatario || (e.pedido_id ? "Entrega NVI" : "Entrega manual"),e.direccion,e.numero_remito ? `Remito ${e.numero_remito}` : ""].filter(Boolean).join(" · ");
+  const ejecutar = async (operacion, mensajeExito) => {
+    if (ocupado) return;
+    setOcupado(true); setMensaje("");
+    try {
+      const {data,error} = await operacion();
+      if (error) throw error;
+      await onCambio();
+      await recargar();
+      setMensaje(mensajeExito(data));
+      return data;
+    } catch(e) { setMensaje("❌ " + (e.message || "No se pudo completar la operación.")); }
+    finally { setOcupado(false); }
+  };
+  const crear = async () => {
+    if (!window.confirm("¿Generar un NUEVO REPARTO numerado, todavía sin chofer?")) return;
+    const data = await ejecutar(() => supabase.rpc("crear_nuevo_reparto"),
+      d => `✅ Reparto ${d?.[0]?.numero_reparto || "creado"}. Ahora podés agregar entregas y asignar chofer.`);
+    if (data?.[0]?.orden_id) setSeleccion(data[0].orden_id);
+  };
+  const agregar = async () => {
+    if (!seleccion || !entregaId) return;
+    const data = await ejecutar(() => supabase.rpc("agregar_entrega_a_reparto", {p_orden_id:seleccion,p_entrega_id:entregaId}),
+      () => "✅ Entrega agregada al reparto. El número no cambia.");
+    if (data !== undefined) setEntregaId("");
+  };
+  const asignar = async (id) => {
+    if (!seleccion) return;
+    await ejecutar(() => supabase.rpc("asignar_repartidor_a_reparto", {p_orden_id:seleccion,p_repartidor_id:id || null}),
+      () => id ? "✅ Repartidor asignado al reparto." : "✅ Reparto sin chofer asignado.");
+  };
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
+    <button type="button" onClick={() => setAbierto(x => !x)} style={{width:"100%",padding:12,border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900}}>
+      🚚 GESTIÓN DE REPARTOS {abierto ? "▲" : "▼"}
+    </button>
+    {abierto && <div style={{marginTop:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8}}>
+        <button type="button" disabled={ocupado} onClick={crear} style={{padding:13,border:0,borderRadius:8,background:"#166534",color:"white",fontWeight:900}}>🚚 NUEVO REPARTO</button>
+        <button type="button" disabled={!modoIndependiente || !seleccion || !orden || orden.estado !== "preparado" || yaSalio}
+          onClick={onNuevaEntrega} style={{padding:13,border:0,borderRadius:8,background:"#0f766e",color:"white",fontWeight:900,opacity:seleccion && orden?.estado === "preparado" && !yaSalio ? 1 : .5}}>📦 NUEVA ENTREGA</button>
+      </div>
+      <div style={{fontSize:12,color:"#475569",marginTop:8}}>{modoIndependiente ? "La entrega nueva se crea con el formulario habitual. Después elegila abajo para incorporarla al reparto." : "Para las NVI, primero prepará la entrega desde Depósito; luego incorporala a este reparto."}</div>
+      <label style={{display:"block",fontSize:13,fontWeight:800,marginTop:12}}>Elegir reparto
+        <select value={seleccion} onChange={e => {setSeleccion(e.target.value);setEntregaId("");}} style={{display:"block",width:"100%",padding:10,marginTop:5}}>
+          <option value="">Seleccionar reparto...</option>
+          {ordenes.map(o => <option key={o.id} value={o.id}>{formato(o)} · {o.estado} · {repartidores.find(r=>r.id===o.repartidor_id)?.nombre || "Sin chofer"}</option>)}
+        </select>
+      </label>
+      {cargandoOrdenes && <p style={{fontSize:12}}>Actualizando repartos...</p>}
+      {orden && <div style={{border:"1px solid #bfdbfe",background:"#eff6ff",padding:12,borderRadius:8,marginTop:12}}>
+        <strong style={{fontSize:18}}>{formato(orden)}</strong>
+        <div style={{fontSize:12,marginTop:4}}>Estado: {orden.estado} · {incluidas.length} entrega/s</div>
+        <div style={{fontWeight:800,fontSize:13,marginTop:12}}>Entregas del reparto</div>
+        {incluidas.length ? incluidas.map(e => <div key={e.id} style={{padding:"6px 0",borderBottom:"1px solid #bfdbfe",fontSize:13}}>{nombreEntrega(e)} · {e.estado}</div>) : <div style={{fontSize:12,color:"#64748b"}}>Todavía no hay entregas.</div>}
+        {orden.estado === "preparado" && !yaSalio && <>
+          <label style={{display:"block",fontSize:13,fontWeight:800,marginTop:12}}>Agregar entrega existente
+            <select value={entregaId} onChange={e=>setEntregaId(e.target.value)} style={{display:"block",width:"100%",padding:10,marginTop:5}}>
+              <option value="">Seleccionar entrega preparada...</option>
+              {disponibles.map(e => <option key={e.id} value={e.id}>{nombreEntrega(e)}</option>)}
+            </select>
+          </label>
+          <button type="button" disabled={!entregaId || ocupado} onClick={agregar} style={{padding:10,marginTop:8,border:0,borderRadius:7,background:"#2563eb",color:"white",fontWeight:900,opacity:entregaId ? 1 : .5}}>＋ AGREGAR ENTREGA</button>
+          <label style={{display:"block",fontSize:13,fontWeight:800,marginTop:12}}>Asignar repartidor
+            <select value={orden.repartidor_id || ""} disabled={ocupado} onChange={e=>asignar(e.target.value)} style={{display:"block",width:"100%",padding:10,marginTop:5}}>
+              <option value="">Sin repartidor asignado</option>
+              {repartidores.map(r=><option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}
+            </select>
+          </label>
+          <div style={{fontSize:12,color:"#475569",marginTop:7}}>Podés agregar entregas antes de la salida, incluso si el chofer ya está asignado.</div>
+        </>}
+      </div>}
+      {mensaje && <p style={{fontSize:13,fontWeight:700}}>{mensaje}</p>}
+    </div>}
   </section>;
 }
 
@@ -1101,63 +1242,8 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
   };
 
   const asignarReparto = async () => {
-    if (!pedidoActivo?.id || asignando) return;
-
-    const existentes = entregasPorPedido.get(String(pedidoActivo.id)) || [];
-    const entrega = existentes[0] || null;
-
-    if (!entrega || entrega.estado !== "preparado") {
-      alert("⚠️ Esta entrega todavía no está en estado PREPARADO.");
-      return;
-    }
-
-    if (!repartidorSeleccionado) {
-      alert("⚠️ Elegí un repartidor.");
-      return;
-    }
-
-    if (!form.fecha_programada) {
-      alert("⚠️ Elegí la fecha de reparto.");
-      return;
-    }
-
-    const rep = repartidores.find(r => String(r.id) === String(repartidorSeleccionado));
-    const nombreRep = rep?.nombre || rep?.email || "Repartidor";
-
-    const confirmar = window.confirm(
-      `¿Asignar la NVI #${pedidoActivo.numeroVisible} a ${nombreRep}?\n\n` +
-      `Fecha de reparto: ${form.fecha_programada}`
-    );
-    if (!confirmar) return;
-
-    setAsignando(true);
-    try {
-      const ahora = new Date().toISOString();
-
-      const { error } = await supabase
-        .from("repartos_entregas")
-        .update({
-          repartidor_id: repartidorSeleccionado,
-          fecha_programada: form.fecha_programada,
-          estado: "asignado",
-          asignado_at: ahora,
-          actualizado_at: ahora,
-        })
-        .eq("id", entrega.id)
-        .eq("empresa_id", empresaId);
-
-      if (error) throw error;
-
-      alert(`🚚 NVI #${pedidoActivo.numeroVisible} asignada a ${nombreRep}.`);
-      setPedidoActivo(null);
-      setBandeja("asignados");
-      await cargarDatos();
-    } catch (e) {
-      console.error("Error asignando reparto:", e);
-      alert("❌ No se pudo asignar el reparto: " + (e?.message || "error desconocido"));
-    } finally {
-      setAsignando(false);
-    }
+    alert("🚚 Primero creá un NUEVO REPARTO, agregá esta entrega y luego asigná el chofer desde GESTIÓN DE REPARTOS.");
+    setPedidoActivo(null);
   };
 
   const recibirMercaderiaDevuelta = async () => {
@@ -1341,7 +1427,8 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
 
   const actualizarEntregaManual = async (nuevoEstado, repartidorId = null) => {
     if (!entregaManualActiva || guardandoManual) return;
-    if (nuevoEstado === "asignado" && !repartidorId) { alert("Elegí un repartidor."); return; }
+    if (nuevoEstado === "asignado") { alert("🚚 Para asignar esta entrega, usá NUEVO REPARTO → AGREGAR ENTREGA → ASIGNAR REPARTIDOR."); return; }
+    if (entregaManualActiva.reparto_orden_id) { alert("Esta entrega pertenece a un reparto. Modificala desde GESTIÓN DE REPARTOS."); return; }
     setGuardandoManual(true);
     try {
       const ahora = new Date().toISOString();
@@ -1361,7 +1448,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
     const e = entregaManualActiva;
     if (!e || guardandoManual || !empresaId) return;
     const permitidos = ["pendiente_preparacion", "preparado"];
-    if (!permitidos.includes(e.estado) || e.repartidor_id || e.pedido_id) {
+    if (!permitidos.includes(e.estado) || e.repartidor_id || e.pedido_id || e.reparto_orden_id) {
       alert("Esta entrega no se puede eliminar desde aquí: ya está vinculada a un repartidor o a Ventas.");
       return;
     }
@@ -1396,6 +1483,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
   const desasignarManual = async () => {
     const e = entregaManualActiva;
     if (!e || e.estado !== "asignado" || !e.repartidor_id || guardandoManual) return;
+    if (e.reparto_orden_id) { alert("Esta entrega pertenece a un reparto numerado. No se puede desasignar por separado."); return; }
     if (!window.confirm(`¿DESASIGNAR la entrega de ${e.destinatario}?\n\nVolverá a PREPARADO y quedará sin repartidor.`)) return;
     setGuardandoManual(true);
     try {
@@ -1561,6 +1649,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
         </header>
         <main style={{ maxWidth: 1000, margin: "auto", padding: 14 }}>
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
+          <GestionRepartos modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
           <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
             <strong>Gestión de entregas</strong>
@@ -2022,6 +2111,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
 
       <main style={{ maxWidth: "1000px", margin: "0 auto", padding: "14px" }}>
           <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
+          <GestionRepartos modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
           <RutasEnviadasSupervisor empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
           {[

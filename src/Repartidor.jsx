@@ -136,6 +136,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   const arrastreTactil = React.useRef(null);
   const [resumenSalida, setResumenSalida] = useState(null);
   const [mapaAsignadasAbierto, setMapaAsignadasAbierto] = useState(false);
+  const [historialAbierto, setHistorialAbierto] = useState(false);
   const [chatAbierto, setChatAbierto] = useState(false);
   const [chatContactos, setChatContactos] = useState([]);
   const [chatDestino, setChatDestino] = useState("");
@@ -231,6 +232,21 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         });
       }
 
+      const ordenIds = [...new Set((rows || []).map(e => e.reparto_orden_id).filter(Boolean))];
+      let numerosOrden = {};
+      if (ordenIds.length) {
+        const [ordenesRes, prefijoRes] = await Promise.all([
+          supabase.from("repartos_ordenes").select("id,numero,estado,repartidor_id").eq("empresa_id", p.empresa_id).in("id", ordenIds),
+          supabase.from("repartos_prefijos_empresa").select("codigo").eq("empresa_id", p.empresa_id).maybeSingle(),
+        ]);
+        if (ordenesRes.error) throw ordenesRes.error;
+        if (prefijoRes.error) throw prefijoRes.error;
+        (ordenesRes.data || []).forEach(o => { numerosOrden[o.id] = {
+          numero: `REP${String(prefijoRes.data?.codigo ?? "???").padStart(3, "0")}-${String(o.numero).padStart(6, "0")}`,
+          estado: o.estado, repartidor_id: o.repartidor_id
+        }; });
+      }
+
       const consolidadas = (rows || []).map(e => {
         const esManual = !e.pedido_id;
         const ped = pedidos[String(e.pedido_id)] || {};
@@ -238,6 +254,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         const direccionManual = [e.direccion, e.localidad, e.partido, e.provincia].filter(Boolean).join(", ");
         return {
           ...e,
+          ordenReparto: numerosOrden[e.reparto_orden_id] || null,
           numeroVisible: esManual ? "" : String(ped.numero_pedido || "").padStart(6, "0"),
           cliente: esManual ? (e.destinatario || "Destinatario") : (ped.comercio_nombre || `Comercio #${ped.comercio_id || ""}`),
           total: esManual ? null : Number(ped.total || 0),
@@ -497,9 +514,27 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       return ta - tb;
     });
 
-  const entregasOrdenadasPantalla = jornadaActiva
-    ? [...pendientesOrdenadas, ...otrasPendientes, ...asignadasRecibidas, ...finalizadas]
-    : [...asignadasRecibidas, ...pendientesOrdenadas, ...otrasPendientes, ...finalizadas];
+  // Reparto actual: agrupa las entregas de la orden numerada que está en curso.
+  // El historial queda separado, incluso cuando una entrega antigua comparte domicilio.
+  const ordenActualId = entregas.find(e => e.reparto_orden_id &&
+    e.ordenReparto?.estado === "en_reparto")?.reparto_orden_id ||
+    (jornadaActiva ? entregas.find(e => e.reparto_orden_id &&
+      ["en_reparto", "reintentar", "recibido"].includes(e.estado))?.reparto_orden_id : null);
+  const esEntregaActual = e => ordenActualId
+    ? e.reparto_orden_id === ordenActualId
+    : !e.reparto_orden_id && !["entregado", "no_entregado", "devolucion_informada"].includes(e.estado);
+  const entregasActualesPantalla = [...pendientesOrdenadas, ...otrasPendientes,
+    ...asignadasRecibidas, ...finalizadas].filter(esEntregaActual);
+  const entregasAnterioresPantalla = entregas.filter(e =>
+    !esEntregaActual(e) && ["entregado", "no_entregado", "devolucion_informada"].includes(e.estado)
+  ).sort((a,b) => new Date(b.entregado_at || b.actualizado_at || b.creado_at || 0).getTime() -
+                  new Date(a.entregado_at || a.actualizado_at || a.creado_at || 0).getTime());
+  const fechaEntregaHistorial = e => {
+    const valor = e.entregado_at || e.actualizado_at || e.creado_at;
+    if (!valor) return "Fecha no registrada";
+    const fecha = new Date(valor);
+    return Number.isNaN(fecha.getTime()) ? "Fecha no registrada" : fecha.toLocaleDateString("es-AR", {day:"2-digit",month:"2-digit",year:"numeric"});
+  };
 
   const mapaDuranteRuta = [...pendientesOrdenadas, ...otrasPendientes]
     .map((e, idx) => ({ ...e, numeroParada: idx + 1 }))
@@ -548,9 +583,41 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
     setProcesandoJornada(true);
     try {
+      const ids = recibidasOrdenadas.map(e => e.id);
+      if (!ids.length) throw new Error("No hay entregas recibidas para iniciar.");
+      const { data: actuales, error: errorActuales } = await supabase.from("repartos_entregas")
+        .select("id,reparto_orden_id,estado,repartidor_id,salida_at")
+        .eq("empresa_id", perfil.empresa_id).in("id", ids);
+      if (errorActuales) throw errorActuales;
+      const usuarioId = sesionProp?.user?.id || perfil?.id;
+      if (actuales?.length !== ids.length || actuales.some(e => e.estado !== "recibido" ||
+          !e.reparto_orden_id || String(e.repartidor_id) !== String(usuarioId) || e.salida_at))
+        throw new Error("Hay entregas sin reparto numerado, sin recibir o que cambiaron de asignación. Actualizá la pantalla.");
+      const ordenesIds = [...new Set(actuales.map(e => e.reparto_orden_id))];
+      if (ordenesIds.length !== 1) throw new Error("Cada salida debe corresponder a un solo número de reparto.");
+      const { data: orden, error: errorOrden } = await supabase.from("repartos_ordenes")
+        .select("id,estado,repartidor_id,salida_at")
+        .eq("empresa_id", perfil.empresa_id).eq("id", ordenesIds[0]).maybeSingle();
+      if (errorOrden) throw errorOrden;
+      if (!orden || String(orden.repartidor_id) !== String(usuarioId) || orden.estado !== "preparado" || orden.salida_at)
+        throw new Error("El reparto no está autorizado para esta salida.");
       pedirUbicacionAhora();
       const ahora = new Date().toISOString();
-      const ids = recibidasOrdenadas.map(e => e.id);
+
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({
+          estado: "en_reparto",
+          salida_at: ahora,
+          actualizado_at: ahora,
+        })
+        .in("id", ids)
+        .eq("empresa_id", perfil.empresa_id)
+        .eq("reparto_orden_id", ordenesIds[0])
+        .eq("repartidor_id", usuarioId)
+        .eq("estado", "recibido");
+
+      if (error) throw error;
 
       const resumen = {
         asignadasTotal: asignadas.length + recibidas.length,
@@ -560,17 +627,6 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       };
       setResumenSalida(resumen);
       try { localStorage.setItem(claveResumenSalida(), JSON.stringify(resumen)); } catch {}
-
-      const { error } = await supabase
-        .from("repartos_entregas")
-        .update({
-          estado: "en_reparto",
-          salida_at: ahora,
-          actualizado_at: ahora,
-        })
-        .in("id", ids);
-
-      if (error) throw error;
 
       setJornadaActiva(true);
       await cargar();
@@ -590,7 +646,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     const mensaje = pendientes.length
       ? `¿FINALIZAR REPARTO AHORA?\n\nQuedan ${pendientes.length} entrega/s pendientes.` +
         (volver ? `\n🕐 ${volver} marcada/s para volver.` : "") +
-        `\n\nEsas entregas volverán a quedar ASIGNADAS a este repartidor para que Despacho pueda reprogramarlas o reasignarlas.`
+        `\n\nEsas entregas volverán a quedar ASIGNADAS a este repartidor para que el Supervisor de Repartos pueda reprogramarlas.`
       : "¿FINALIZAR REPARTO?\n\nLa salida quedará cerrada.";
 
     const ok = window.confirm(mensaje);
@@ -628,6 +684,9 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   };
 
   const marcarRecibida = async (entrega) => {
+    if (!entrega.reparto_orden_id || !entrega.ordenReparto) {
+      alert("⚠️ El Supervisor todavía no incorporó esta entrega a un reparto numerado."); return;
+    }
     if (jornadaActiva) {
       alert("⚠️ El reparto ya comenzó. La carga se confirma antes de salir.");
       return;
@@ -642,7 +701,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       const { error } = await supabase
         .from("repartos_entregas")
         .update({ estado: "recibido", actualizado_at: ahora })
-        .eq("id", entrega.id);
+        .eq("id", entrega.id).eq("empresa_id", perfil.empresa_id).eq("reparto_orden_id", entrega.reparto_orden_id);
       if (error) throw error;
       setActiva(null);
       await cargar();
@@ -1018,7 +1077,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         <header style={{background:"#0f172a",color:"#fff",padding:"12px 14px"}}>
           <div style={{maxWidth:"760px",margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div>
-              <div style={{fontSize:"11px",color:"#93c5fd",fontWeight:"900"}}>🚚 REPARTO</div>
+              <div style={{fontSize:"15px",color:"#93c5fd",fontWeight:"900"}}>🚚 REPARTO</div>
               <div style={{fontSize:"19px",fontWeight:"900"}}>{tituloEntrega(activa)}</div>
             </div>
             <button onClick={()=>setActiva(null)} style={{...boton,background:"#1e293b",color:"#fff",border:"1px solid #64748b"}}>← VOLVER</button>
@@ -1028,10 +1087,10 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
             <div style={{fontSize:"21px",fontWeight:"950"}}>{activa.cliente}</div>
             <div style={{marginTop:"6px",color:"#475569"}}>📍 {activa.direccion || "Sin dirección cargada"}</div>
-            {activa.contacto && <div style={{marginTop:"5px",fontSize:"13px"}}>👤 {activa.contacto}</div>}
-            {activa.telefono && <div style={{marginTop:"5px",fontSize:"13px"}}>☎️ {activa.telefono}</div>}
-            <div style={{marginTop:"8px",fontSize:"13px",color:"#475569"}}>
-              📦 {activa.bultos ?? "—"} bulto/s
+            {activa.contacto && <div style={{marginTop:"5px",fontSize:"16px"}}>👤 {activa.contacto}</div>}
+            {activa.telefono && <div style={{marginTop:"5px",fontSize:"16px"}}>☎️ {activa.telefono}</div>}
+            <div style={{marginTop:"8px",fontSize:"16px",color:"#475569"}}>
+              🚚 {activa.ordenReparto?.numero || "Sin reparto numerado"} · 📦 {activa.bultos ?? "—"} bulto/s
               {activa.numero_remito ? ` · Remito ${activa.numero_remito}` : ""}
               {activa.numero_factura ? ` · Factura ${activa.numero_factura}` : ""}
             </div>
@@ -1039,12 +1098,12 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
           {(activa.items || []).length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
-            <div style={{fontSize:"13px",fontWeight:"950",marginBottom:"9px"}}>📦 DETALLE DE MERCADERÍA</div>
+            <div style={{fontSize:"16px",fontWeight:"950",marginBottom:"9px"}}>📦 DETALLE DE MERCADERÍA</div>
             {(activa.items || []).map((it,i)=>(
               <div key={i} style={{display:"flex",justifyContent:"space-between",gap:"10px",padding:"8px 0",borderBottom:"1px solid #e2e8f0"}}>
                 <div>
                   <div style={{fontWeight:"800"}}>{it.descripcion}</div>
-                  <div style={{fontSize:"11px",color:"#64748b"}}>
+                  <div style={{fontSize:"15px",color:"#334155"}}>
                     {[it.codigo,it.color && `Color ${it.color}`,it.talle && `Talle ${it.talle}`].filter(Boolean).join(" · ")}
                   </div>
                 </div>
@@ -1056,35 +1115,35 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
           <section style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
             <div style={{fontWeight:"900",fontSize:"15px",marginBottom:"9px"}}>📝 NOTAS DE ESTA ENTREGA</div>
-            <div style={{fontSize:"12px",color:"#64748b",marginBottom:"10px"}}>
+            <div style={{fontSize:"16px",color:"#334155",marginBottom:"10px"}}>
               Historial compartido con el Supervisor de Repartos. No es RutaChat.
             </div>
             {cargandoNotas && notasEntrega.length === 0 && (
-              <div style={{fontSize:"12px",color:"#64748b",marginBottom:"8px"}}>Cargando notas...</div>
+              <div style={{fontSize:"16px",color:"#334155",marginBottom:"8px"}}>Cargando notas...</div>
             )}
             {!cargandoNotas && notasEntrega.length === 0 && (
-              <div style={{fontSize:"12px",color:"#64748b",marginBottom:"8px"}}>Todavía no hay notas en esta entrega.</div>
+              <div style={{fontSize:"16px",color:"#334155",marginBottom:"8px"}}>Todavía no hay notas en esta entrega.</div>
             )}
             <div style={{display:"grid",gap:"8px",maxHeight:"250px",overflowY:"auto",marginBottom:"10px"}}>
               {notasEntrega.map(n => {
                 const mia = n.autor_id === (sesionProp?.user?.id || perfil?.id);
                 return (
                   <div key={n.id} style={{background:mia?"#dcfce7":"#eff6ff",borderRadius:"9px",padding:"10px",overflowWrap:"anywhere"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:"8px",fontSize:"11px",fontWeight:"900"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:"8px",fontSize:"15px",fontWeight:"900"}}>
                       <span>{mia ? "🚚 Repartidor (vos)" : "👔 Supervisor"}</span>
-                      <span style={{color:"#64748b",fontWeight:"500"}}>
+                      <span style={{color:"#334155",fontWeight:"500"}}>
                         {new Date(n.creado_at).toLocaleString("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
                       </span>
                     </div>
-                    <div style={{marginTop:"5px",fontSize:"13px",whiteSpace:"pre-wrap"}}>{n.contenido}</div>
+                    <div style={{marginTop:"5px",fontSize:"16px",whiteSpace:"pre-wrap"}}>{n.contenido}</div>
                   </div>
                 );
               })}
             </div>
             <textarea value={textoNotaEntrega} onChange={e=>setTextoNotaEntrega(e.target.value)}
               maxLength={2000} rows={3} placeholder="Escribí una nota sobre esta entrega..."
-              style={{width:"100%",boxSizing:"border-box",padding:"10px",border:"1px solid #cbd5e1",borderRadius:"9px",fontFamily:"inherit",fontSize:"14px"}} />
-            {errorNotas && <div style={{color:"#b91c1c",fontSize:"12px",marginTop:"6px"}}>⚠️ {errorNotas}</div>}
+              style={{width:"100%",boxSizing:"border-box",padding:"10px",border:"1px solid #cbd5e1",borderRadius:"9px",fontFamily:"inherit",fontSize:"16px"}} />
+            {errorNotas && <div style={{color:"#b91c1c",fontSize:"16px",marginTop:"6px"}}>⚠️ {errorNotas}</div>}
             <button type="button" onClick={guardarNotaEntrega}
               disabled={!textoNotaEntrega.trim() || guardandoNota}
               style={{...boton,width:"100%",marginTop:"8px",background:"#0f766e",color:"#fff",opacity:(!textoNotaEntrega.trim()||guardandoNota)?0.55:1}}>
@@ -1097,7 +1156,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#1e3a8a",textAlign:"center",marginBottom:"9px"}}>
                 📋 ENTREGA ASIGNADA · Confirmá cuando este pedido esté cargado en el vehículo.
               </div>
-              <button onClick={()=>marcarRecibida(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"14px"}}>
+              <button onClick={()=>marcarRecibida(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"16px"}}>
                 📦 MARCAR COMO RECIBIDA
               </button>
             </div>
@@ -1106,8 +1165,8 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               <div style={{background:"#ecfeff",border:"1px solid #67e8f9",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#155e75",textAlign:"center",marginBottom:"9px"}}>
                 📦 RECIBIDA · Este pedido está cargado y listo para entrar en la ruta.
               </div>
-              <button onClick={()=>devolverAAsignada(activa)} style={{...boton,width:"100%",background:"#64748b",color:"#fff",fontSize:"13px"}}>
-                ↩️ DEVOLVER A ASIGNADAS
+              <button onClick={()=>devolverAAsignada(activa)} style={{...boton,width:"100%",background:"#64748b",color:"#fff",fontSize:"16px"}}>
+                ❌ RECHAZAR ESTA ENTREGA
               </button>
             </div>
           ) : activa.estado === "entregado" ? (
@@ -1118,15 +1177,15 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             <div>
               <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#991b1b",textAlign:"center",marginBottom:"9px"}}>
                 ❌ NO ENTREGADA
-                {activa.motivo_no_entrega ? <div style={{fontSize:"12px",fontWeight:"700",marginTop:"5px"}}>{activa.motivo_no_entrega}</div> : null}
+                {activa.motivo_no_entrega ? <div style={{fontSize:"16px",fontWeight:"700",marginTop:"5px"}}>{activa.motivo_no_entrega}</div> : null}
               </div>
               {!jornadaActiva && (
-                <button onClick={()=>informarDevolucion(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"14px"}}>
+                <button onClick={()=>informarDevolucion(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"16px"}}>
                   📦 DEVOLVÍ MERCADERÍA NO ENTREGADA
                 </button>
               )}
               {jornadaActiva && (
-                <div style={{fontSize:"11px",color:"#64748b",textAlign:"center"}}>
+                <div style={{fontSize:"15px",color:"#334155",textAlign:"center"}}>
                   Finalizá el reparto cuando regreses al depósito para informar la devolución.
                 </div>
               )}
@@ -1137,19 +1196,19 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
           ) : activa.estado === "devolucion_informada" ? (
             <div style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#9a3412",textAlign:"center"}}>
               📦 DEVOLUCIÓN INFORMADA
-              <div style={{fontSize:"12px",fontWeight:"700",marginTop:"5px"}}>Pendiente de recepción por Depósito.</div>
+              <div style={{fontSize:"16px",fontWeight:"700",marginTop:"5px"}}>Pendiente de recepción por Depósito.</div>
             </div>
           ) : activa.estado === "reintentar" ? (
             <div>
               <div style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#9a3412",textAlign:"center",marginBottom:"9px"}}>
                 🕐 PASAR MÁS TARDE
-                {activa.observaciones ? <div style={{fontSize:"12px",fontWeight:"700",marginTop:"5px"}}>{activa.observaciones}</div> : null}
+                {activa.observaciones ? <div style={{fontSize:"16px",fontWeight:"700",marginTop:"5px"}}>{activa.observaciones}</div> : null}
               </div>
               <div style={{display:"grid",gap:"8px"}}>
-                <button onClick={()=>irAlProximoDestino(activa)} style={{...boton,width:"100%",background:"#2563eb",color:"#fff",fontSize:"14px"}}>
+                <button onClick={()=>irAlProximoDestino(activa)} style={{...boton,width:"100%",background:"#2563eb",color:"#fff",fontSize:"16px"}}>
                   🚚 IR AL PRÓXIMO DESTINO
                 </button>
-                <button onClick={()=>retomarEntrega(activa)} style={{...boton,width:"100%",background:"#64748b",color:"#fff",fontSize:"14px"}}>
+                <button onClick={()=>retomarEntrega(activa)} style={{...boton,width:"100%",background:"#64748b",color:"#fff",fontSize:"16px"}}>
                   🔄 REINTENTAR ENTREGA
                 </button>
               </div>
@@ -1161,20 +1220,24 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               </div>
 
               <div style={{display:"grid",gap:"8px"}}>
-                <button onClick={()=>marcarEntregada(activa)} style={{...boton,width:"100%",background:"#16a34a",color:"#fff",fontSize:"14px"}}>
+                <button onClick={()=>marcarEntregada(activa)} style={{...boton,width:"100%",background:"#16a34a",color:"#fff",fontSize:"16px"}}>
                   ✅ ENTREGADA
                 </button>
 
-                <button onClick={()=>pasarMasTarde(activa)} style={{...boton,width:"100%",background:"#f59e0b",color:"#fff",fontSize:"14px"}}>
+                <button onClick={()=>pasarMasTarde(activa)} style={{...boton,width:"100%",background:"#f59e0b",color:"#fff",fontSize:"16px"}}>
                   🕐 PASAR MÁS TARDE
                 </button>
 
-                <button onClick={()=>marcarNoEntregada(activa)} style={{...boton,width:"100%",background:"#dc2626",color:"#fff",fontSize:"14px"}}>
+                <button onClick={()=>marcarNoEntregada(activa)} style={{...boton,width:"100%",background:"#dc2626",color:"#fff",fontSize:"16px"}}>
                   ❌ NO ENTREGADA
                 </button>
               </div>
             </div>
           )}
+          <button type="button" onClick={() => setActiva(null)}
+            style={{...boton,width:"100%",minHeight:"62px",marginTop:"22px",marginBottom:"24px",background:"#1d4ed8",color:"#fff",fontSize:"18px",boxShadow:"0 3px 9px #0002"}}>
+            ⬅ VOLVER A MIS ENTREGAS
+          </button>
         </main>
       </div>
     );
@@ -1186,7 +1249,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         <div style={{maxWidth:"760px",margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
             <div style={{fontSize:"20px",fontWeight:"950"}}>🚚 RutaComercio · Repartos</div>
-            <div style={{fontSize:"11px",color:"#94a3b8",marginTop:"2px"}}>{perfil?.nombre || "Repartidor"} · Mis entregas</div>
+            <div style={{fontSize:"15px",color:"#334155",marginTop:"2px"}}>{perfil?.nombre || "Repartidor"} · Mis entregas</div>
           </div>
           <div style={{display:"flex",gap:"6px"}}>
             {onVolver && <button onClick={onVolver} style={{...boton,background:"#1e293b",color:"#fff",border:"1px solid #64748b"}}>← VOLVER</button>}
@@ -1201,31 +1264,31 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             <button type="button"
               onClick={jornadaActiva ? finalizarJornada : comenzarJornada}
               disabled={procesandoJornada || (!jornadaActiva && recibidas.length===0)}
-              style={{...boton,width:"100%",padding:"8px 5px",fontSize:"12px",
+              style={{...boton,width:"100%",padding:"8px 5px",fontSize:"16px",
                 background:procesandoJornada||(!jornadaActiva&&recibidas.length===0)?"#94a3b8":jornadaActiva?"#0f172a":"#2563eb",
                 color:"#fff"}}>
               {procesandoJornada?"⏳ PROCESANDO":jornadaActiva?"🏁 FINALIZAR REPARTO":"🚚 COMENZAR REPARTO"}
             </button>
             <button type="button" onClick={()=>setChatAbierto(v=>!v)}
-              style={{...boton,width:"100%",padding:"8px 5px",fontSize:"12px",background:"#166534",color:"#fff"}}>
+              style={{...boton,width:"100%",padding:"8px 5px",fontSize:"16px",background:"#166534",color:"#fff"}}>
               💬 RUTACHAT {chatAbierto?"▲":"▼"}
             </button>
           </div>
           {chatAbierto && (
             <div style={{paddingTop:"10px"}}>
-              <div style={{fontSize:"12px",fontWeight:"800",marginBottom:"6px"}}>Mensajes al Supervisor</div>
+              <div style={{fontSize:"16px",fontWeight:"800",marginBottom:"6px"}}>Mensajes al Supervisor</div>
               <select value={chatDestino} onChange={e=>setChatDestino(e.target.value)}
                 style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1px solid #cbd5e1"}}>
                 {!chatContactos.length && <option value="">No hay supervisores disponibles</option>}
                 {chatContactos.map(c=><option key={c.id} value={c.id}>{c.nombre||"Supervisor"}</option>)}
               </select>
-              {chatError && <div style={{color:"#b91c1c",fontSize:"12px",marginTop:"8px"}}>⚠️ {chatError}</div>}
+              {chatError && <div style={{color:"#b91c1c",fontSize:"16px",marginTop:"8px"}}>⚠️ {chatError}</div>}
               <div ref={fondoChatRef} style={{maxHeight:"230px",overflowY:"auto",background:"#f8fafc",borderRadius:"8px",padding:"8px",marginTop:"8px"}}>
-                {!conversacionChat.length && <div style={{fontSize:"12px",color:"#64748b"}}>Todavía no hay mensajes.</div>}
+                {!conversacionChat.length && <div style={{fontSize:"16px",color:"#334155"}}>Todavía no hay mensajes.</div>}
                 {conversacionChat.map(m=><div key={m.id} style={{marginBottom:"8px",textAlign:m.remitente_id===miIdChat?"right":"left"}}>
-                  <div style={{display:"inline-block",maxWidth:"90%",background:m.remitente_id===miIdChat?"#dcfce7":"#e2e8f0",padding:"8px",borderRadius:"8px",fontSize:"12px",overflowWrap:"anywhere"}}>
+                  <div style={{display:"inline-block",maxWidth:"90%",background:m.remitente_id===miIdChat?"#dcfce7":"#e2e8f0",padding:"8px",borderRadius:"8px",fontSize:"16px",overflowWrap:"anywhere"}}>
                     {m.contenido}
-                    <div style={{fontSize:"10px",color:"#64748b",marginTop:"3px"}}>{new Date(m.creado_at).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</div>
+                    <div style={{fontSize:"10px",color:"#334155",marginTop:"3px"}}>{new Date(m.creado_at).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</div>
                   </div>
                 </div>)}
               </div>
@@ -1240,7 +1303,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:"8px",marginBottom:"12px"}}>
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
-            <div style={{fontSize:"10px",fontWeight:"900",color:"#64748b"}}>ASIGNADAS</div>
+            <div style={{fontSize:"10px",fontWeight:"900",color:"#334155"}}>ASIGNADAS</div>
             <div style={{fontSize:"25px",fontWeight:"950"}}>{asignadasMostradas}</div>
           </div>
           <div style={{background:"#ecfeff",border:"1px solid #67e8f9",borderRadius:"10px",padding:"11px",textAlign:"center"}}>
@@ -1267,7 +1330,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             </button>
             {mapaAsignadasAbierto && (
               <div style={{marginTop:"10px"}}>
-                <div style={{fontSize:"11px",color:"#475569",marginBottom:"8px"}}>
+                <div style={{fontSize:"15px",color:"#475569",marginBottom:"8px"}}>
                   Vista previa de {asignadas.length} entrega/s asignada/s. No inicia el reparto ni modifica el orden.
                 </div>
                 {destinosAsignados.length > 0 ? (
@@ -1290,13 +1353,13 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                       </MapContainer>
                     </div>
                     {destinosAsignados.length < asignadas.length && (
-                      <div style={{fontSize:"11px",color:"#92400e",marginTop:"8px"}}>
+                      <div style={{fontSize:"15px",color:"#92400e",marginTop:"8px"}}>
                         ⚠️ {asignadas.length - destinosAsignados.length} entrega/s sin coordenadas no aparecen en el mapa.
                       </div>
                     )}
                   </>
                 ) : (
-                  <div style={{padding:"12px",background:"#fff7ed",borderRadius:"9px",fontSize:"12px"}}>
+                  <div style={{padding:"12px",background:"#fff7ed",borderRadius:"9px",fontSize:"16px"}}>
                     Las entregas asignadas no tienen coordenadas guardadas. Consultá al Supervisor para corregir la ubicación.
                   </div>
                 )}
@@ -1307,10 +1370,10 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
         {!cargando && !error && !jornadaActiva && asignadas.length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
-            <button type="button" onClick={() => setOrganizarAsignadasAbierto(v => !v)} style={{width:"100%",textAlign:"left",background:"#f1f5f9",border:"1px solid #cbd5e1",borderRadius:"8px",padding:"11px",fontSize:"13px",fontWeight:"950",cursor:"pointer"}}>🧭 ORGANIZAR MI RUTA {organizarAsignadasAbierto ? "▲" : "▼"}</button>
+            <button type="button" onClick={() => setOrganizarAsignadasAbierto(v => !v)} style={{width:"100%",textAlign:"left",background:"#f1f5f9",border:"1px solid #cbd5e1",borderRadius:"8px",padding:"11px",fontSize:"16px",fontWeight:"950",cursor:"pointer"}}>🧭 ORGANIZAR MI RUTA {organizarAsignadasAbierto ? "▲" : "▼"}</button>
             {organizarAsignadasAbierto && (<>
 
-            <div style={{fontSize:"11px",color:"#64748b",marginBottom:"9px"}}>
+            <div style={{fontSize:"15px",color:"#334155",marginBottom:"9px"}}>
               Arrastrá los destinos desde ☰ o usá las flechas. El mapa mostrará los números en ese orden.
               Esto no cambia las asignaciones del Supervisor.
             </div>
@@ -1323,11 +1386,11 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                   onDragEnd={()=>setArrastrandoId(null)}
                   style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px",border:"1px solid #e2e8f0",borderRadius:"8px",
                     cursor:"grab",background:arrastrandoId===e.id?"#dbeafe":"#fff"}}>
-                  <span title="Arrastrar destino" onPointerDown={ev=>iniciarArrastreTactil(ev,e.id)} onPointerUp={terminarArrastreTactil} onPointerCancel={cancelarArrastreTactil} style={{fontSize:"20px",color:"#64748b",cursor:"grab",touchAction:"none",userSelect:"none",padding:"8px 3px"}}>☰</span>
+                  <span title="Arrastrar destino" onPointerDown={ev=>iniciarArrastreTactil(ev,e.id)} onPointerUp={terminarArrastreTactil} onPointerCancel={cancelarArrastreTactil} style={{fontSize:"20px",color:"#334155",cursor:"grab",touchAction:"none",userSelect:"none",padding:"8px 3px"}}>☰</span>
                   <strong style={{minWidth:"22px"}}>{idx+1}</strong>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:"12px",fontWeight:"800"}}>{e.cliente}</div>
-                    <div style={{fontSize:"10px",color:"#64748b"}}>{e.direccion}</div>
+                    <div style={{fontSize:"16px",fontWeight:"800"}}>{e.cliente}</div>
+                    <div style={{fontSize:"10px",color:"#334155"}}>{e.direccion}</div>
                   </div>
                   <button type="button" disabled={idx===0} onClick={()=>moverEnRuta(e.id,asignadasOrdenadas[idx-1].id)}
                     style={{...boton,minHeight:"34px",background:"#e2e8f0",opacity:idx===0?.4:1}}>↑</button>
@@ -1340,7 +1403,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               style={{...boton,width:"100%",marginTop:"10px",background:rutaGuardada?"#166534":"#2563eb",color:"#fff",opacity:guardandoRuta?.65:1}}>
               {guardandoRuta ? "⏳ ENVIANDO RUTA..." : rutaGuardada ? "✅ RUTA ENVIADA" : "💾 GUARDAR Y ENVIAR RUTA"}
             </button>
-            <div style={{fontSize:"10px",color:"#64748b",marginTop:"6px",textAlign:"center"}}>
+            <div style={{fontSize:"10px",color:"#334155",marginTop:"6px",textAlign:"center"}}>
               Se guarda en este dispositivo y se comparte con el Supervisor. No modifica las asignaciones.
             </div>
             </>)}
@@ -1349,10 +1412,10 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
         {!cargando && !error && !jornadaActiva && recibidas.length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
-            <button type="button" onClick={() => setOrganizarRecibidasAbierto(v => !v)} style={{width:"100%",textAlign:"left",background:"#f1f5f9",border:"1px solid #cbd5e1",borderRadius:"8px",padding:"11px",fontSize:"13px",fontWeight:"950",cursor:"pointer"}}>🗺️ ORGANIZAR RUTA {organizarRecibidasAbierto ? "▲" : "▼"}</button>
+            <button type="button" onClick={() => setOrganizarRecibidasAbierto(v => !v)} style={{width:"100%",textAlign:"left",background:"#f1f5f9",border:"1px solid #cbd5e1",borderRadius:"8px",padding:"11px",fontSize:"16px",fontWeight:"950",cursor:"pointer"}}>🗺️ ORGANIZAR RUTA {organizarRecibidasAbierto ? "▲" : "▼"}</button>
             {organizarRecibidasAbierto && (<>
 
-            <div style={{fontSize:"10px",color:"#64748b",marginBottom:"10px"}}>
+            <div style={{fontSize:"10px",color:"#334155",marginBottom:"10px"}}>
               Arrastrá las entregas para definir el orden del recorrido.
             </div>
 
@@ -1382,10 +1445,10 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                   }}
                 >
                   <div style={{fontSize:"18px",fontWeight:"950",textAlign:"center"}}>{idx+1}</div>
-                  <div onPointerDown={ev=>iniciarArrastreTactil(ev,e.id)} onPointerUp={terminarArrastreTactil} onPointerCancel={cancelarArrastreTactil} style={{fontSize:"18px",color:"#64748b",textAlign:"center",touchAction:"none",userSelect:"none",padding:"8px 0",cursor:"grab"}}>☰</div>
+                  <div onPointerDown={ev=>iniciarArrastreTactil(ev,e.id)} onPointerUp={terminarArrastreTactil} onPointerCancel={cancelarArrastreTactil} style={{fontSize:"18px",color:"#334155",textAlign:"center",touchAction:"none",userSelect:"none",padding:"8px 0",cursor:"grab"}}>☰</div>
                   <div>
-                    <div style={{fontSize:"12px",fontWeight:"900"}}>{tituloEntrega(e)} · {e.cliente}</div>
-                    <div style={{fontSize:"10px",color:"#64748b",marginTop:"3px"}}>📍 {e.direccion || "Sin dirección"}</div>
+                    <div style={{fontSize:"16px",fontWeight:"900"}}>{tituloEntrega(e)} · {e.cliente}</div>
+                    <div style={{fontSize:"10px",color:"#334155",marginTop:"3px"}}>📍 {e.direccion || "Sin dirección"}</div>
                   </div>
                   <div style={{display:"flex",gap:"4px",justifyContent:"flex-end"}}>
                     <button
@@ -1426,7 +1489,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               style={{...boton,width:"100%",marginTop:"10px",background:rutaGuardada?"#166534":"#2563eb",color:"#fff",opacity:guardandoRuta?.65:1}}>
               {guardandoRuta ? "⏳ ENVIANDO RUTA..." : rutaGuardada ? "✅ RUTA ENVIADA" : "💾 GUARDAR Y ENVIAR RUTA"}
             </button>
-            <div style={{fontSize:"10px",color:"#64748b",marginTop:"6px",textAlign:"center"}}>
+            <div style={{fontSize:"10px",color:"#334155",marginTop:"6px",textAlign:"center"}}>
               Se comparte el orden de las entregas recibidas con el Supervisor de Repartos.
             </div>
             </>)}
@@ -1435,7 +1498,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
         {!cargando && !error && !jornadaActiva && recibidas.length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
-            <div style={{fontSize:"13px",fontWeight:"950",marginBottom:"8px"}}>📍 MAPA DE LA RUTA</div>
+            <div style={{fontSize:"16px",fontWeight:"950",marginBottom:"8px"}}>📍 MAPA DE LA RUTA</div>
 
             {paradasConCoordenadas.length > 0 ? (
               <>
@@ -1463,8 +1526,8 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                         <Popup>
                           <div style={{fontFamily:"Arial,sans-serif"}}>
                             <div style={{fontWeight:"900"}}>Parada {e.numeroParada} · {e.cliente}</div>
-                            <div style={{fontSize:"12px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
-                            <div style={{fontSize:"12px",marginTop:"4px"}}>{e.direccion}</div>
+                            <div style={{fontSize:"16px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
+                            <div style={{fontSize:"16px",marginTop:"4px"}}>{e.direccion}</div>
                           </div>
                         </Popup>
                       </Marker>
@@ -1478,7 +1541,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                 )}
               </>
             ) : (
-              <div style={{padding:"14px",background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"9px",fontSize:"12px",color:"#9a3412"}}>
+              <div style={{padding:"14px",background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"9px",fontSize:"16px",color:"#9a3412"}}>
                 ⚠️ Las entregas recibidas todavía no tienen coordenadas guardadas en sus comercios.
               </div>
             )}
@@ -1487,7 +1550,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
         {!cargando && !error && jornadaActiva && mapaDuranteRuta.length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
-            <div style={{fontSize:"13px",fontWeight:"950",marginBottom:"8px"}}>📍 RUTA PENDIENTE</div>
+            <div style={{fontSize:"16px",fontWeight:"950",marginBottom:"8px"}}>📍 RUTA PENDIENTE</div>
             <div style={{height:"320px",borderRadius:"10px",overflow:"hidden",border:"1px solid #cbd5e1"}}>
               <MapContainer
                 center={[mapaDuranteRuta[0].latitud, mapaDuranteRuta[0].longitud]}
@@ -1512,8 +1575,8 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                     <Popup>
                       <div style={{fontFamily:"Arial,sans-serif"}}>
                         <div style={{fontWeight:"900"}}>Próxima {e.numeroParada} · {e.cliente}</div>
-                        <div style={{fontSize:"12px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
-                        <div style={{fontSize:"12px",marginTop:"4px"}}>{e.direccion}</div>
+                        <div style={{fontSize:"16px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
+                        <div style={{fontSize:"16px",marginTop:"4px"}}>{e.direccion}</div>
                       </div>
                     </Popup>
                   </Marker>
@@ -1531,20 +1594,20 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
             <div style={{fontSize:"16px",fontWeight:"950"}}>
               {proximoDestino.cliente}
             </div>
-            <div style={{fontSize:"11px",color:"#64748b",marginTop:"4px"}}>
+            <div style={{fontSize:"15px",color:"#334155",marginTop:"4px"}}>
               {tituloEntrega(proximoDestino)} · {proximoDestino.direccion || "Sin dirección"}
             </div>
             <button
               type="button"
               onClick={()=>navegarEntrega(proximoDestino)}
-              style={{...boton,width:"100%",background:"#2563eb",color:"#fff",fontSize:"14px",marginTop:"10px"}}
+              style={{...boton,width:"100%",background:"#2563eb",color:"#fff",fontSize:"16px",marginTop:"10px"}}
             >
               📍 NAVEGAR AL PRÓXIMO DESTINO
             </button>
             <button
               type="button"
               onClick={()=>setActiva(proximoDestino)}
-              style={{...boton,width:"100%",background:"#16a34a",color:"#fff",fontSize:"14px",marginTop:"8px"}}
+              style={{...boton,width:"100%",background:"#16a34a",color:"#fff",fontSize:"16px",marginTop:"8px"}}
             >
               📍 LLEGUÉ AL DESTINO
             </button>
@@ -1553,38 +1616,60 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
 
         {cargando ? (
-          <div style={{textAlign:"center",padding:"40px",color:"#64748b"}}>⏳ Cargando entregas...</div>
+          <div style={{textAlign:"center",padding:"40px",color:"#111827"}}>⏳ Cargando entregas...</div>
         ) : error ? (
           <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:"10px",padding:"14px",color:"#991b1b"}}>❌ {error}</div>
-        ) : entregas.length === 0 ? (
-          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"10px",padding:"30px",textAlign:"center",color:"#64748b"}}>
-            No tenés entregas asignadas.
-          </div>
         ) : (
-          <div style={{display:"grid",gap:"9px"}}>
-            {entregasOrdenadasPantalla.filter(e => !(jornadaActiva && proximoDestino && e.id === proximoDestino.id)).map(e=>(
-              <button key={e.id} onClick={()=>setActiva(e)} style={{width:"100%",textAlign:"left",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",cursor:"pointer",color:"#0f172a"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:"10px"}}>
-                  <div>
-                    <div style={{fontWeight:"950"}}>🧾 {tituloEntrega(e)} · {e.cliente}</div>
-                    <div style={{fontSize:"11px",color:"#64748b",marginTop:"4px"}}>📍 {e.direccion || "Sin dirección cargada"}</div>
-                    <div style={{fontSize:"11px",color:"#64748b",marginTop:"4px"}}>
-                      📅 {e.fecha_programada || "Sin fecha"} · 📦 {e.bultos ?? "—"} bulto/s
+          <>
+            {ordenActualId && (
+              <div style={{fontSize:"17px",fontWeight:950,color:"#111827",marginBottom:"10px",textAlign:"center"}}>
+                🚚 Reparto {entregas.find(e=>e.reparto_orden_id===ordenActualId)?.ordenReparto?.numero || "actual"} (Actual)
+              </div>
+            )}
+            <div style={{display:"grid",gap:"9px"}}>
+              {entregasActualesPantalla.filter(e => !(jornadaActiva && proximoDestino && e.id === proximoDestino.id)).map(e=>(
+                <button key={e.id} onClick={()=>setActiva(e)} style={{width:"100%",textAlign:"left",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",cursor:"pointer",color:"#111827"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:"10px"}}>
+                    <div>
+                      <div style={{fontWeight:"950",fontSize:"16px"}}>🧾 {tituloEntrega(e)} · {e.cliente}</div>
+                      <div style={{fontSize:"16px",color:"#111827",marginTop:"4px"}}>📍 {e.direccion || "Sin dirección cargada"}</div>
+                      <div style={{fontSize:"15px",color:"#111827",marginTop:"4px"}}>
+                        📅 {e.fecha_programada || "Sin fecha"} · 📦 {e.bultos ?? "—"} bulto/s
+                      </div>
+                    </div>
+                    <div style={{fontSize:"13px",fontWeight:"900",whiteSpace:"nowrap",color:e.estado==="entregado"?"#166534":e.estado==="no_entregado"?"#991b1b":"#1d4ed8"}}>
+                      {e.estado==="reintentar" ? "🕐 VOLVER" : e.estado==="entregado" ? "✅ ENTREGADA" :
+                       e.estado==="no_entregado" ? "❌ NO ENTREGADA" : e.estado==="devolucion_informada" ? "📦 DEVOLUCIÓN" :
+                       e.estado==="recibido" ? "📦 RECIBIDA" : e.estado==="en_reparto" ? "🚚 EN REPARTO" : "📋 ASIGNADA"}
                     </div>
                   </div>
-                  <div style={{fontSize:"10px",fontWeight:"900",whiteSpace:"nowrap",
-                    color:e.estado==="reintentar"?"#9a3412":e.estado==="entregado"?"#166534":e.estado==="no_entregado"?"#991b1b":e.estado==="devolucion_informada"?"#9a3412":e.estado==="recibido"?"#155e75":e.estado==="en_reparto"?"#166534":"#1d4ed8"}}>
-                    {e.estado==="reintentar" ? "🕐 VOLVER" :
-                     e.estado==="entregado" ? "✅ ENTREGADA" :
-                     e.estado==="no_entregado" ? "❌ NO ENTREGADA" :
-                     e.estado==="devolucion_informada" ? "📦 DEVOLUCIÓN INFORMADA" :
-                     e.estado==="recibido" ? "📦 RECIBIDA" :
-                     e.estado==="en_reparto" ? "🚚 EN REPARTO" : "📋 ASIGNADA"}
-                  </div>
-                </div>
+                </button>
+              ))}
+              {!entregasActualesPantalla.length && <div style={{padding:"16px",background:"#fff",borderRadius:"10px",textAlign:"center",color:"#111827"}}>No hay entregas en el reparto actual.</div>}
+            </div>
+            <div style={{marginTop:"18px",marginBottom:"20px",border:"1px solid #94a3b8",borderRadius:"11px",background:"#fff",overflow:"hidden"}}>
+              <button type="button" onClick={()=>setHistorialAbierto(v=>!v)}
+                aria-expanded={historialAbierto}
+                style={{width:"100%",padding:"16px",background:"#e2e8f0",color:"#111827",fontSize:"18px",fontWeight:950,border:"none",cursor:"pointer",textAlign:"left"}}>
+                📚 ENTREGAS ANTERIORES ({entregasAnterioresPantalla.length}) {historialAbierto ? "▲" : "▼"}
               </button>
-            ))}
-          </div>
+              {historialAbierto && <div style={{padding:"12px",display:"grid",gap:"10px"}}>
+                {entregasAnterioresPantalla.length === 0 && <div style={{color:"#111827",fontSize:"16px"}}>Todavía no hay entregas anteriores.</div>}
+                {entregasAnterioresPantalla.map(e=>(
+                  <button key={e.id} type="button" onClick={()=>setActiva(e)}
+                    style={{background:"#fff",border:"1px solid #94a3b8",borderRadius:"10px",padding:"13px",textAlign:"left",color:"#111827",cursor:"pointer",width:"100%"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:"8px",flexWrap:"wrap",fontSize:"16px",fontWeight:900}}>
+                      <span>📦 {e.cliente}</span>
+                      <span style={{color:e.estado==="entregado"?"#166534":"#991b1b"}}>{e.estado==="entregado"?"✅ ENTREGADA":e.estado==="no_entregado"?"❌ NO ENTREGADA":"📦 DEVOLUCIÓN"}</span>
+                    </div>
+                    <div style={{fontSize:"16px",marginTop:"7px"}}>📍 {e.direccion || "Sin dirección cargada"}</div>
+                    <div style={{fontSize:"17px",fontWeight:950,marginTop:"8px"}}>🚚 {e.ordenReparto?.numero || "Sin número (sistema anterior)"}</div>
+                    <div style={{fontSize:"17px",fontWeight:950,marginTop:"5px"}}>📅 {fechaEntregaHistorial(e)}</div>
+                  </button>
+                ))}
+              </div>}
+            </div>
+          </>
         )}
       </main>
     </div>
