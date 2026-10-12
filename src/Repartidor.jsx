@@ -383,6 +383,61 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Destinos automáticos: Realtime avisa de cambios y una consulta cada 60 s
+  // sirve de respaldo. Solo funciona con la pantalla visible y sesión activa.
+  // La consulta sigue limitada al repartidor y empresa dentro de cargar().
+  const cargarActualRef = React.useRef(cargar);
+  cargarActualRef.current = cargar;
+  const actualizacionEnCursoRef = React.useRef(false);
+  const ultimaActualizacionRef = React.useRef(0);
+  useEffect(() => {
+    const empresaId = perfil?.empresa_id || perfilProp?.empresa_id;
+    const repartidorId = sesionProp?.user?.id || perfil?.id;
+    if (!empresaId || !repartidorId) return;
+    let vigente = true;
+    let espera = null;
+    const actualizar = async (forzar = false) => {
+      if (!vigente || document.visibilityState !== "visible" || !navigator.onLine) return;
+      if (actualizacionEnCursoRef.current) return;
+      if (!forzar && Date.now() - ultimaActualizacionRef.current < 2500) return;
+      actualizacionEnCursoRef.current = true;
+      ultimaActualizacionRef.current = Date.now();
+      try { await cargarActualRef.current(); }
+      finally { actualizacionEnCursoRef.current = false; }
+    };
+    const programar = () => {
+      if (espera) clearTimeout(espera);
+      espera = setTimeout(() => { espera = null; actualizar(); }, 500);
+    };
+    // Filtramos por empresa en el servidor y por chofer en el cliente.
+    // Para cambios de asignación, también detectamos la asignación anterior.
+    const canal = supabase.channel(`repartidor-destinos-${empresaId}-${repartidorId}`)
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "repartos_entregas",
+        filter: `empresa_id=eq.${empresaId}`
+      }, (evento) => {
+        const nuevo = evento.new || {};
+        const anterior = evento.old || {};
+        if (String(nuevo.repartidor_id || "") === String(repartidorId) ||
+            String(anterior.repartidor_id || "") === String(repartidorId)) programar();
+      })
+      .subscribe();
+    const respaldo = window.setInterval(() => actualizar(), 60000);
+    const alVolver = () => { if (document.visibilityState === "visible") actualizar(true); };
+    const alConectar = () => actualizar(true);
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("online", alConectar);
+    return () => {
+      vigente = false;
+      if (espera) clearTimeout(espera);
+      clearInterval(respaldo);
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("online", alConectar);
+      supabase.removeChannel(canal);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perfil?.empresa_id, perfilProp?.empresa_id, sesionProp?.user?.id, perfil?.id]);
+
   // Restaurar el resumen cuando ya conocemos empresa y usuario.
   useEffect(() => {
     if (!perfil?.empresa_id || !(sesionProp?.user?.id || perfil?.id)) return;
