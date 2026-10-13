@@ -287,7 +287,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
         .select("*")
         .eq("empresa_id", p.empresa_id)
         .eq("repartidor_id", session.user.id)
-        .in("estado", ["asignado", "recibido", "en_reparto", "reintentar", "entregado", "no_entregado", "devolucion_informada"])
+        .in("estado", ["asignado", "recibido", "en_reparto", "reintentar", "entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"])
         .order("fecha_programada", { ascending: true });
 
       if (ee) throw ee;
@@ -720,9 +720,13 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       return prioridad(a) - prioridad(b);
     });
   const entregasAnterioresPantalla = entregas.filter(e =>
-    !esEntregaActual(e) && ["entregado", "no_entregado", "devolucion_informada"].includes(e.estado)
+    !esEntregaActual(e) && ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado)
   ).sort((a,b) => new Date(b.entregado_at || b.actualizado_at || b.creado_at || 0).getTime() -
                   new Date(a.entregado_at || a.actualizado_at || a.creado_at || 0).getTime());
+  // Aviso visible aun cuando el recorrido ya termino. Solo entregas
+  // no entregadas que todavia no fueron informadas al deposito.
+  const devolucionesPorInformar = entregas.filter(e => e.estado === "no_entregado")
+    .sort((a,b) => new Date(b.actualizado_at || 0).getTime() - new Date(a.actualizado_at || 0).getTime());
   const fechaEntregaHistorial = e => {
     const valor = e.entregado_at || e.actualizado_at || e.creado_at;
     if (!valor) return "Fecha no registrada";
@@ -1410,6 +1414,24 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       </header>
 
       <main style={{maxWidth:"760px",margin:"0 auto",padding:"9px"}}>
+        {!cargando && !error && devolucionesPorInformar.length > 0 && (
+          <section role="status" style={{background:"#fff7ed",border:"3px solid #ea580c",borderRadius:12,padding:13,marginBottom:12,color:"#7c2d12"}}>
+            <div style={{fontSize:18,fontWeight:950}}>⚠️ MERCADERÍA PENDIENTE DE DEVOLUCIÓN</div>
+            <div style={{fontSize:15,marginTop:5,marginBottom:10,fontWeight:700}}>
+              Tenés {devolucionesPorInformar.length} entrega{devolucionesPorInformar.length === 1 ? "" : "s"} sin informar al depósito, incluso de repartos finalizados.
+            </div>
+            <div style={{display:"grid",gap:8}}>
+              {devolucionesPorInformar.map(e => (
+                <button key={e.id} type="button" onClick={() => setActiva(e)}
+                  style={{...boton,width:"100%",textAlign:"left",background:"#fff",border:"2px solid #fb923c",color:"#7c2d12",fontSize:16,padding:12}}>
+                  📦 {e.cliente || "Entrega no realizada"} · {e.ordenReparto?.numero || "Reparto anterior"}
+                  <div style={{fontSize:13,marginTop:4}}>VER DEVOLUCIÓN PENDIENTE →</div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
           {(sinConexion || colaOffline.length > 0 || errorOffline) && (
             <div style={{padding:12,marginBottom:10,background:"#fff7ed",border:"2px solid #f97316",borderRadius:10,fontWeight:800,color:"#7c2d12"}}>
               {sinConexion ? "📴 SIN CONEXIÓN · " : ""}{colaOffline.length} entrega/s PENDIENTE/S DE SINCRONIZAR
@@ -1825,7 +1847,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                     style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"7px",padding:"7px 8px",textAlign:"left",color:"#111827",cursor:"pointer",width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",overflow:"hidden"}}>
                     <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:"5px",fontSize:"15px",fontWeight:900,minWidth:0}}>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>📦 {e.cliente}</span>
-                      <span style={{color:e.estado==="entregado"?"#166534":"#991b1b",whiteSpace:"nowrap",fontSize:"13px",flexShrink:0}}>{e.estado==="entregado"?"✓ ENTREGADA":e.estado==="no_entregado"?"✕ NO ENTREGADA":"↩ DEVOLUCIÓN"}</span>
+                      <span style={{color:e.estado==="entregado"?"#166534":"#991b1b",whiteSpace:"nowrap",fontSize:"13px",flexShrink:0}}>{e.estado==="entregado"?"✓ ENTREGADA":e.estado==="no_entregado"?"✕ NO ENTREGADA":e.estado==="vuelto_deposito"?"✓ RECIBIDA EN DEPÓSITO":"↩ DEVOLUCIÓN"}</span>
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:"5px",marginTop:"3px",fontSize:"13px",fontWeight:800,minWidth:0}}>
                       <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}} title={e.ordenReparto?.numero || "Sin número (sistema anterior)"}>🚚 {e.ordenReparto?.numero || "Sin número anterior"}</span>
