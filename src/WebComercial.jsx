@@ -8,7 +8,7 @@ export default function WebComercial() {
   };
 
   const irAlLogin = () => {
-    window.location.href = "/login";
+    window.location.assign("https://rutacomercios.com/login");
   };
 
   const whatsapp =
