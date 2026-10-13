@@ -16,6 +16,72 @@ L.Icon.Default.mergeOptions({
 
 const COLORES = ["#2563eb", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#06b6d4"];
 
+
+// Gráfico de ventas del día: utiliza la telemetría ya calculada y aislada por empresa.
+function GraficoVentasFlota({ flota }) {
+  const formatoCorto = (importe) => {
+    const n = Number(importe) || 0;
+    if (Math.abs(n) >= 1000000) return `$${(n / 1000000).toLocaleString("es-AR", { maximumFractionDigits: 2 })}M`;
+    if (Math.abs(n) >= 1000) return `$${(n / 1000).toLocaleString("es-AR", { maximumFractionDigits: 1 })}k`;
+    return `$${n.toLocaleString("es-AR", { maximumFractionDigits: 0 })}`;
+  };
+  const ventas = (flota || []).filter(p => Number(p.vendidoHoy) > 0)
+    .map(p => ({ nombre: p.nombre, valor: Number(p.vendidoHoy) }))
+    .sort((a, b) => b.valor - a.valor);
+  const total = ventas.reduce((acc, p) => acc + p.valor, 0);
+  const centroX = 210, centroY = 190, radio = 101, ancho = 42;
+  let inicio = -Math.PI / 2;
+  const segmentos = ventas.map((v, i) => {
+    const angulo = (v.valor / total) * 2 * Math.PI;
+    const medio = inicio + angulo / 2;
+    const fin = inicio + angulo;
+    const x1 = centroX + radio * Math.cos(inicio), y1 = centroY + radio * Math.sin(inicio);
+    const x2 = centroX + radio * Math.cos(fin), y2 = centroY + radio * Math.sin(fin);
+    const ruta = `M ${x1} ${y1} A ${radio} ${radio} 0 ${angulo > Math.PI ? 1 : 0} 1 ${x2} ${y2}`;
+    inicio = fin;
+    return { ...v, ruta, medio, color: COLORES[i % COLORES.length], porcentaje: Math.round(v.valor / total * 100) };
+  });
+  // Repartir etiquetas a ambos lados para evitar superposiciones entre vendedores.
+  const etiquetas = segmentos.map(seg => ({ ...seg, derecha: Math.cos(seg.medio) >= 0, yDeseada: centroY + (radio + 35) * Math.sin(seg.medio) }));
+  for (const derecha of [false, true]) {
+    const lado = etiquetas.filter(e => e.derecha === derecha).sort((a,b) => a.yDeseada - b.yDeseada);
+    const paso = lado.length > 7 ? 29 : 36;
+    lado.forEach((e, i) => { e.y = Math.max(22 + i * paso, e.yDeseada); });
+    if (lado.length && lado[lado.length-1].y > 348) {
+      const exceso = lado[lado.length-1].y - 348;
+      lado.forEach(e => { e.y -= exceso; });
+    }
+  }
+  return (
+    <div style={{ border: "1px solid #dbe4f0", borderRadius: "10px", background: "#fff", padding: "12px 6px", minWidth: 0, alignSelf: "start" }}>
+      <div style={{ fontSize: "11px", fontWeight: 900, color: "#475569", textAlign: "center" }}>VENTAS TOTALES HOY</div>
+      <div style={{ fontSize: "22px", fontWeight: 900, color: "#0f172a", textAlign: "center", margin: "3px 0 5px" }}>${total.toLocaleString("es-AR")}</div>
+      {total <= 0 ? (
+        <div style={{ minHeight: "190px", display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b", fontSize: "12px", textAlign: "center", padding: "12px" }}>Sin ventas registradas hoy</div>
+      ) : (
+        <svg viewBox="0 0 420 380" role="img" aria-label="Porcentaje e importe vendido hoy por preventista" style={{ display: "block", width: "100%", height: "auto", maxHeight: "390px" }}>
+          {segmentos.length === 1 ? (
+            <circle cx={centroX} cy={centroY} r={radio} fill="none" stroke={segmentos[0].color} strokeWidth={ancho} />
+          ) : segmentos.map((seg, i) => <path key={i} d={seg.ruta} fill="none" stroke={seg.color} strokeWidth={ancho - 2} />)}
+          <text x={centroX} y={centroY - 3} textAnchor="middle" fontSize="20" fontWeight="800" fill="#0f172a">{formatoCorto(total)}</text>
+          <text x={centroX} y={centroY + 19} textAnchor="middle" fontSize="13" fill="#64748b">100%</text>
+          {etiquetas.map((e, i) => {
+            const x0 = centroX + (radio + ancho/2 + 4) * Math.cos(e.medio);
+            const y0 = centroY + (radio + ancho/2 + 4) * Math.sin(e.medio);
+            const xTexto = e.derecha ? 318 : 102;
+            const xCodo = e.derecha ? 308 : 112;
+            return <g key={i}>
+              <polyline points={`${x0},${y0} ${xCodo},${e.y} ${e.derecha ? 314 : 106},${e.y}`} fill="none" stroke={e.color} strokeWidth="1.5" />
+              <text x={xTexto} y={e.y - 4} textAnchor={e.derecha ? "start" : "end"} fontSize="11" fontWeight="700" fill="#334155">{String(e.nombre).slice(0, 13)}</text>
+              <text x={xTexto} y={e.y + 10} textAnchor={e.derecha ? "start" : "end"} fontSize="11" fill="#475569">{formatoCorto(e.valor)} · {e.porcentaje}%</text>
+            </g>;
+          })}
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function iconoNumero(numero, estado) {
   const bg = estado === "no_visitar" ? "#111827" : estado === "visitado" ? "#10b981" : estado === "activo" ? "#2563eb" : "#64748b";
   return L.divIcon({
@@ -4647,19 +4713,19 @@ useEffect(() => {
                                 ["condicion_fiscal", "Condición fiscal"], ["email", "Email del cliente"]
                               ].map(([campo, etiqueta]) => (
                                 <div key={campo}>
-                                  <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>{etiqueta.toUpperCase()}</label>
+                                  <label style={{ display: "block", fontSize: "8px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>{etiqueta.toUpperCase()}</label>
                                   <input value={editClienteDatos[campo] || ""} onChange={(e) => setEditClienteDatos(prev => ({ ...prev, [campo]: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a" }} />
                                 </div>
                               ))}
                               <div>
-                                <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>👤 PREVENTISTA</label>
+                                <label style={{ display: "block", fontSize: "8px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>👤 PREVENTISTA</label>
                                 <select value={editPrevFicha || ""} onChange={(e) => setEditPrevFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a" }}>
                                   <option value="">Sin preventista</option>
                                   {listaPreventistas.map(p => <option key={p} value={p}>{p}</option>)}
                                 </select>
                               </div>
                               <div>
-                                <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>🗓️ DÍA DE VISITA</label>
+                                <label style={{ display: "block", fontSize: "8px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>🗓️ DÍA DE VISITA</label>
                                 <select value={editDiaFicha || ""} onChange={(e) => setEditDiaFicha(e.target.value)} style={{ width: "100%", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a" }}>
                                   <option value="">Sin día asignado</option>
                                   {["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"].map(d => <option key={d} value={d}>{d}</option>)}
@@ -4667,7 +4733,7 @@ useEffect(() => {
                               </div>
                             </div>
                             <div style={{ marginTop: "10px" }}>
-                              <label style={{ display: "block", fontSize: "10px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>NOTAS</label>
+                              <label style={{ display: "block", fontSize: "8px", fontWeight: "800", color: "#475569", marginBottom: "4px" }}>NOTAS</label>
                               <textarea value={editClienteDatos.notas || ""} onChange={(e) => setEditClienteDatos(prev => ({ ...prev, notas: e.target.value }))} rows={3} style={{ width: "100%", boxSizing: "border-box", padding: "8px", borderRadius: "7px", border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", resize: "vertical" }} />
                             </div>
                             <div style={{ marginTop: "10px", padding: "8px 10px", borderRadius: "7px", background: "#fff", border: "1px solid #dbeafe", fontSize: "11px", color: "#475569" }}>
@@ -5482,8 +5548,10 @@ useEffect(() => {
         </div>
 
         
+        <style>{`@media(max-width: 1120px){.flota-con-grafico{grid-template-columns:1fr !important;}}`}</style>
         {/* TELEMETRÍA DE FLOTA (TARJETAS DE PREVENTISTAS) */}
-        <div style={{ marginBottom: "14px" }}>
+        <div className="flota-con-grafico" style={{ display: "grid", gridTemplateColumns: "minmax(0, 63fr) minmax(0, 37fr)", gap: "12px", alignItems: "start", marginBottom: "14px" }}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginBottom: "6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>Flota de Preventistas</span>
             {preventistaSeleccionado && (
@@ -5495,6 +5563,12 @@ useEffect(() => {
                 ✕ Ver Todos
               </button>
             )}
+          </div>
+          {/* Cabecera de lectura para los datos compactos de la flota. */}
+          <div style={{ overflowX: "hidden", marginBottom: "5px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.15fr) minmax(0,.95fr) minmax(0,1.15fr) minmax(0,.75fr) minmax(0,.65fr) minmax(0,.43fr) minmax(0,.9fr) minmax(0,.8fr)", gap: "2px", minWidth: 0, padding: "7px 3px", background: "#eaf0f8", border: "1px solid #dbe4f0", borderRadius: "7px", fontSize: "8px", fontWeight: "800", color: "#475569" }}>
+              <span>PREVENTISTA</span><span>ESTADO</span><span>ÚLTIMA SEÑAL</span><span title="Total de comercios asignados">COMERCIOS</span><span>VISITAS</span><span>NVI</span><span>EFECTIVIDAD</span><span>VENDIDO HOY</span>
+            </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
             {telemetriaFlota.map((prev, idx) => {
@@ -5517,29 +5591,33 @@ useEffect(() => {
                     backgroundColor: seleccionado ? "#eff6ff" : "#ffffff",
                     border: seleccionado ? "2px solid #2563eb" : "1px solid #e2e8f0",
                     borderRadius: "8px",
-                    padding: "7px 10px",
+                    padding: "7px 5px",
                     cursor: "pointer",
-                    display: "flex",
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0,1.15fr) minmax(0,.95fr) minmax(0,1.15fr) minmax(0,.75fr) minmax(0,.65fr) minmax(0,.43fr) minmax(0,.9fr) minmax(0,.8fr)",
                     alignItems: "center",
-                    gap: "12px",
-                    minHeight: "38px",
+                    gap: "2px",
+                    minWidth: 0,
+                    minHeight: "34px",
                     boxShadow: seleccionado ? "0 2px 8px rgba(37,99,235,0.15)" : "none",
-                    overflowX: "auto",
+                    overflow: "hidden",
                     whiteSpace: "nowrap"
                   }}
                 >
-                  <span style={{fontSize:"12px",fontWeight:"800",color:"#0f172a"}}>👤 {prev.nombre}</span>
-                  <span style={{fontSize:"10px",fontWeight:"800",color:estadoSenal.color}}>{estadoSenal.texto}</span>
-                  <span title={prev.ultimaSenal ? `Fecha y hora exactas: ${new Date(prev.ultimaSenal).toLocaleString("es-AR")}` : "Sin señal registrada"} style={{fontSize:"10px",color:"#64748b"}}>🕐 {textoUltimaSenal(prev.ultimaSenal)}</span>
-                  <span style={{fontSize:"10px",color:"#334155"}}>🏪 <b>{prev.paradasTotales || 0}</b> comercios</span>
-                  <span style={{fontSize:"10px",color:"#334155"}}>📍 <b>{prev.paradasHoy || 0}</b> visita{prev.paradasHoy === 1 ? "" : "s"}</span>
-                  <span style={{fontSize:"10px",color:"#334155"}}>🧾 <b>{prev.nviHoy || 0}</b> NVI</span>
-                  <span style={{fontSize:"10px",color:"#334155"}}>🎯 <b>{prev.efectividadHoy || 0}%</b></span>
-                  <span style={{fontSize:"10px",color:"#334155"}}>💰 <b>${Number(prev.vendidoHoy || 0).toLocaleString("es-AR")}</b> vendido hoy</span>
+                  <span style={{fontSize:"9px",fontWeight:"800",color:"#0f172a"}}>👤 {prev.nombre}</span>
+                  <span style={{fontSize:"9px",fontWeight:"800",color:estadoSenal.color}}>{estadoSenal.texto}</span>
+                  <span title={prev.ultimaSenal ? `Fecha y hora exactas: ${new Date(prev.ultimaSenal).toLocaleString("es-AR")}` : "Sin señal registrada"} style={{fontSize:"9px",color:"#64748b"}}>🕐 {textoUltimaSenal(prev.ultimaSenal).replace(/^Última señal: /, "")}</span>
+                  <span style={{fontSize:"9px",color:"#334155"}}>🏪 <b>{prev.paradasTotales || 0}</b></span>
+                  <span style={{fontSize:"9px",color:"#334155"}}>📍 <b>{prev.paradasHoy || 0}</b></span>
+                  <span style={{fontSize:"9px",color:"#334155"}}>🧾 <b>{prev.nviHoy || 0}</b></span>
+                  <span style={{fontSize:"9px",color:"#334155"}}>🎯 <b>{prev.efectividadHoy || 0}%</b></span>
+                  <span style={{fontSize:"9px",color:"#334155"}}>💰 <b>${Number(prev.vendidoHoy || 0).toLocaleString("es-AR")}</b></span>
                 </div>
               );
             })}
           </div>
+        </div>
+        <GraficoVentasFlota flota={telemetriaFlota} />
         </div>
 
         {preventistaSeleccionado && (

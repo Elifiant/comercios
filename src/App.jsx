@@ -678,7 +678,7 @@ useEffect(() => {
 
        let query = supabase
          .from("pedidos")
-         .select("id, total, fecha, estado, deposito_stock_id")
+         .select("id, total, fecha, estado")
          .gte("fecha", inicioHoy.toISOString())
          .lt("fecha", inicioManana.toISOString())
          .eq("preventista", pActivo.nombre);
@@ -692,15 +692,15 @@ useEffect(() => {
        const { data, error } = await query;
        if (error) throw error;
 
-       // Para las NVI del sistema físico nuevo, la señal simple y confiable de
-       // confirmación es que el Supervisor ya haya definido el depósito de salida.
-       // Las NVI guardadas sin depósito quedan pendientes y NO cuentan como venta.
-       const ventasConfirmadas = (data || []).filter((pedido) => {
-         if (["pendiente de stock", "anulado", "anulada", "cancelado", "cancelada"].includes(String(pedido?.estado || "").trim().toLowerCase())) return false;
-         return Boolean(pedido?.deposito_stock_id);
+       // Una NVI guardada es una venta realizada por el preventista,
+       // aunque Depósito todavía no haya asignado stock o preparado la entrega.
+       // Las NVI anuladas o canceladas no integran el total vendido.
+       const ventasValidas = (data || []).filter((pedido) => {
+         const estado = String(pedido?.estado || "").trim().toLowerCase();
+         return !["anulado", "anulada", "cancelado", "cancelada"].includes(estado);
        });
 
-       const totalHoy = ventasConfirmadas.reduce(
+       const totalHoy = ventasValidas.reduce(
          (acum, pedido) => acum + Number(pedido.total || 0),
          0
        );

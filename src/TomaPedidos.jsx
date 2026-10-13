@@ -476,7 +476,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
           .eq('id', pedidoId)
           .eq('empresa_id', empresaId);
 
-        alert('⚠️ NVI guardada como PENDIENTE DE STOCK. El Supervisor deberá elegir otro depósito o eliminarla. Todavía no suma como venta.');
+        alert('⚠️ NVI guardada como PENDIENTE DE STOCK. El Supervisor deberá elegir otro depósito o eliminarla. La NVI queda registrada como venta; la entrega está sujeta a disponibilidad de stock.');
       }
 
       // Respaldo local después de guardar la NVI.
@@ -501,7 +501,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             `\n--------------------------\n` +
             `*TOTAL A COBRAR: $${totalFinal.toLocaleString()} ARS*\n` +
             (observaciones ? `Notas: ${observaciones}\n` : '') +
-            `_RutaComercio · Comanda Oficial_`
+            `_RutaComercios · Venta_`
           );
           window.open(`https://wa.me/549${telLimpio}?text=${msj}`, '_blank');
         }
@@ -634,8 +634,10 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                 <div key={prod.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', padding: '5px 6px', borderBottom: '1px solid #f1f5f9', backgroundColor: bloqueado ? '#fef2f2' : critico ? '#fffbeb' : '#ffffff' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '10px', color: '#2563eb', fontWeight: '800' }}>{prod.codigo} · {prod.marca}</div>
-                    <div style={{ fontSize: '12px', fontWeight: '700' }}>{prod.nombre}</div>
-                    <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: '800' }}>${prod.precio.toLocaleString()}</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '3px 8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '700' }}>{prod.nombre}</span>
+                      <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: '800', whiteSpace: 'nowrap' }}>${prod.precio.toLocaleString()}</span>
+                    </div>
 
                     {critico && (
                       <div style={{ marginTop: '4px', fontSize: '11px', fontWeight: '900', color: '#b45309' }}>
@@ -808,9 +810,12 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
           )}
         </div>
 
-        {/* Medio de Pago y Observaciones */}
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '14px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
-          <div style={{ fontSize: '13px', fontWeight: '800', marginBottom: '8px' }}>Condiciones & Forma de Pago</div>
+        {/* Condiciones y pago: cerrado para dar más espacio a los artículos */}
+        <details style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '12px 14px', border: '1px solid #e2e8f0', marginBottom: '12px' }}>
+          <summary style={{ fontSize: '13px', fontWeight: '800', cursor: 'pointer', color: '#0f172a' }}>
+            Condiciones y forma de pago · {medioPago} {medioPago === 'Cuenta corriente' && diasCuentaCorriente ? `(${diasCuentaCorriente} días)` : ''}
+          </summary>
+          <div style={{ marginTop: '12px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
             {['Efectivo', 'Transferencia QR', 'Cuenta corriente', 'BCH / Crypto'].map(m => (
               <button
@@ -860,13 +865,14 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             rows={2}
             style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
           />
-        </div>
+          </div>
+        </details>
 
         {/* Envío WhatsApp */}
         <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '12px 14px', border: '1px solid #e2e8f0', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>
             <input type="checkbox" checked={enviarWsp} onChange={(e) => setEnviarWsp(e.target.checked)} />
-            <span>💬 Enviar comanda por WhatsApp</span>
+            <span>💬 Enviar venta por WhatsApp</span>
           </label>
           <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: '800' }}>
             {comercio?.telefono || 'Sin teléfono cargado'}
@@ -917,7 +923,7 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
             ) : (
               <>
                 <span>🚀 Confirmar y Enviar Pedido</span>
-                <span style={{ fontSize: '11px', fontWeight: 'normal', opacity: 0.9 }}>Notificación automática a Supervisor y Depósito</span>
+                <span style={{ fontSize: '11px', fontWeight: 'normal', opacity: 0.9 }}>La NVI se registra al guardar. Entrega sujeta a disponibilidad de stock.</span>
               </>
             )}
           </button>
