@@ -45,8 +45,9 @@ function EnrutadorSeguro() {
   const [errorLogin, setErrorLogin] = useState(null);
   const [enviandoLogin, setEnviandoLogin] = useState(false);
 
-  // La web comercial siempre es pública
-  if (ruta === "/web") {
+  // Web comercial pública: /web en ambos dominios y raíz del subdominio www.
+  // Las demás rutas conservan sus accesos y permisos originales.
+  if (ruta === "/web" || (window.location.hostname === "www.rutacomercios.com" && (ruta === "/" || ruta === ""))) {
     return <WebComercial />;
   }
 
