@@ -8,6 +8,7 @@ import Supervisor from "./Supervisor";
 import AdminClientes from "./AdminClientes";
 import AdminPromotores from "./AdminPromotores";
 import WebComercial from "./WebComercial";
+import Ayuda from "./Ayuda";
 import MonitorPedidos from "./MonitorPedidos";
 import Repartos from "./Repartos";
 import Repartidor from "./Repartidor";
@@ -44,6 +45,11 @@ function EnrutadorSeguro() {
   const [passwordLogin, setPasswordLogin] = useState("");
   const [errorLogin, setErrorLogin] = useState(null);
   const [enviandoLogin, setEnviandoLogin] = useState(false);
+
+  // Centro de Ayuda público, sin necesidad de iniciar sesión.
+  if (ruta === "/ayuda" || ruta === "/ayuda/") {
+    return <Ayuda />;
+  }
 
   // Web comercial pública: /web en ambos dominios y raíz del subdominio www.
   // Las demás rutas conservan sus accesos y permisos originales.
