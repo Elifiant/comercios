@@ -1,11 +1,58 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+// Ícono explícito para que el marcador se vea en Vite.
+const iconoClienteSimplex = L.icon({
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+});
+
+// Centra la vista al abrir cada cliente, aunque React reutilice el mapa.
+function CentrarMapaClienteSimplex({ centro }) {
+  const map = useMap();
+  useEffect(() => {
+    if (centro && Number.isFinite(centro[0]) && Number.isFinite(centro[1])) {
+      map.setView(centro, 16, { animate: false });
+    }
+  }, [map, centro?.[0], centro?.[1]]);
+  return null;
+}
+
+// Ajusta el mapa general a los clientes ubicados, sin consultar GPS ni rutas externas.
+function AjustarMapaRutaSimplex({ puntos }) {
+  const map = useMap();
+  const clave = puntos.map(c => `${c.id}:${c.latitud}:${c.longitud}`).join("|");
+  useEffect(() => {
+    if (!puntos.length) return;
+    const bounds = L.latLngBounds(puntos.map(c => [Number(c.latitud), Number(c.longitud)]));
+    if (puntos.length === 1) map.setView(bounds.getCenter(), 15, { animate: false });
+    else map.fitBounds(bounds, { padding: [28, 28], maxZoom: 15, animate: false });
+  }, [map, clave]);
+  return null;
+}
+
+function SeleccionarPuntoSimplex({ alSeleccionar }) {
+  useMapEvents({ click: (e) => alSeleccionar([e.latlng.lat, e.latlng.lng]) });
+  return null;
+}
+
 import { supabase } from "./supabase";
 import TomaPedidos from "./TomaPedidos";
 import HistorialCliente from "./HistorialCliente";
 
 export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const [comercios, setComercios] = useState([]);
+  const [mapaClienteAbierto, setMapaClienteAbierto] = useState(false);
+  const [paradasRuta, setParadasRuta] = useState([]);
+  const [rutaRecuperada, setRutaRecuperada] = useState(false);
+
+  const [puntoCliente, setPuntoCliente] = useState(null);
+  const [guardandoPuntoCliente, setGuardandoPuntoCliente] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [busqueda, setBusqueda] = useState("");
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
@@ -51,6 +98,95 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
 
   const perfil = perfilProp || null;
   const sesion = sesionProp || null;
+
+  const claveRuta = perfil?.empresa_id && (sesion?.user?.id || perfil?.id)
+    ? `simplex_ruta_manual_v1_${perfil.empresa_id}_${sesion?.user?.id || perfil.id}` : null;
+
+  const [guardandoRuta, setGuardandoRuta] = useState(false);
+  const [estadoRuta, setEstadoRuta] = useState("");
+
+  // Primero recupera la ruta local existente; luego busca la versión sincronizada.
+  useEffect(() => {
+    let cancelado = false;
+    const recuperarRuta = async () => {
+      setRutaRecuperada(false);
+      setEstadoRuta("");
+      setParadasRuta([]);
+      if (!claveRuta || !perfil?.empresa_id) return;
+      let local = [];
+      try {
+        const guardadas = JSON.parse(localStorage.getItem(claveRuta) || "[]");
+        if (Array.isArray(guardadas)) local = guardadas.map(String);
+      } catch (error) { console.warn("Simplex - ruta local ilegible", error); }
+      if (!cancelado) setParadasRuta(local);
+      try {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        const usuarioId = authData?.user?.id;
+        if (!usuarioId) throw new Error("No hay sesión autenticada.");
+        const { data, error } = await supabase.from("simplex_recorridos")
+          .select("paradas").eq("empresa_id", perfil.empresa_id)
+          .eq("usuario_id", usuarioId).maybeSingle();
+        if (error) throw error;
+        if (cancelado) return;
+        if (data && Array.isArray(data.paradas)) {
+          const remota = data.paradas.map(String);
+          setParadasRuta(remota);
+          localStorage.setItem(claveRuta, JSON.stringify(remota));
+          setEstadoRuta("☁️ Recorrido recuperado de Supabase.");
+        } else {
+          setEstadoRuta(local.length
+            ? "📱 Recorrido anterior recuperado de este dispositivo. Guardalo para sincronizarlo."
+            : "☁️ Sin recorrido guardado todavía. Podés crear uno.");
+        }
+      } catch (error) {
+        console.error("Simplex - error recuperando recorrido de Supabase:", error);
+        if (!cancelado) setEstadoRuta("⚠️ No se pudo consultar Supabase. Tu recorrido local sigue disponible.");
+      } finally {
+        if (!cancelado) setRutaRecuperada(true);
+      }
+    };
+    recuperarRuta();
+    return () => { cancelado = true; };
+  }, [claveRuta, perfil?.empresa_id]);
+
+  const guardarRutaSincronizada = async () => {
+    if (!claveRuta || !perfil?.empresa_id) return alert("⚠️ No pude identificar la empresa para guardar la ruta.");
+    if (guardandoRuta || !rutaRecuperada) return;
+    setGuardandoRuta(true);
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const usuarioId = authData?.user?.id;
+      if (!usuarioId) throw new Error("No hay sesión autenticada.");
+      const { error } = await supabase.from("simplex_recorridos").upsert({
+        empresa_id: perfil.empresa_id,
+        usuario_id: usuarioId,
+        paradas: paradasRuta.map(String),
+        actualizado_en: new Date().toISOString()
+      }, { onConflict: "empresa_id,usuario_id" });
+      if (error) throw error;
+      try { localStorage.setItem(claveRuta, JSON.stringify(paradasRuta)); }
+      catch (localError) { console.warn("Simplex - no se pudo actualizar copia local", localError); }
+      setEstadoRuta("☁️ Recorrido guardado en Supabase y disponible en otros dispositivos.");
+      alert("✅ Recorrido guardado en Supabase. Ya podés abrirlo desde otro dispositivo con la misma cuenta.");
+    } catch (error) {
+      console.error("Simplex - error guardando recorrido:", error);
+      setEstadoRuta("⚠️ No se pudo sincronizar el recorrido.");
+      alert(`❌ No se pudo guardar en Supabase.\n\n${error?.message || "Error desconocido"}\n\nTu recorrido sigue visible en pantalla.`);
+    } finally { setGuardandoRuta(false); }
+  };
+
+  const moverParada = (indice, direccion) => {
+    setParadasRuta(actual => {
+      const siguiente = [...actual];
+      const destino = indice + direccion;
+      if (destino < 0 || destino >= siguiente.length) return actual;
+      [siguiente[indice], siguiente[destino]] = [siguiente[destino], siguiente[indice]];
+      return siguiente;
+    });
+  };
+
 
   useEffect(() => {
     let cancelado = false;
@@ -412,6 +548,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       cargarProductosParaConsulta();
       return;
     }
+    if (modulo === "ruta") return setVista("ruta");
     if (modulo === "clientes") return setVista("clientes");
     if (modulo === "ventas") {
       setVista("ventas");
@@ -638,6 +775,35 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     }
   };
 
+  const abrirMapaCliente = () => {
+    const lat = comercioSeleccionado?.latitud;
+    const lng = comercioSeleccionado?.longitud;
+    setPuntoCliente(lat != null && lng != null && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))
+      ? [Number(lat), Number(lng)] : null);
+    setMapaClienteAbierto(true);
+  };
+
+  const guardarUbicacionCliente = async () => {
+    if (!puntoCliente || !comercioSeleccionado?.id || !perfil?.empresa_id) return;
+    setGuardandoPuntoCliente(true);
+    try {
+      const { data, error } = await supabase.from("comercios")
+        .update({ latitud: puntoCliente[0], longitud: puntoCliente[1] })
+        .eq("id", comercioSeleccionado.id)
+        .eq("empresa_id", perfil.empresa_id)
+        .select("id,latitud,longitud").single();
+      if (error) throw error;
+      setComercioSeleccionado(prev => ({ ...prev, latitud: data.latitud, longitud: data.longitud }));
+      setComercios(prev => prev.map(c => String(c.id) === String(data.id)
+        ? { ...c, latitud: data.latitud, longitud: data.longitud } : c));
+      setMapaClienteAbierto(false);
+      alert("✅ Ubicación del cliente guardada.");
+    } catch (error) {
+      console.error("Simplex - error guardando ubicación:", error);
+      alert(`❌ No se pudo guardar la ubicación. ${error?.message || ""}`);
+    } finally { setGuardandoPuntoCliente(false); }
+  };
+
   const cerrarSesion = async () => {
     try {
       await supabase.auth.signOut();
@@ -694,6 +860,87 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           setTimeout(() => setComercioSeleccionado(actual), 0);
         }}
       />
+    );
+  }
+
+  if (vista === "ruta") {
+    const ubicados = comercios.filter(c => c.latitud != null && c.longitud != null
+      && Number.isFinite(Number(c.latitud)) && Number.isFinite(Number(c.longitud))
+      && Math.abs(Number(c.latitud)) <= 90 && Math.abs(Number(c.longitud)) <= 180);
+    const idsValidos = new Set(comercios.map(c => String(c.id)));
+    const paradas = paradasRuta.filter(id => idsValidos.has(String(id)))
+      .map(id => comercios.find(c => String(c.id) === String(id))).filter(Boolean);
+    const sinUbicar = comercios.filter(c => !ubicados.some(u => String(u.id) === String(c.id)));
+    const alternar = id => setParadasRuta(actual => actual.includes(String(id))
+      ? actual.filter(x => x !== String(id)) : [...actual, String(id)]);
+    return (
+      <div style={estilos.pagina}>
+        <header style={estilos.header}>
+          <button type="button" onClick={() => setVista("inicio")} style={estilos.botonVolver}>← Inicio</button>
+          <div style={estilos.marcaChica}>RutaComercios Simplex · V1.2</div>
+        </header>
+        <main style={estilos.contenedorFicha}>
+          <h2 style={{marginTop:0}}>🗺️ Rutas y visitas</h2>
+          <div style={{fontSize:"12px",color:"#cbd5e1",marginBottom:"12px"}}>
+            Elegí los clientes y acomodalos en el orden en que quieras visitarlos. Sin GPS, Geoapify ni cálculo automático de rutas.
+          </div>
+          {ubicados.length > 0 ? (
+            <div style={{height:"340px",width:"100%",overflow:"hidden",borderRadius:"12px",marginBottom:"12px"}}>
+              <MapContainer center={[-34.72,-58.29]} zoom={11} scrollWheelZoom={false}
+                style={{height:"100%",width:"100%"}}>
+                <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                <AjustarMapaRutaSimplex puntos={ubicados} />
+                {ubicados.map(c => (
+                  <Marker key={c.id} position={[Number(c.latitud),Number(c.longitud)]} icon={iconoClienteSimplex}>
+                    <Popup><strong>{c.nombre || "Cliente"}</strong><div>{c.direccion || "Sin dirección"}</div>
+                      <button type="button" onClick={() => alternar(c.id)}>
+                        {paradasRuta.includes(String(c.id)) ? "Quitar del recorrido" : "Agregar al recorrido"}
+                      </button>
+                    </Popup>
+                  </Marker>
+                ))}
+              </MapContainer>
+            </div>
+          ) : <div style={estilos.mensaje}>Todavía no hay clientes ubicados en el mapa.</div>}
+          <div style={estilos.panelSeccion}>
+            <div style={{fontWeight:900,marginBottom:"10px"}}>🏪 Clientes ubicados ({ubicados.length})</div>
+            {ubicados.map(c => (
+              <label key={c.id} style={{display:"flex",alignItems:"center",gap:"10px",padding:"9px 0",borderBottom:"1px solid #334155",fontSize:"13px"}}>
+                <input type="checkbox" checked={paradasRuta.includes(String(c.id))}
+                  onChange={() => alternar(c.id)} style={{width:"18px",height:"18px"}} />
+                <span>{c.nombre || "Cliente"}</span>
+              </label>
+            ))}
+            {!ubicados.length && <div style={{fontSize:"12px",color:"#94a3b8"}}>Ubicá primero un cliente desde su ficha.</div>}
+          </div>
+          <div style={estilos.panelSeccion}>
+            <div style={{fontWeight:900,marginBottom:"10px"}}>🚗 Mi recorrido ({paradas.length} paradas)</div>
+            {paradas.length === 0 ? <div style={{fontSize:"12px",color:"#94a3b8"}}>Seleccioná clientes para armar tu recorrido.</div>
+              : paradas.map((c,i) => (
+                <div key={c.id} style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px 0",borderBottom:"1px solid #334155"}}>
+                  <span style={{fontWeight:900,minWidth:"22px"}}>{i+1}.</span>
+                  <span style={{flex:1,fontSize:"13px"}}>{c.nombre || "Cliente"}</span>
+                  <button type="button" aria-label="Subir parada" disabled={i===0}
+                    onClick={() => moverParada(i,-1)} style={{padding:"7px",opacity:i===0?0.35:1}}>↑</button>
+                  <button type="button" aria-label="Bajar parada" disabled={i===paradas.length-1}
+                    onClick={() => moverParada(i,1)} style={{padding:"7px",opacity:i===paradas.length-1?0.35:1}}>↓</button>
+                  <button type="button" aria-label="Quitar parada" onClick={() => alternar(c.id)} style={{padding:"7px"}}>✕</button>
+                </div>
+              ))}
+            <button type="button" disabled={!rutaRecuperada || guardandoRuta} onClick={guardarRutaSincronizada}
+              style={{...estilos.botonGrande,backgroundColor:"#15803d",marginTop:"12px"}}>{guardandoRuta ? "⏳ GUARDANDO..." : "💾 GUARDAR MI RECORRIDO"}</button>
+            <div style={{fontSize:"11px",color:"#94a3b8",marginTop:"8px"}}>
+              {estadoRuta || "Sincronización de recorridos con Supabase."}
+            </div>
+          </div>
+          {sinUbicar.length > 0 && <div style={estilos.panelSeccion}>
+            <div style={{fontWeight:900,marginBottom:"7px"}}>📍 Sin ubicación ({sinUbicar.length})</div>
+            {sinUbicar.map(c => <div key={c.id} style={{fontSize:"12px",padding:"5px 0"}}>{c.nombre || "Cliente"}</div>)}
+            <div style={{fontSize:"11px",color:"#94a3b8",marginTop:"8px"}}>Podés ubicarlos desde Clientes → ficha → Ubicar cliente en mapa.</div>
+          </div>}
+        </main>
+      </div>
     );
   }
 
@@ -1105,7 +1352,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
         <header style={estilos.header}>
           <button
             type="button"
-            onClick={() => setComercioSeleccionado(null)}
+            onClick={() => { setMapaClienteAbierto(false); setPuntoCliente(null); setComercioSeleccionado(null); }}
             style={estilos.botonVolver}
           >
             ← Volver a clientes
@@ -1121,6 +1368,54 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           <div style={{ color: "#94a3b8", fontSize: "13px", marginBottom: "12px" }}>
             {comercioSeleccionado.direccion || "Sin dirección cargada"}
           </div>
+
+          <button type="button" onClick={abrirMapaCliente}
+            style={{ ...estilos.botonGrande, backgroundColor: "#0369a1", marginBottom: "12px" }}>
+            📍 {comercioSeleccionado.latitud != null && comercioSeleccionado.longitud != null
+              ? "VER / CORREGIR UBICACIÓN EN MAPA" : "UBICAR CLIENTE EN MAPA"}
+          </button>
+
+          {mapaClienteAbierto && (
+            <div style={{ ...estilos.panelSeccion, marginBottom: "12px" }}>
+              <div style={{ fontWeight: 900, marginBottom: "6px" }}>🗺️ Ubicación manual del cliente</div>
+              <div style={{ fontSize: "12px", color: "#cbd5e1", marginBottom: "10px" }}>
+                Mové el mapa y tocá el lugar del comercio. También podés arrastrar el marcador para corregirlo.
+                No se consulta tu GPS ni se buscan direcciones automáticamente.
+              </div>
+              <div style={{ height: "330px", width: "100%", overflow: "hidden", borderRadius: "10px" }}>
+                <MapContainer
+                  key={`${comercioSeleccionado.id}-${Number(comercioSeleccionado.latitud)}-${Number(comercioSeleccionado.longitud)}`}
+                  center={puntoCliente || [-34.72, -58.29]}
+                  zoom={puntoCliente ? 16 : 11}
+                  scrollWheelZoom={false}
+                  style={{ height: "100%", width: "100%" }}>
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <CentrarMapaClienteSimplex centro={comercioSeleccionado.latitud != null && comercioSeleccionado.longitud != null ? [Number(comercioSeleccionado.latitud), Number(comercioSeleccionado.longitud)] : null} />
+                  <SeleccionarPuntoSimplex alSeleccionar={setPuntoCliente} />
+                  {puntoCliente && (
+                    <Marker position={puntoCliente} icon={iconoClienteSimplex} draggable
+                      eventHandlers={{ dragend: (e) => {
+                        const p = e.target.getLatLng();
+                        setPuntoCliente([p.lat, p.lng]);
+                      } }} />
+                  )}
+                </MapContainer>
+              </div>
+              <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
+                <button type="button" onClick={() => setMapaClienteAbierto(false)}
+                  style={{ ...estilos.botonChico, backgroundColor: "#475569", flex: 1 }}>Cancelar</button>
+                <button type="button" disabled={!puntoCliente || guardandoPuntoCliente}
+                  onClick={guardarUbicacionCliente}
+                  style={{ ...estilos.botonChico, backgroundColor: "#15803d", flex: 1,
+                    opacity: !puntoCliente || guardandoPuntoCliente ? 0.5 : 1 }}>
+                  {guardandoPuntoCliente ? "⏳ Guardando..." : "💾 Guardar ubicación"}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div
             style={{
@@ -1177,13 +1472,6 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             🧾 HISTORIAL DE COMPRAS
           </button>
 
-          <div style={estilos.avisoCalle}>
-            <div style={{ fontWeight: 900 }}>🚗 Funciones de calle</div>
-            <div style={{ marginTop: "5px", color: "#cbd5e1", lineHeight: 1.4 }}>
-              Rutas, visitas y GPS formarán parte de Simplex. En este primer paso
-              todavía no los activamos para no tocar el MAIN MAIN del Preventista.
-            </div>
-          </div>
         </main>
       </div>
     );
