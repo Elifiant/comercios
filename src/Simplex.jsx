@@ -58,7 +58,15 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [tomandoPedido, setTomandoPedido] = useState(false);
   const [viendoHistorial, setViendoHistorial] = useState(false);
-  const [vista, setVista] = useState("inicio");
+  const [vista, setVista] = useState("dia");
+  const [visitasHoy, setVisitasHoy] = useState([]);
+  const [visitaActiva, setVisitaActiva] = useState(null);
+  const [guardandoVisita, setGuardandoVisita] = useState(false);
+  const [motivoSinVenta, setMotivoSinVenta] = useState("No compró");
+  const [fechaRevisita, setFechaRevisita] = useState("");
+  const [notasVisita, setNotasVisita] = useState("");
+  const calendarioRevisitaRef = useRef(null);
+  const [mostrarRealizadas, setMostrarRealizadas] = useState(false);
   const [ventas, setVentas] = useState([]);
   const [cargandoVentas, setCargandoVentas] = useState(false);
   const [busquedaVentas, setBusquedaVentas] = useState("");
@@ -102,6 +110,60 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const claveRuta = perfil?.empresa_id && (sesion?.user?.id || perfil?.id)
     ? `simplex_ruta_manual_v1_${perfil.empresa_id}_${sesion?.user?.id || perfil.id}` : null;
 
+  const fechaLocal = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  };
+  const cargarVisitasHoy = async () => {
+    if (!perfil?.empresa_id) return;
+    const comienzo = new Date(); comienzo.setHours(0,0,0,0);
+    const fin = new Date(comienzo); fin.setDate(fin.getDate()+1);
+    const {data,error} = await supabase.from("visitas").select("id,comercio_id,resultado,observacion,fecha")
+      .eq("empresa_id",perfil.empresa_id).gte("fecha",comienzo.toISOString()).lt("fecha",fin.toISOString())
+      .order("fecha",{ascending:false});
+    if(error) { console.warn("Simplex - visitas:",error); return; }
+    setVisitasHoy(data||[]);
+  };
+  useEffect(() => {
+    if (!perfil?.empresa_id) return;
+    cargarVisitasHoy();
+    const alVolver = () => { if(document.visibilityState === "visible") cargarVisitasHoy(); };
+    document.addEventListener("visibilitychange",alVolver);
+    return () => document.removeEventListener("visibilitychange",alVolver);
+  },[perfil?.empresa_id]);
+  const registrarResultadoSimplex = async (resultado,observacion="",revisita="") => {
+    if (!visitaActiva?.id || !perfil?.empresa_id || guardandoVisita) return;
+    setGuardandoVisita(true);
+    try {
+      const observacionFinal = [observacion, notasVisita.trim() ? `Notas: ${notasVisita.trim()}` : ""].filter(Boolean).join(" | ");
+      const registro = {
+        comercio_id: visitaActiva.id,
+        comercio_nombre: visitaActiva.nombre || "Cliente",
+        preventista: perfil.nombre || sesion?.user?.email || "Vendedor Simplex",
+        empresa: perfil.empresa || "Simplex",
+        empresa_id: perfil.empresa_id,
+        resultado, observacion: observacionFinal || "Visita registrada en Simplex",
+        fecha: new Date().toISOString()
+      };
+      const {error} = await supabase.from("visitas").insert(registro);
+      if(error) throw error;
+      if(revisita) {
+        const {error: errorRevisita} = await supabase.from("comercios")
+          .update({revisita_fecha:revisita}).eq("id",visitaActiva.id).eq("empresa_id",perfil.empresa_id);
+        if(errorRevisita) alert("La visita quedó registrada, pero no se pudo programar la nueva fecha.");
+        else setComercios(prev=>prev.map(c=>String(c.id)===String(visitaActiva.id)?{...c,revisita_fecha:revisita}:c));
+      }
+      await cargarVisitasHoy();
+      setVisitaActiva(null); setComercioSeleccionado(null); setVista("dia");
+    } catch(error) {
+      console.error("Simplex - resultado de visita:",error);
+      alert("❌ No se pudo registrar la visita. Intentá nuevamente.");
+    } finally {setGuardandoVisita(false);}
+  };
+  const iniciarVisitaSimplex = (c) => {
+    setVisitaActiva(c); setComercioSeleccionado(c); setMotivoSinVenta("No compró");setFechaRevisita("");setNotasVisita("");
+    setVista("visita");
+  };
   const [guardandoRuta, setGuardandoRuta] = useState(false);
   const [estadoRuta, setEstadoRuta] = useState("");
 
@@ -133,7 +195,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           const remota = data.paradas.map(String);
           setParadasRuta(remota);
           localStorage.setItem(claveRuta, JSON.stringify(remota));
-          setEstadoRuta("☁️ Recorrido recuperado de Supabase.");
+          setEstadoRuta("☁️ Recorrido recuperado correctamente.");
         } else {
           setEstadoRuta(local.length
             ? "📱 Recorrido anterior recuperado de este dispositivo. Guardalo para sincronizarlo."
@@ -141,7 +203,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
         }
       } catch (error) {
         console.error("Simplex - error recuperando recorrido de Supabase:", error);
-        if (!cancelado) setEstadoRuta("⚠️ No se pudo consultar Supabase. Tu recorrido local sigue disponible.");
+        if (!cancelado) setEstadoRuta("⚠️ No se pudo recuperar el recorrido en línea. Tu recorrido local sigue disponible.");
       } finally {
         if (!cancelado) setRutaRecuperada(true);
       }
@@ -168,12 +230,12 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       if (error) throw error;
       try { localStorage.setItem(claveRuta, JSON.stringify(paradasRuta)); }
       catch (localError) { console.warn("Simplex - no se pudo actualizar copia local", localError); }
-      setEstadoRuta("☁️ Recorrido guardado en Supabase y disponible en otros dispositivos.");
-      alert("✅ Recorrido guardado en Supabase. Ya podés abrirlo desde otro dispositivo con la misma cuenta.");
+      setEstadoRuta("☁️ Recorrido guardado y disponible en otros dispositivos.");
+      alert("✅ Recorrido guardado correctamente. Ya podés abrirlo desde otro dispositivo con la misma cuenta.");
     } catch (error) {
       console.error("Simplex - error guardando recorrido:", error);
       setEstadoRuta("⚠️ No se pudo sincronizar el recorrido.");
-      alert(`❌ No se pudo guardar en Supabase.\n\n${error?.message || "Error desconocido"}\n\nTu recorrido sigue visible en pantalla.`);
+      alert(`❌ No se pudo guardar el recorrido en línea.\n\n${error?.message || "Error desconocido"}\n\nTu recorrido sigue visible en pantalla.`);
     } finally { setGuardandoRuta(false); }
   };
 
@@ -548,6 +610,8 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       cargarProductosParaConsulta();
       return;
     }
+    if (modulo === "dia") return setVista("dia");
+    if (modulo === "preciosStock") return setVista("preciosStock");
     if (modulo === "ruta") return setVista("ruta");
     if (modulo === "clientes") return setVista("clientes");
     if (modulo === "ventas") {
@@ -854,6 +918,10 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             return;
           }
 
+          if (visitaActiva && !eraEdicion) {
+            registrarResultadoSimplex("Tomó Pedido", "Venta realizada");
+            return;
+          }
           // Fuerza recarga del resumen sin registrar una visita:
           const actual = comercioSeleccionado;
           setComercioSeleccionado(null);
@@ -863,6 +931,75 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     );
   }
 
+  if (vista === "visita" && visitaActiva) {
+    return <div style={estilos.pagina}>
+      <header style={estilos.header}><button style={estilos.botonVolver} onClick={()=>{setVisitaActiva(null);setComercioSeleccionado(null);setVista("dia");}}>← Mi día</button><span style={estilos.marcaChica}>RutaComercios Simplex</span></header>
+      <main style={estilos.contenedorFicha}>
+        <h2 style={{color:"#f8fafc"}}>📍 {visitaActiva.nombre}</h2><p style={{color:"#cbd5e1"}}>{visitaActiva.direccion||"Sin dirección"}</p>
+        <div style={estilos.panelSeccion}>📍 Llegaste al comercio. Elegí cómo terminó la visita. Hasta entonces seguirá pendiente.</div>
+        <div style={estilos.panelSeccion}>
+          <label htmlFor="notas-visita-simplex" style={{display:"block",fontWeight:800,marginBottom:9}}>📝 NOTAS / OBSERVACIONES</label>
+          <textarea id="notas-visita-simplex" value={notasVisita} onChange={e=>setNotasVisita(e.target.value)}
+            placeholder="Ej.: Pidió que vuelva con una muestra, consultar precio, llamar antes..."
+            rows={3} style={{...estilos.input,width:"100%",boxSizing:"border-box",resize:"vertical",fontFamily:"inherit",minHeight:90}} />
+          <div style={{fontSize:12,color:"#94a3b8",marginTop:7}}>Opcional. Se guarda junto con el resultado de la visita.</div>
+        </div>
+        <button disabled={guardandoVisita} style={{...estilos.botonGrande,backgroundColor:"#15803d"}} onClick={()=>setTomandoPedido(true)}>🛒 HACER VENTA</button>
+        <div style={estilos.panelSeccion}>
+          <strong>🚫 SIN VENTA</strong>
+          <select value={motivoSinVenta} onChange={e=>setMotivoSinVenta(e.target.value)} style={{...estilos.input,marginTop:10}}>
+            {["No compró","Comercio cerrado","Cliente ausente","No interesado","Otro motivo"].map(x=><option key={x}>{x}</option>)}
+          </select>
+          <button disabled={guardandoVisita} style={{...estilos.botonGrande,backgroundColor:"#b45309"}} onClick={()=>registrarResultadoSimplex("Sin venta",motivoSinVenta)}>{guardandoVisita?"⏳ GUARDANDO...":"CONFIRMAR SIN VENTA"}</button>
+        </div>
+        <div style={estilos.panelSeccion}>
+          <strong>📅 REVISITAR OTRO DÍA</strong>
+          <div style={{display:"flex",gap:8,alignItems:"stretch",marginTop:10}}>
+            <input ref={calendarioRevisitaRef} aria-label="Fecha para revisitar" type="date" min={fechaLocal()} value={fechaRevisita}
+              onChange={e=>setFechaRevisita(e.target.value)} style={{...estilos.input,flex:1,minWidth:0,margin:0,colorScheme:"dark"}}/>
+            <button type="button" aria-label="Abrir calendario" onClick={()=>{
+              const campo=calendarioRevisitaRef.current;
+              if(!campo) return;
+              try { if(typeof campo.showPicker === "function") campo.showPicker(); else campo.focus(); }
+              catch(e) { campo.focus(); }
+            }} style={{padding:"10px 14px",borderRadius:8,border:"1px solid #64748b",backgroundColor:"#334155",color:"#fff",fontSize:22,cursor:"pointer"}}>📅</button>
+          </div>
+          {fechaRevisita && <div style={{color:"#bfdbfe",fontSize:13,marginTop:8}}>Volver el {fechaRevisita.split("-").reverse().join("/")}</div>}
+          <button disabled={guardandoVisita||!fechaRevisita||fechaRevisita<=fechaLocal()} style={{...estilos.botonGrande,backgroundColor:"#2563eb",opacity:!fechaRevisita||fechaRevisita<=fechaLocal()?0.5:1}} onClick={()=>registrarResultadoSimplex("Revisitar",`Revisitar el ${fechaRevisita}`,fechaRevisita)}>GUARDAR REVISITA</button>
+        </div>
+      </main></div>;
+  }
+  if (vista === "dia") {
+    const ids = new Set(comercios.map(c=>String(c.id)));
+    const paradas = paradasRuta.filter(id=>ids.has(String(id))).map(id=>comercios.find(c=>String(c.id)===String(id))).filter(Boolean);
+    const visitadas = new Map();
+    visitasHoy.forEach(v=>{const id=String(v.comercio_id);if(!visitadas.has(id))visitadas.set(id,v);});
+    const pendientes = paradas.filter(c=>!visitadas.has(String(c.id)));
+    const realizadas = paradas.filter(c=>visitadas.has(String(c.id)));
+    return <div style={estilos.pagina}>
+      <header style={estilos.headerPrincipal}><div><strong>🚗 RutaComercios Simplex</strong><div style={{fontSize:12,color:"#94a3b8"}}>Mi día de trabajo</div></div><button onClick={()=>setVista("inicio")} style={{...estilos.botonChico,width:"auto",backgroundColor:"#334155"}}>☰ MENÚ</button></header>
+      <main style={estilos.contenedor}>
+        <h2 style={{marginTop:0,color:"#f8fafc"}}>📋 Mi día de trabajo</h2>
+        <div style={{...estilos.panelSeccion,display:"flex",justifyContent:"space-around",textAlign:"center"}}><div><strong>{paradas.length}</strong><div style={{fontSize:12}}>Programadas</div></div><div><strong>{pendientes.length}</strong><div style={{fontSize:12}}>Pendientes</div></div><div><strong>{realizadas.length}</strong><div style={{fontSize:12}}>Realizadas</div></div></div>
+        {!rutaRecuperada ? <div style={estilos.mensaje}>⏳ Recuperando recorrido...</div> : paradas.length===0 ? <div style={estilos.panelSeccion}>Todavía no tenés paradas en tu recorrido.<button onClick={()=>setVista("ruta")} style={{...estilos.botonGrande,backgroundColor:"#2563eb",marginTop:12}}>🗺️ ORGANIZAR MI RECORRIDO</button></div> : null}
+        {pendientes.map((c,i)=><div key={c.id} style={estilos.panelSeccion}><div style={{fontWeight:900}}>{i+1}. 🏪 {c.nombre}</div><div style={{fontSize:12,color:"#94a3b8",margin:"5px 0 12px"}}>{c.direccion||"Sin dirección"}</div>{i===0 ? <button onClick={()=>iniciarVisitaSimplex(c)} style={{...estilos.botonGrande,backgroundColor:"#16a34a",marginBottom:0}}>📍 LLEGUÉ</button> : <div style={{fontSize:12,color:"#94a3b8",marginTop:8}}>⏳ Próxima parada: esperá a finalizar la visita anterior.</div>}</div>)}
+        {realizadas.length>0 && <div style={estilos.panelSeccion}><button onClick={()=>setMostrarRealizadas(v=>!v)} style={{...estilos.botonGrande,backgroundColor:"#334155",marginBottom:mostrarRealizadas?12:0}}>✅ VISITAS REALIZADAS ({realizadas.length}) {mostrarRealizadas?"▲":"▼"}</button>{mostrarRealizadas&&realizadas.map(c=>{
+          const visita=visitadas.get(String(c.id));
+          const esRevisita=String(visita?.resultado||"").toLowerCase()==="revisitar";
+          const fechaEnNota=String(visita?.observacion||"").match(/Revisitar el (\d{4}-\d{2}-\d{2})/i)?.[1];
+          const fechaProgramada=fechaEnNota || c.revisita_fecha;
+          const fechaLegible=fechaProgramada ? String(fechaProgramada).slice(0,10).split("-").reverse().join("/") : "";
+          const nota=String(visita?.observacion||"").split(" | ").find(x=>x.startsWith("Notas: "))?.slice(7);
+          return <div key={c.id} style={{padding:"10px 0",borderBottom:"1px solid #334155"}}>
+            <strong>🏪 {c.nombre}</strong>
+            {esRevisita && fechaLegible && <div style={{fontSize:13,fontWeight:800,color:"#bfdbfe",marginTop:5}}>📅 Revisitar: {fechaLegible}</div>}
+            <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>{visita?.resultado} · Visita: {new Date(visita?.fecha).toLocaleDateString("es-AR")} {new Date(visita?.fecha).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</div>
+            {nota && <div style={{fontSize:12,color:"#cbd5e1",marginTop:5,whiteSpace:"pre-wrap"}}>📝 {nota}</div>}
+          </div>;
+        })}</div>}
+        <button onClick={()=>setVista("ruta")} style={{...estilos.botonGrande,backgroundColor:"#1d4ed8"}}>🗺️ ORGANIZAR / MODIFICAR RECORRIDO</button>
+      </main></div>;
+  }
   if (vista === "ruta") {
     const ubicados = comercios.filter(c => c.latitud != null && c.longitud != null
       && Number.isFinite(Number(c.latitud)) && Number.isFinite(Number(c.longitud))
@@ -876,13 +1013,13 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     return (
       <div style={estilos.pagina}>
         <header style={estilos.header}>
-          <button type="button" onClick={() => setVista("inicio")} style={estilos.botonVolver}>← Inicio</button>
+          <button type="button" onClick={() => setVista("dia")} style={estilos.botonVolver}>← Inicio</button>
           <div style={estilos.marcaChica}>RutaComercios Simplex · V1.2</div>
         </header>
         <main style={estilos.contenedorFicha}>
           <h2 style={{marginTop:0}}>🗺️ Rutas y visitas</h2>
           <div style={{fontSize:"12px",color:"#cbd5e1",marginBottom:"12px"}}>
-            Elegí los clientes y acomodalos en el orden en que quieras visitarlos. Sin GPS, Geoapify ni cálculo automático de rutas.
+            Elegí los clientes y acomodalos en el orden en que quieras visitarlos.
           </div>
           {ubicados.length > 0 ? (
             <div style={{height:"340px",width:"100%",overflow:"hidden",borderRadius:"12px",marginBottom:"12px"}}>
@@ -931,7 +1068,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             <button type="button" disabled={!rutaRecuperada || guardandoRuta} onClick={guardarRutaSincronizada}
               style={{...estilos.botonGrande,backgroundColor:"#15803d",marginTop:"12px"}}>{guardandoRuta ? "⏳ GUARDANDO..." : "💾 GUARDAR MI RECORRIDO"}</button>
             <div style={{fontSize:"11px",color:"#94a3b8",marginTop:"8px"}}>
-              {estadoRuta || "Sincronización de recorridos con Supabase."}
+              {estadoRuta || "Tu recorrido se sincroniza entre dispositivos."}
             </div>
           </div>
           {sinUbicar.length > 0 && <div style={estilos.panelSeccion}>
@@ -963,7 +1100,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     return (
       <div style={estilos.pagina}>
         <header style={estilos.header}>
-          <button type="button" onClick={() => setVista("inicio")} style={estilos.botonVolver}>← Inicio</button>
+          <button type="button" onClick={() => setVista("dia")} style={estilos.botonVolver}>← Inicio</button>
           <div style={estilos.marcaChica}>RutaComercio Simplex · V1.2</div>
         </header>
 
@@ -1156,6 +1293,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     );
   }
 
+  if (vista === "preciosStock") return <div style={estilos.pagina}><header style={estilos.header}><button style={estilos.botonVolver} onClick={()=>setVista("inicio")}>← Menú</button><span style={estilos.marcaChica}>RutaComercios Simplex</span></header><main style={estilos.contenedorFicha}><h2>📦 Precios y stock</h2><button style={{...estilos.botonGrande,backgroundColor:"#0369a1"}} onClick={()=>abrirModulo("consultarPrecios")}>🔎 CONSULTAR PRECIOS Y STOCK</button><button style={{...estilos.botonGrande,backgroundColor:"#475569"}} onClick={()=>abrirModulo("productos")}>📋 PRODUCTOS Y LISTAS DE PRECIOS</button></main></div>;
   if (vista === "consultarPrecios") {
     const q=busquedaPrecio.trim().toLowerCase();
     const resultados=q ? productosPrecio.filter(p =>
@@ -1502,12 +1640,10 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             </div>
             <div style={estilos.modulos}>
               {[
-                ["consultarPrecios","🔎","Consultar precios","Buscá rápidamente código, producto o marca"],
+                ["dia","🚗","Mi día de trabajo","Pendientes y visitas realizadas"],
                 ["clientes","🏪","Clientes","Alta, búsqueda, pedidos e historial"],
                 ["ventas","🧾","Ventas","NVI e historial general"],
-                ["productos","📦","Productos y precios","Catálogo y precios"],
-                ["stock","📊","Stock","Existencias y alertas"],
-                ["ruta","🗺️","Rutas y visitas","Organizá tus días de calle"],
+                ["preciosStock","📦","Precios y stock","Consulta, catálogo y existencias"],
                 ["estadisticas","📈","Estadísticas","Tu actividad y resultados"],
               ].map(([id,icono,titulo,detalle]) => (
                 <button key={id} type="button" onClick={() => abrirModulo(id)} style={estilos.modulo}>
