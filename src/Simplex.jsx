@@ -89,6 +89,9 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const [nombreLista, setNombreLista] = useState("");
   const [codigoLista, setCodigoLista] = useState("");
   const [guardandoLista, setGuardandoLista] = useState(false);
+  const [manualAlta, setManualAlta] = useState({codigo:"",descripcion:"",marca:"",gtin:"",precio:"",stock:"0",color:"",talle:""});
+  const [variantesManual, setVariantesManual] = useState([]);
+  const [modoVarianteExistente, setModoVarianteExistente] = useState(false);
   const [listaActualizando, setListaActualizando] = useState(null);
   const [archivoActualizacionNombre, setArchivoActualizacionNombre] = useState("");
   const [vistaPreviaActualizacion, setVistaPreviaActualizacion] = useState(null);
@@ -98,7 +101,6 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const inputIngresoStockRef = useRef(null);
   const [vistaPreviaIngresoStock, setVistaPreviaIngresoStock] = useState(null);
   const [guardandoIngresoStock, setGuardandoIngresoStock] = useState(false);
-  const [preparandoDemo010, setPreparandoDemo010] = useState(false);
   const [nuevoCliente, setNuevoCliente] = useState({
     nombre: "", direccion: "", localidad: "", partido: "",
     provincia: "", pais: "Argentina", rubro: "General", telefono: "",
@@ -517,6 +519,39 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     }
   };
 
+  // Ajusta SOLO la fila color/talle seleccionada en el depósito principal.
+  const corregirStockVarianteSimplex = async (producto, variante) => {
+    const etiqueta = [variante.color && `color ${variante.color}`, variante.talle && `talle ${variante.talle}`].filter(Boolean).join(" · ");
+    const respuesta = window.prompt(
+      `Cantidad REAL de ${producto.nombre} (${etiqueta}):`,
+      String(variante.cantidad)
+    );
+    if (respuesta === null) return;
+    const texto = respuesta.trim();
+    const cantidad = Number(texto);
+    if (!/^\d+$/.test(texto) || !Number.isSafeInteger(cantidad)) {
+      alert("Ingresá una cantidad entera igual o mayor a cero.");
+      return;
+    }
+    if (cantidad === variante.cantidad) return;
+    if (!window.confirm(`¿Corregir ${producto.nombre} (${etiqueta}) de ${variante.cantidad} a ${cantidad} unidades?\n\nLos otros talles no se modifican.`)) return;
+    try {
+      const { data, error } = await supabase.rpc("simplex_corregir_stock_variante", {
+        p_producto_id: producto.id,
+        p_color: variante.color || "",
+        p_talle: variante.talle || "",
+        p_cantidad: cantidad
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error("No se confirmó la corrección.");
+      await cargarProductosParaConsulta();
+      alert(`Stock corregido: ${etiqueta} → ${cantidad} unidades.`);
+    } catch (error) {
+      console.error("Simplex - corrección por variante:", error);
+      alert(`No se pudo corregir este talle. ${error?.message || ""}`);
+    }
+  };
+
   const cargarVentas = async () => {
     if (!perfil?.empresa_id) return;
     setCargandoVentas(true);
@@ -754,53 +789,145 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
         const gtin=String(campo(fila,["gtin","ean","ean13","codigo barras","código de barras"])||"").trim();
         const descripcion=String(campo(fila,["descripcion","descripción","producto","articulo","artículo"])||"").trim();
         const marca=String(campo(fila,["marca"])||"").trim();
+        const color=String(campo(fila,["color"])||"").trim();
+        const talle=String(campo(fila,["talle","talla"])||"").trim();
         const pr=campo(fila,["precio","precio venta","pvp"]);
-        let precio=typeof pr==="number"?pr:Number(String(pr??"").trim().replace(/\s/g,"").replace(/\./g,"").replace(",","."));
+        const cantidad=campo(fila,["stock","stock inicial","existencia","cantidad"]);
+        const numero=v=>typeof v==="number"?v:Number(String(v??"").trim().replace(/\s/g,"").replace(/\.(?=\d{3}(?:\D|$))/g,"").replace(",","."));
+        const precio=numero(pr);
+        const stock=String(cantidad??"").trim()===""?0:numero(cantidad);
         const errores=[];
         if(!codigo) errores.push("Falta código");
         if(!descripcion) errores.push("Falta descripción");
         if(!Number.isFinite(precio)||precio<0) errores.push("Precio inválido");
-        return {fila:i+2,codigo,gtin,descripcion,marca,precio,errores};
+        if(!Number.isSafeInteger(stock)||stock<0) errores.push("Stock inicial inválido");
+        return {fila:i+2,codigo,gtin,descripcion,marca,precio,stock,color,talle,errores};
       });
-      setVistaPreviaLista({total:productos.length,validos:productos.filter(p=>!p.errores.length),conProblemas:productos.filter(p=>p.errores.length)});
+      const porCodigo=new Map();
+      for(const p of productos){
+        const key=p.codigo.toUpperCase();
+        if(!key) continue;
+        if(!porCodigo.has(key)) porCodigo.set(key,[]);
+        porCodigo.get(key).push(p);
+      }
+      for(const grupo of porCodigo.values()){
+        if(grupo.length<2) continue;
+        const combinaciones=new Set();
+        const base=grupo[0];
+        for(const p of grupo){
+          if(!p.color&&!p.talle) p.errores.push("Código repetido sin variante (color/talle)");
+          if(p.descripcion.toLowerCase()!==base.descripcion.toLowerCase()||p.precio!==base.precio||p.marca.toLowerCase()!==base.marca.toLowerCase())
+            p.errores.push("Las variantes del mismo código deben tener igual descripción, marca y precio");
+          const variante=`${p.color.toLowerCase()}|${p.talle.toLowerCase()}`;
+          if(combinaciones.has(variante)) p.errores.push("Variante repetida para el mismo código");
+          combinaciones.add(variante);
+        }
+      }
+      const validos=productos.filter(p=>!p.errores.length);
+      const conProblemas=productos.filter(p=>p.errores.length);
+      const conStock=validos.filter(p=>p.stock>0);
+      const conVariantes=validos.filter(p=>p.color||p.talle);
+      setVistaPreviaLista({total:productos.length,validos,conProblemas,conStock,conVariantes,
+        codigosUnicos:new Set(validos.map(p=>p.codigo.toUpperCase())).size,
+        unidadesIniciales:validos.reduce((n,p)=>n+p.stock,0)});
     } catch(error) {
       console.error(error); alert("❌ No pude leer el archivo. Usá la plantilla oficial.");
     } finally { event.target.value=""; }
   };
 
-  const crearListaInicial = async () => {
-    if(!perfil?.empresa_id) return alert("⚠️ No pude identificar la empresa.");
-    if(!nombreLista.trim()||!codigoLista.trim()) return alert("⚠️ Completá nombre y código de referencia.");
-    if(!vistaPreviaLista?.validos?.length) return alert("⚠️ Primero elegí una planilla.");
-    if(vistaPreviaLista.conProblemas.length) return alert("⚠️ Corregí las filas con problemas.");
-    if(!window.confirm(`⚠️ CARGAR PRODUCTOS Y PRECIOS\n\n${nombreLista.trim()}\nProductos: ${vistaPreviaLista.validos.length}\n\n¿Confirmar?`)) return;
-
+  // El alta completa requiere una única transacción del servidor que cree
+  // producto + precio + stock del depósito. Nunca escribirlos por separado.
+  const confirmarAltaSimplex = async (filas, origen="Excel") => {
+    if (!perfil?.empresa_id || guardandoLista) return;
+    if (!Array.isArray(filas) || !filas.length) return alert("Primero cargá al menos un artículo.");
+    const listaExistente = listasPrecios.find(l=>l.predeterminada) || listasPrecios[0] || null;
+    if (!listaExistente && (!nombreLista.trim() || !codigoLista.trim()))
+      return alert("Para la primera carga completá el nombre y código de referencia de la lista.");
+    const total = filas.reduce((n,p)=>n+Number(p.stock||0),0);
+    if (!window.confirm(`ALTA DE PRODUCTOS SIMPLEX\n\nOrigen: ${origen}\nArtículos: ${new Set(filas.map(p=>p.codigo.toUpperCase())).size}\nFilas / variantes: ${filas.length}\nStock inicial: ${total} unidades\n\nSe crearán productos NUEVOS con sus precios y stock inicial.\nSi algo falla, no se guardará ninguna fila.\n\n¿Confirmar?`)) return;
     setGuardandoLista(true);
-    let listaCreada=null;
     try {
-      const {data:lista,error}=await supabase.from("listas_precios").insert({
-        nombre:nombreLista.trim(), codigo:codigoLista.trim(), activo:true,
-        predeterminada:listasPrecios.length===0, empresa_id:perfil.empresa_id, empresa:perfil.empresa||null
-      }).select("*").single();
-      if(error) throw error;
-      listaCreada=lista;
-
-      const productosNuevos=vistaPreviaLista.validos.map(p=>({
-        codigo:p.codigo, gtin:p.gtin||"", nombre:p.descripcion, descripcion:p.descripcion, marca:p.marca||"", precio:Number(p.precio)
-      }));
-      const {data:res,error:errorRpc}=await supabase.rpc("actualizar_lista_precios",{
-        p_lista_id:lista.id,p_cambios_precio:[],p_productos_nuevos:productosNuevos,p_productos_quitar:[]
+      const {data,error} = await supabase.rpc("simplex_alta_productos",{
+        p_lista_id: listaExistente?.id || null,
+        p_productos: filas.map(p=>({codigo:p.codigo,descripcion:p.descripcion,marca:p.marca||"",gtin:p.gtin||"",precio:Number(p.precio),stock:Number(p.stock),color:p.color||"",talle:p.talle||""})),
+        p_nombre_lista:listaExistente ? null : nombreLista.trim(),
+        p_codigo_lista:listaExistente ? null : codigoLista.trim()
       });
-      if(errorRpc) throw errorRpc;
-      if(!res?.ok) throw new Error("Supabase no confirmó la carga de productos.");
-
-      alert(`✅ PRODUCTOS Y PRECIOS CARGADOS\n\n${nombreLista.trim()}\nProductos: ${res.productos_creados ?? productosNuevos.length}\n\nLa columna stock todavía no se guarda desde esta pantalla.`);
-      setNombreLista(""); setCodigoLista(""); setArchivoListaNombre(""); setVistaPreviaLista(null);
+      if (error) throw error;
+      if (!data?.ok) throw new Error("El servidor no confirmó el alta.");
+      alert(`ALTA COMPLETADA\n\nProductos creados: ${data.productos_creados}\nVariantes / filas: ${data.variantes_cargadas}\nUnidades iniciales: ${data.unidades_iniciales}`);
+      setVistaPreviaLista(null);setArchivoListaNombre("");
+      setManualAlta({codigo:"",descripcion:"",marca:"",gtin:"",precio:"",stock:"0",color:"",talle:""});
+      setVariantesManual([]);
       await cargarListasPrecios();
     } catch(error) {
-      if(listaCreada?.id) await supabase.from("listas_precios").delete().eq("id",listaCreada.id).eq("empresa_id",perfil.empresa_id);
-      console.error(error); alert(`❌ No se pudieron cargar los productos y precios.\n\n${error?.message||"Error desconocido"}`);
-    } finally { setGuardandoLista(false); }
+      console.error("Simplex - alta de productos:",error);
+      alert(`No se pudo completar el alta.\n\n${error?.message||"Error desconocido"}\n\nNo vuelvas a confirmar sin revisar el catálogo.`);
+    } finally {setGuardandoLista(false);}
+  };
+
+  const crearListaInicial = async () => {
+    if (!vistaPreviaLista?.validos?.length) return alert("Primero seleccioná un Excel.");
+    if (vistaPreviaLista.conProblemas?.length) return alert("Corregí todas las filas con problemas.");
+    await confirmarAltaSimplex(vistaPreviaLista.validos, archivoListaNombre||"Excel");
+  };
+
+  const validarFilaManual = (soloVarianteExistente=false) => {
+    const p=manualAlta;
+    const precio=Number(String(p.precio).replace(",","."));
+    const stock=Number(String(p.stock).replace(",","."));
+    if (!p.codigo.trim() || (!soloVarianteExistente && (!p.descripcion.trim() || String(p.precio).trim()==="" || !Number.isFinite(precio) || precio<0)) || !Number.isSafeInteger(stock) || stock<0) {
+      alert(soloVarianteExistente ? "Completá código y stock entero mayor o igual a cero." : "Completá código, descripción, precio válido y stock entero mayor o igual a cero.");
+      return null;
+    }
+    return {...p,codigo:p.codigo.trim().toUpperCase(),descripcion:p.descripcion.trim(),marca:p.marca.trim(),precio,stock,color:p.color.trim(),talle:p.talle.trim()};
+  };
+
+  const agregarVarianteManual = () => {
+    const fila=validarFilaManual();
+    if (!fila) return;
+    if (!fila.color && !fila.talle) return alert("Para agregar variantes, indicá un color o talle.");
+    if (variantesManual.length) {
+      const base=variantesManual[0];
+      if (base.codigo!==fila.codigo || base.descripcion.toLowerCase()!==fila.descripcion.toLowerCase() || base.marca.toLowerCase()!==fila.marca.toLowerCase() || base.precio!==fila.precio)
+        return alert("Las variantes deben compartir código, descripción, marca y precio.");
+      if (variantesManual.some(v=>v.color.toLowerCase()===fila.color.toLowerCase() && v.talle.toLowerCase()===fila.talle.toLowerCase()))
+        return alert("Ese color y talle ya están agregados.");
+      if ((!!base.color)!=(!!fila.color) || (!!base.talle)!=(!!fila.talle))
+        return alert("Todas las variantes deben usar los mismos campos de color y talle.");
+    }
+    setVariantesManual(v=>[...v,fila]);
+    setManualAlta(v=>({...v,color:"",talle:"",stock:"0"}));
+  };
+
+  const crearProductoManual = async () => {
+    if (variantesManual.length) {
+      if (modoVarianteExistente) return alert("Para un producto existente, usá Agregar variante al producto existente.");
+      await confirmarAltaSimplex(variantesManual,"Carga manual con variantes");
+      return;
+    }
+    const fila=validarFilaManual(modoVarianteExistente);
+    if (!fila) return;
+    if (modoVarianteExistente) {
+      if (!fila.color && !fila.talle) return alert("Indicá el color o talle de la nueva variante.");
+      if (!window.confirm(`AGREGAR VARIANTE A PRODUCTO EXISTENTE\n\nCódigo: ${fila.codigo}\nColor: ${fila.color||"—"}\nTalle: ${fila.talle||"—"}\nStock inicial de esta variante: ${fila.stock}\n\nNo se modificará el precio ni el stock de otras variantes. ¿Confirmar?`)) return;
+      setGuardandoLista(true);
+      try {
+        const {data,error}=await supabase.rpc("simplex_agregar_variante",{
+          p_codigo:fila.codigo,p_color:fila.color,p_talle:fila.talle,p_stock:fila.stock
+        });
+        if (error) throw error;
+        if (!data?.ok) throw new Error("El servidor no confirmó la variante.");
+        alert(`VARIANTE AGREGADA\n\n${fila.codigo} · ${fila.color} ${fila.talle}\nStock inicial: ${fila.stock}`);
+        setManualAlta({codigo:"",descripcion:"",marca:"",gtin:"",precio:"",stock:"0",color:"",talle:""});
+        setModoVarianteExistente(false);
+      } catch(error) {
+        console.error("Simplex - variante:",error);
+        alert(`No se agregó la variante.\n\n${error?.message||"Error desconocido"}`);
+      } finally {setGuardandoLista(false);}
+      return;
+    }
+    await confirmarAltaSimplex([fila],"Carga manual");
   };
 
   const iniciarActualizacionLista = (lista) => {
@@ -872,83 +999,23 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     if(!listaActualizando?.id||!vistaPreviaActualizacion) return;
     const c=vistaPreviaActualizacion;
     if(c.conProblemas?.length) return alert("⚠️ Corregí primero las filas con problemas.");
-    if(!window.confirm(`🔄 ACTUALIZAR PRODUCTOS Y PRECIOS\nCambios de precio: ${c.cambiosPrecio.length}\nProductos nuevos: ${c.productosNuevos.length}\nProductos conservados aunque no figuren en el Excel: sí\n\n¿Confirmar actualización?`)) return;
+    if(c.productosNuevos?.length) return alert(`⚠️ Hay ${c.productosNuevos.length} códigos que todavía no existen.\n\nACTUALIZAR PRECIOS no crea artículos. Dales de alta primero y después actualizá sus precios.`);
+    if(!window.confirm(`💲 ACTUALIZAR PRECIOS\nCambios de precio: ${c.cambiosPrecio.length}\nCódigos no dados de alta: ${c.productosNuevos.length}\nProductos conservados aunque no figuren en el Excel: sí\n\n¿Confirmar actualización?`)) return;
     setGuardandoActualizacion(true);
     try{
       const {data:res,error}=await supabase.rpc("actualizar_lista_precios",{
         p_lista_id:listaActualizando.id,p_cambios_precio:c.cambiosPrecio,
-        p_productos_nuevos:c.productosNuevos,p_productos_quitar:[]
+        p_productos_nuevos:[],p_productos_quitar:[]
       });
       if(error) throw error;
       if(!res?.ok) throw new Error("Supabase no confirmó la actualización.");
-      alert(`✅ PRODUCTOS Y PRECIOS ACTUALIZADOS\n\nLos artículos ausentes del Excel se conservaron. El stock todavía no se actualiza desde esta pantalla.`);
+      alert(`✅ PRECIOS ACTUALIZADOS\n\nLos artículos ausentes del Excel se conservaron. No se modificó el stock ni se crearon artículos.`);
       setListaActualizando(null); setArchivoActualizacionNombre(""); setVistaPreviaActualizacion(null);
       await cargarListasPrecios();
     }catch(error){
       console.error("Simplex - error actualizando lista:",error);
       alert(`❌ No se pudieron actualizar los productos y precios.\n\n${error?.message||"Error desconocido"}`);
     }finally{setGuardandoActualizacion(false);}
-  };
-
-  // Prueba acotada a SIMPLEX DEMO: un producto con dos talles.
-  // El catálogo se crea sin stock; las existencias se ingresan con el flujo Excel ya probado.
-  const prepararBotinDemo010 = async () => {
-    if (perfil?.empresa_id !== "27f69558-681d-46ae-a7fb-e23b45550918" || preparandoDemo010) return;
-    if (!window.confirm("Crear DEM010 · Botín de seguridad · $25.000\n\nSe habilitarán color y talle. No se cargará stock todavía.\n\n¿Continuar?")) return;
-    setPreparandoDemo010(true);
-    try {
-      const { data: listas, error: eListas } = await supabase.from("listas_precios")
-        .select("id,predeterminada").eq("empresa_id",perfil.empresa_id)
-        .eq("activo",true).order("predeterminada",{ascending:false});
-      if (eListas) throw eListas;
-      const lista = (listas || []).find(l => l.predeterminada) || (listas || [])[0];
-      if (!lista?.id) throw new Error("No existe una lista de precios activa.");
-
-      const buscarDemo010 = async () => {
-        const { data, error } = await supabase.from("lista_productos")
-          .select("producto_id,codigo_lista,productos(id,codigo_cge,usa_color,usa_talle)")
-          .eq("lista_id",lista.id).eq("activo",true);
-        if (error) throw error;
-        return (data || []).filter(x =>
-          [x.codigo_lista,x.productos?.codigo_cge].some(c => String(c || "").trim().toLowerCase() === "dem010"));
-      };
-      let coincidencias = await buscarDemo010();
-      if (coincidencias.length > 1) throw new Error("DEM010 aparece más de una vez en la lista. No se modificó el catálogo.");
-      if (!coincidencias.length) {
-        const { data: res, error } = await supabase.rpc("actualizar_lista_precios",{
-          p_lista_id:lista.id,
-          p_cambios_precio:[],
-          p_productos_nuevos:[{codigo:"DEM010",gtin:"",nombre:"Botín de seguridad",descripcion:"Botín de seguridad",marca:"DEMO",precio:25000}],
-          p_productos_quitar:[]
-        });
-        if (error) throw error;
-        if (!res?.ok) throw new Error("No se confirmó la creación del producto.");
-        coincidencias = await buscarDemo010();
-      }
-      const articulo = coincidencias[0];
-      if (!articulo?.producto_id) throw new Error("No pude identificar DEM010. Revisá el catálogo antes de reintentar.");
-      const { error: errorVariantes } = await supabase.rpc("simplex_configurar_variantes",{
-        p_producto_id:articulo.producto_id,p_usa_color:true,p_usa_talle:true
-      });
-      if (errorVariantes) throw errorVariantes;
-      await cargarListasPrecios();
-      alert("DEM010 está preparado con color y talle.\n\nAhora descargá el Excel de prueba e ingresá las 5 unidades del talle 40 y las 8 del talle 41.");
-    } catch (error) {
-      console.error("Simplex - preparando DEM010:",error);
-      alert(`No se pudo completar la preparación de DEM010.\n\n${error?.message || "Error desconocido"}\n\nNo se ingresó stock desde este botón.`);
-    } finally { setPreparandoDemo010(false); }
-  };
-
-  const descargarExcelBotinDemo010 = () => {
-    const hoja = XLSX.utils.aoa_to_sheet([
-      ["codigo","gtin","descripcion","marca","precio","stock","color","talle"],
-      ["DEM010","","Botín de seguridad","DEMO",25000,5,"Negro","40"],
-      ["DEM010","","Botín de seguridad","DEMO",25000,8,"Negro","41"]
-    ]);
-    hoja["!cols"] = [{wch:15},{wch:17},{wch:30},{wch:14},{wch:14},{wch:12},{wch:16},{wch:12}];
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro,hoja,"Prueba DEM010");
-    XLSX.writeFile(libro,"simplex_prueba_DEM010_variantes.xlsx");
   };
 
   // Ingreso de mercadería separado de la actualización de precios.
@@ -1645,7 +1712,13 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
                               {p.variantesStock?.length ? p.variantesStock.map((v,i) => (
                                 <div key={`${v.color}-${v.talle}-${i}`} style={{display:"flex",justifyContent:"space-between",gap:12,padding:"5px 0",borderBottom:i===p.variantesStock.length-1?"none":"1px solid #334155"}}>
                                   <span>{[v.color && `Color: ${v.color}`,v.talle && `Talle: ${v.talle}`].filter(Boolean).join(" · ") || "Sin variante"}</span>
-                                  <strong>{v.cantidad.toLocaleString("es-AR")} u.</strong>
+                                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                                    <strong>{v.cantidad.toLocaleString("es-AR")} u.</strong>
+                                    <button type="button" onClick={() => corregirStockVarianteSimplex(p,v)}
+                                      style={{padding:"5px 8px",borderRadius:7,backgroundColor:"#475569",color:"#fff",border:"none",cursor:"pointer",fontSize:11}}>
+                                      ✏️ Corregir stock
+                                    </button>
+                                  </div>
                                 </div>
                               )) : <span style={{color:"#94a3b8"}}>Sin existencias registradas por variante.</span>}
                             </div>
@@ -1679,26 +1752,26 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           <div style={estilos.marcaChica}>RutaComercios Simplex · V1.2</div>
         </header>
         <main style={estilos.contenedorFicha}>
-          <h2 style={{marginTop:0}}>📦 Productos y precios</h2>
-          <div style={estilos.ayudaAlta}>Cargá y actualizá los productos y precios de tu empresa.</div>
+          <h2 style={{marginTop:0}}>📦 Gestión de productos</h2>
+          <div style={estilos.ayudaAlta}>Alta de artículos, actualización de precios e ingreso de mercadería: cada operación por separado.</div>
           <button type="button" onClick={()=>abrirModulo("consultarPrecios")}
             style={{...estilos.botonGrande,backgroundColor:"#0369a1",marginBottom:"14px",fontSize:"15px"}}>
             🔎 CONSULTAR PRECIOS
           </button>
           {perfil?.empresa_id === "27f69558-681d-46ae-a7fb-e23b45550918" && (
             <div style={estilos.panelSeccion}>
-              <div style={{fontWeight:900,marginBottom:8}}>📦 INGRESAR MERCADERÍA POR EXCEL — PRUEBA</div>
+              <div style={{fontWeight:900,marginBottom:8}}>📦 INGRESAR MERCADERÍA</div>
               <div style={{fontSize:12,color:"#cbd5e1",marginBottom:10}}>
-                Suma unidades al stock actual de artículos ya cargados en el catálogo.
+                Suma unidades al stock de los artículos existentes.
                 No modifica precios ni da de baja productos. Respeta color y talle.
-                Si volvés a subir exactamente el mismo archivo, se rechazará para evitar duplicados.
+                No permite ingresar dos veces el mismo archivo.
               </div>
               <input ref={inputIngresoStockRef} type="file" accept=".xlsx,.xls,.csv"
                 onChange={leerIngresoStockExcel} style={{display:"none"}} />
               <button type="button" onClick={() => inputIngresoStockRef.current?.click()}
                 disabled={guardandoIngresoStock}
                 style={{...estilos.botonGrande,backgroundColor:"#2563eb"}}>
-                📄 ELEGIR EXCEL PARA SUMAR STOCK
+                📄 SELECCIONAR EXCEL DE MERCADERÍA
               </button>
               {vistaPreviaIngresoStock && (
                 <div style={estilos.vistaPrevia}>
@@ -1727,29 +1800,9 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
               )}
             </div>
           )}
-          {perfil?.empresa_id === "27f69558-681d-46ae-a7fb-e23b45550918" && (
-            <div style={estilos.panelSeccion}>
-              <div style={{fontWeight:900,marginBottom:8}}>👟 PRUEBA DE COLOR Y TALLE · DEM010</div>
-              <div style={{fontSize:13,color:"#cbd5e1",marginBottom:10}}>
-                Un solo Botín de seguridad, precio $25.000, color Negro. Talle 40: 5 unidades; talle 41: 8 unidades.
-                Primero prepará el artículo y después ingresá el Excel usando el botón de sumar stock de arriba.
-              </div>
-              <button type="button" disabled={preparandoDemo010} onClick={prepararBotinDemo010}
-                style={{...estilos.botonGrande,backgroundColor:"#7c3aed",opacity:preparandoDemo010?.55:1}}>
-                {preparandoDemo010 ? "⏳ PREPARANDO..." : "1️⃣ PREPARAR ARTÍCULO DEM010 CON VARIANTES"}
-              </button>
-              <button type="button" onClick={descargarExcelBotinDemo010}
-                style={{...estilos.botonGrande,backgroundColor:"#166534"}}>
-                2️⃣ DESCARGAR EXCEL DE PRUEBA DEM010
-              </button>
-              <div style={{fontSize:12,color:"#94a3b8",marginTop:7}}>
-                3️⃣ Elegí ese archivo en «ELEGIR EXCEL PARA SUMAR STOCK» (sección de arriba).
-                No lo cargues dos veces: las importaciones idénticas se bloquean.
-              </div>
-            </div>
-          )}
           <div style={estilos.panelSeccion}>
-            <div style={{fontWeight:900,marginBottom:"8px"}}>Tus productos y precios</div>
+            <div style={{fontWeight:900,marginBottom:"8px"}}>💲 ACTUALIZAR PRECIOS</div>
+            <div style={{fontSize:12,color:"#cbd5e1",marginBottom:10}}>Solo cambia precios de artículos existentes. Los códigos nuevos deben darse de alta antes. No modifica stock.</div>
             {cargandoListas ? <div>⏳ Cargando...</div> : listasPrecios.length ? (
               <div style={{...estilos.filaLista,alignItems:"stretch",flexDirection:"column"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px"}}>
@@ -1766,13 +1819,13 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
                   onClick={()=>iniciarActualizacionLista(listasPrecios.find(l=>l.predeterminada) || listasPrecios[0])}
                   style={{...estilos.botonChico,backgroundColor:"#0f766e"}}
                 >
-                  🔄 ACTUALIZAR PRODUCTOS Y PRECIOS
+                  💲 ACTUALIZAR PRECIOS
                 </button>
               </div>
             ) : <div style={{color:"#94a3b8",fontSize:"13px"}}>Todavía no tenés productos y precios cargados.</div>}
             <input ref={inputActualizarListaRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoActualizacion} style={{display:"none"}}/>
             {listaActualizando&&<div style={{...estilos.vistaPrevia,marginTop:"14px"}}>
-              <div style={{fontWeight:900}}>🔄 Actualizando productos y precios</div>
+              <div style={{fontWeight:900}}>💲 Actualizando precios</div>
               {archivoActualizacionNombre&&<div style={{fontSize:"12px",color:"#cbd5e1",marginTop:"6px"}}>📄 {archivoActualizacionNombre}</div>}
               {vistaPreviaActualizacion&&<>
                 {vistaPreviaActualizacion.conProblemas?.length>0
@@ -1780,10 +1833,11 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
                   : <>
                     <div style={{...estilos.resumenImportacion,marginTop:"12px"}}>
                       <div><strong>{vistaPreviaActualizacion.cambiosPrecio.length}</strong><span>Precios cambian</span></div>
-                      <div><strong>{vistaPreviaActualizacion.productosNuevos.length}</strong><span>Nuevos</span></div>
+                      <div><strong>{vistaPreviaActualizacion.productosNuevos.length}</strong><span>Códigos no dados de alta</span></div>
                       <div><strong>{vistaPreviaActualizacion.productosQuitar.length}</strong><span>Se quitarán</span></div>
                     </div>
-                    <button type="button" onClick={confirmarActualizacionLista} disabled={guardandoActualizacion}
+                    {vistaPreviaActualizacion.productosNuevos.length > 0 && <div style={{color:"#fca5a5",fontSize:12,marginTop:10}}>⚠️ Estos códigos todavía no están dados de alta. Actualizar precios no los creará. Usá primero Alta de productos.</div>}
+                    <button type="button" onClick={confirmarActualizacionLista} disabled={guardandoActualizacion || vistaPreviaActualizacion.productosNuevos.length > 0}
                       style={{...estilos.botonGrande,backgroundColor:"#16a34a",marginTop:"12px",opacity:guardandoActualizacion?0.55:1}}>
                       {guardandoActualizacion?"⏳ ACTUALIZANDO...":"✅ CONFIRMAR ACTUALIZACIÓN"}
                     </button>
@@ -1794,26 +1848,51 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             </div>}
           </div>
           <div style={estilos.panelSeccion}>
-            <div style={{fontWeight:900,fontSize:"16px",marginBottom:"12px"}}>➕ Cargar productos y precios desde Excel / CSV</div>
-            <label style={estilos.label}>Nombre de referencia *</label>
-            <input style={estilos.input} value={nombreLista} onChange={e=>setNombreLista(e.target.value)} placeholder="Ej.: Precios Octubre"/>
-            <label style={estilos.label}>Código de referencia *</label>
-            <input style={estilos.input} value={codigoLista} onChange={e=>setCodigoLista(e.target.value)} placeholder="Ej.: PRECIOS"/>
+            <div style={{fontWeight:900,fontSize:16,marginBottom:10}}>➕ ALTA DE PRODUCTOS</div>
+            <div style={{fontSize:12,color:"#cbd5e1",marginBottom:12}}>Creá artículos nuevos con precio y stock inicial. Se guardan juntos. Si el código ya existe, la operación se rechaza sin modificar el inventario.</div>
+            {!listasPrecios.length && <>
+              <label style={estilos.label}>Nombre de lista inicial *</label>
+              <input style={estilos.input} value={nombreLista} onChange={e=>setNombreLista(e.target.value)} placeholder="Ej.: Precio base"/>
+              <label style={estilos.label}>Código de lista inicial *</label>
+              <input style={estilos.input} value={codigoLista} onChange={e=>setCodigoLista(e.target.value)} placeholder="Ej.: BASE"/>
+            </>}
+            <div style={{fontWeight:800,margin:"12px 0 8px"}}>Alta manual</div>
+            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+              <button type="button" onClick={()=>{setModoVarianteExistente(false);setVariantesManual([]);}} style={{...estilos.botonChico,backgroundColor:!modoVarianteExistente?"#2563eb":"#475569"}}>Producto nuevo</button>
+              <button type="button" onClick={()=>{setModoVarianteExistente(true);setVariantesManual([]);}} style={{...estilos.botonChico,backgroundColor:modoVarianteExistente?"#2563eb":"#475569"}}>Agregar variante a producto existente</button>
+            </div>
+            {modoVarianteExistente&&<div style={{fontSize:12,color:"#fbbf24",marginBottom:10}}>Usá el código exacto de un producto ya creado. El precio y la descripción se conservan; solo se agrega el nuevo color/talle con su stock inicial.</div>}
+
+            {(modoVarianteExistente ? [["Código *","codigo"],["Stock inicial *","stock"],["Color (opcional)","color"],["Talle (opcional)","talle"]] : [["Código *","codigo"],["Descripción *","descripcion"],["Marca","marca"],["GTIN (opcional)","gtin"],["Precio *","precio"],["Stock inicial *","stock"],["Color (opcional)","color"],["Talle (opcional)","talle"]]).map(([titulo,campo])=><React.Fragment key={campo}>
+              <label style={estilos.label}>{titulo}</label>
+              <input style={estilos.input} value={manualAlta[campo]} onChange={e=>setManualAlta(v=>({...v,[campo]:e.target.value}))} placeholder={titulo}/>
+            </React.Fragment>)}
+            {!modoVarianteExistente&&<>
+              <button type="button" onClick={agregarVarianteManual} disabled={guardandoLista} style={{...estilos.botonGrande,backgroundColor:"#334155"}}>➕ AGREGAR TALLE / COLOR A LA LISTA</button>
+              {variantesManual.length>0&&<div style={{...estilos.vistaPrevia,marginTop:10}}>
+                <strong>Variantes preparadas: {variantesManual.length} · Stock total: {variantesManual.reduce((n,v)=>n+v.stock,0)}</strong>
+                {variantesManual.map((v,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:8,fontSize:12}}>
+                  <span>{v.codigo} · {v.color||"—"} · {v.talle||"—"} · {v.stock} unidades</span>
+                  <button type="button" onClick={()=>setVariantesManual(x=>x.filter((_,j)=>j!==i))} style={{...estilos.botonChico,backgroundColor:"#7f1d1d"}}>Quitar</button>
+                </div>)}
+                <button type="button" onClick={()=>setVariantesManual([])} style={{...estilos.botonChico,backgroundColor:"#475569",marginTop:8}}>Vaciar lista</button>
+              </div>}
+            </>}
+            <button type="button" onClick={crearProductoManual} disabled={guardandoLista} style={{...estilos.botonGrande,backgroundColor:"#15803d",opacity:guardandoLista?.6:1}}>
+              {guardandoLista?"⏳ GUARDANDO...":modoVarianteExistente?"💾 AGREGAR VARIANTE AL PRODUCTO EXISTENTE":variantesManual.length?"💾 DAR DE ALTA PRODUCTO CON VARIANTES":"💾 DAR DE ALTA PRODUCTO"}
+            </button>
+            <div style={{fontWeight:800,margin:"18px 0 8px"}}>Alta por Excel</div>
             <button type="button" onClick={descargarPlantillaListaPrecios} style={{...estilos.botonGrande,backgroundColor:"#166534"}}>📥 DESCARGAR PLANTILLA OFICIAL</button>
             <input ref={inputListaRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerArchivoLista} style={{display:"none"}}/>
-            <button type="button" onClick={()=>inputListaRef.current?.click()} style={{...estilos.botonGrande,backgroundColor:"#2563eb"}}>1️⃣ ELEGIR ARCHIVO EXCEL / CSV</button>
-            {archivoListaNombre&&<div style={{fontSize:"12px",color:"#cbd5e1",marginBottom:"10px"}}>📄 <strong>{archivoListaNombre}</strong></div>}
+            <button type="button" onClick={()=>inputListaRef.current?.click()} style={{...estilos.botonGrande,backgroundColor:"#2563eb"}}>📄 ELEGIR EXCEL / CSV</button>
+            {archivoListaNombre&&<div style={{fontSize:12,marginBottom:8}}>📄 {archivoListaNombre}</div>}
             {vistaPreviaLista&&<div style={estilos.vistaPrevia}>
-              <div style={{fontWeight:900,marginBottom:"9px"}}>2️⃣ Revisar artículos</div>
-              <div style={estilos.resumenImportacion}>
-                <div><strong>{vistaPreviaLista.total}</strong><span>Encontrados</span></div>
-                <div><strong>{vistaPreviaLista.validos.length}</strong><span>Correctos</span></div>
-                <div><strong>{vistaPreviaLista.conProblemas.length}</strong><span>Problemas</span></div>
-              </div>
-              {vistaPreviaLista.conProblemas.length>0&&<div style={{marginTop:"10px",color:"#fca5a5",fontSize:"12px"}}>⚠️ Corregí las filas con problemas antes de importar.</div>}
-              <button type="button" onClick={crearListaInicial} disabled={guardandoLista||vistaPreviaLista.conProblemas.length>0}
-                style={{...estilos.botonGrande,marginTop:"12px",backgroundColor:"#16a34a",opacity:(guardandoLista||vistaPreviaLista.conProblemas.length)?0.55:1}}>
-                {guardandoLista?"⏳ CARGANDO...":"3️⃣ CARGAR PRODUCTOS Y PRECIOS"}
+              <div style={{fontWeight:900}}>Revisar antes de guardar</div>
+              <div style={{fontSize:13,marginTop:8}}>Filas: {vistaPreviaLista.total} · Artículos: {vistaPreviaLista.codigosUnicos} · Unidades: {vistaPreviaLista.unidadesIniciales}</div>
+              {vistaPreviaLista.conProblemas.slice(0,12).map((p,i)=><div key={i} style={{fontSize:12,color:"#fca5a5",marginTop:5}}>Fila {p.fila}: {p.errores.join("; ")}</div>)}
+              <button type="button" onClick={crearListaInicial} disabled={guardandoLista||!!vistaPreviaLista.conProblemas.length||!vistaPreviaLista.validos.length}
+                style={{...estilos.botonGrande,backgroundColor:"#15803d",marginTop:12,opacity:guardandoLista||vistaPreviaLista.conProblemas.length?.5:1}}>
+                {guardandoLista?"⏳ GUARDANDO...":"✅ CONFIRMAR ALTA POR EXCEL"}
               </button>
             </div>}
           </div>
