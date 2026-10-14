@@ -730,6 +730,17 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     setTomandoPedido(true);
   };
 
+  // En celulares, al entrar a Precios y stock se debe comenzar arriba.
+  // No modificar el scroll de las demás pantallas ni los datos del catálogo.
+  useEffect(() => {
+    if (vista !== "preciosStock" && vista !== "consultarPrecios") return;
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [vista]);
+
   const abrirModulo = (modulo) => {
     if (modulo === "consultarPrecios") {
       setBusquedaPrecio("");
@@ -1675,7 +1686,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           <div style={{color:"#94a3b8",fontSize:"12px",marginBottom:"12px"}}>
             Buscá un producto sin iniciar una venta.
           </div>
-          <input autoFocus type="text" value={busquedaPrecio}
+          <input type="text" value={busquedaPrecio}
             onChange={e=>setBusquedaPrecio(e.target.value)}
             placeholder="🔎 Código, producto o marca..."
             style={{...estilos.buscador,border:"2px solid #38bdf8",fontSize:"16px"}}/>
