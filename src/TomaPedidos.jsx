@@ -7,6 +7,8 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
   const [itemsPedido, setItemsPedido] = useState(pedidoExistente?.items || []);
   const [catalogo, setCatalogo] = useState([]);
   const [disponibilidad, setDisponibilidad] = useState({});
+  const [stockVariantesPedido, setStockVariantesPedido] = useState({});
+  const [estadoConsultaStock, setEstadoConsultaStock] = useState('cargando');
   const [cargandoCatalogo, setCargandoCatalogo] = useState(true);
   const [errorCatalogo, setErrorCatalogo] = useState('');
   const [medioPago, setMedioPago] = useState(pedidoExistente?.medioPago || 'Efectivo');
@@ -184,6 +186,80 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     };
   }, [usuario?.empresa_id, comercio?.empresa_id]);
 
+  // Stock físico del depósito principal, separado de la disponibilidad operativa.
+  // La ausencia de una variante NO equivale a una existencia confirmada de cero.
+  const claveVariante = (productoId, color, talle) =>
+    `${String(productoId || '')}|${String(color || '').trim().toLowerCase()}|${String(talle || '').trim().toLowerCase()}`;
+
+  useEffect(() => {
+    let cancelado = false;
+    const empresaId = usuario?.empresa_id || comercio?.empresa_id;
+    const cargarStock = async () => {
+      if (!empresaId) {
+        if (!cancelado) { setStockVariantesPedido({}); setEstadoConsultaStock('error'); }
+        return;
+      }
+      try {
+        const { data: deposito, error: errorDeposito } = await supabase
+          .from('stock_depositos').select('id')
+          .eq('empresa_id', empresaId).eq('activo', true).eq('es_principal', true)
+          .limit(1).maybeSingle();
+        if (errorDeposito) throw errorDeposito;
+        if (!deposito?.id) throw new Error('No se encontró el depósito principal');
+        const registros = [];
+        const tamano = 1000;
+        for (let desde = 0; ; desde += tamano) {
+          const { data, error } = await supabase.from('stock_por_deposito')
+            .select('producto_id,color,talle,cantidad')
+            .eq('empresa_id', empresaId).eq('deposito_id', deposito.id)
+            .range(desde, desde + tamano - 1);
+          if (error) throw error;
+          registros.push(...(data || []));
+          if ((data || []).length < tamano) break;
+        }
+        const mapa = {};
+        registros.forEach(r => {
+          const clave = claveVariante(r.producto_id, r.color, r.talle);
+          mapa[clave] = (mapa[clave] || 0) + Number(r.cantidad || 0);
+        });
+        if (!cancelado) { setStockVariantesPedido(mapa); setEstadoConsultaStock('listo'); }
+      } catch (error) {
+        console.error('No se pudo consultar el stock por variante:', error);
+        if (!cancelado) { setStockVariantesPedido({}); setEstadoConsultaStock('error'); }
+      }
+    };
+    cargarStock();
+    const actualizarAlVolver = () => {
+      if (document.visibilityState === 'visible') cargarStock();
+    };
+    document.addEventListener('visibilitychange', actualizarAlVolver);
+    return () => { cancelado = true; document.removeEventListener('visibilitychange', actualizarAlVolver); };
+  }, [usuario?.empresa_id, comercio?.empresa_id]);
+
+  const consultarStockItem = (item) => {
+    if (estadoConsultaStock !== 'listo') return { estado: estadoConsultaStock };
+    if ((item.usaColor && !String(item.color || '').trim()) ||
+        (item.usaTalle && !String(item.talle || '').trim())) return { estado: 'incompleto' };
+    const clave = claveVariante(item.productoId, item.color, item.talle);
+    if (!Object.prototype.hasOwnProperty.call(stockVariantesPedido, clave))
+      return { estado: 'sin_registro' };
+    const disponible = Number(stockVariantesPedido[clave]);
+    const solicitado = itemsPedido.filter(it =>
+      claveVariante(it.productoId, it.color, it.talle) === clave
+    ).reduce((s, it) => s + Number(it.cant || 0), 0);
+    return { estado: solicitado > disponible ? 'insuficiente' : 'disponible', disponible, solicitado };
+  };
+
+  const mensajeStockItem = (item) => {
+    const info = consultarStockItem(item);
+    if (info.estado === 'cargando') return '⏳ Consultando existencias del depósito...';
+    if (info.estado === 'error') return '⚠️ No se pudo consultar el stock. Verificá las existencias.';
+    if (info.estado === 'incompleto') return 'Elegí color y talle para consultar el stock.';
+    if (info.estado === 'sin_registro') return '🟠 Sin existencias registradas para esta variante.';
+    if (info.estado === 'insuficiente') return `🟠 Stock insuficiente: ${info.disponible} disponibles; ${info.solicitado} solicitadas en este pedido.`;
+    return `🟢 Stock disponible: ${info.disponible} unidades (${info.solicitado} solicitadas en este pedido).`;
+  };
+
   const estadoProducto = (productoId) =>
     disponibilidad[String(productoId)]?.estado || 'disponible';
 
@@ -284,6 +360,12 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
       return;
     }
 
+    const infoStock = consultarStockItem(item);
+    if (['sin_registro', 'insuficiente', 'error', 'cargando'].includes(infoStock.estado)) {
+      const detalle = mensajeStockItem(item);
+      if (!window.confirm(`${detalle}\n\n${item.nombre}${item.color ? ' · ' + item.color : ''}${item.talle ? ' · Talle ' + item.talle : ''}\n\nEl aviso es informativo. ¿Confirmar igualmente este ítem?`)) return;
+    }
+
     actualizarItem(id, { confirmadoItem: true });
     setBusqueda('');
   };
@@ -348,6 +430,16 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
     if (itemsSinProducto.length > 0) {
       alert('Hay artículos sin vínculo al catálogo real. Volvé a agregarlos al pedido.');
       return;
+    }
+
+    const advertenciasStock = itemsPedido.filter(it =>
+      ['sin_registro', 'insuficiente', 'error', 'cargando'].includes(consultarStockItem(it).estado)
+    );
+    if (advertenciasStock.length) {
+      const resumen = advertenciasStock.map(it =>
+        `• ${it.codigo} ${it.color || ''} ${it.talle ? 'talle ' + it.talle : ''}: ${mensajeStockItem(it)}`
+      ).join('\n');
+      if (!window.confirm(`ADVERTENCIAS DE STOCK\n\n${resumen}\n\nEl stock es informativo. ¿Enviar igualmente el pedido?`)) return;
     }
 
     setGuardando(true);
@@ -727,6 +819,14 @@ export default function TomaPedidos({ comercio, usuario, onVolver, onPedidoGuard
                       🗑️
                     </button>
                   </div>
+
+                      {/* Existencias reales por combinación de producto, color y talle. */}
+                      <div style={{ marginTop: '8px', padding: '7px 9px', borderRadius: '7px',
+                        backgroundColor: consultarStockItem(item).estado === 'disponible' ? '#f0fdf4' : '#fffbeb',
+                        color: consultarStockItem(item).estado === 'disponible' ? '#166534' : '#92400e',
+                        fontSize: '11px', fontWeight: '800' }}>
+                        {mensajeStockItem(item)}
+                      </div>
 
                   {/* Talle, ajuste comercial y cantidad */}
                   <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
