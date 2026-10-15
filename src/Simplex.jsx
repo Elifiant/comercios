@@ -13,6 +13,12 @@ const iconoClienteSimplex = L.icon({
 });
 
 // Centra la vista al abrir cada cliente, aunque React reutilice el mapa.
+const iconoParadaSimplex = (numero) => L.divIcon({
+  className: "",
+  html: `<div style="width:30px;height:30px;border-radius:50%;background:#1d4ed8;border:3px solid white;color:white;font:bold 15px sans-serif;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px #0008">${numero}</div>`,
+  iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -15]
+});
+
 function CentrarMapaClienteSimplex({ centro }) {
   const map = useMap();
   useEffect(() => {
@@ -48,7 +54,16 @@ import HistorialCliente from "./HistorialCliente";
 export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   const [comercios, setComercios] = useState([]);
   const [mapaClienteAbierto, setMapaClienteAbierto] = useState(false);
-  const [paradasRuta, setParadasRuta] = useState([]);
+  const diasRuta = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  const [diaRuta, setDiaRuta] = useState(new Date().getDay());
+  const [rutasSemana, setRutasSemana] = useState({});
+  const paradasRuta = rutasSemana[diaRuta] || [];
+  const setParadasRuta = (cambio) => setRutasSemana(prev => ({...prev, [diaRuta]: typeof cambio === "function" ? cambio(prev[diaRuta] || []) : cambio}));
+  const paradasHoy = rutasSemana[new Date().getDay()] || [];
+  const [clienteEditando, setClienteEditando] = useState(null);
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  const arrastreRutaRef = useRef(null);
+  const [arrastrandoRuta, setArrastrandoRuta] = useState(null);
   const [rutaRecuperada, setRutaRecuperada] = useState(false);
 
   const [puntoCliente, setPuntoCliente] = useState(null);
@@ -184,12 +199,25 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       setEstadoRuta("");
       setParadasRuta([]);
       if (!claveRuta || !perfil?.empresa_id) return;
-      let local = [];
-      try {
-        const guardadas = JSON.parse(localStorage.getItem(claveRuta) || "[]");
-        if (Array.isArray(guardadas)) local = guardadas.map(String);
-      } catch (error) { console.warn("Simplex - ruta local ilegible", error); }
-      if (!cancelado) setParadasRuta(local);
+      let local = {};
+      const normalizarRutas = (dato) => {
+        if (Array.isArray(dato)) {
+          const resultado = {};
+          dato.forEach(valor => {
+            const texto=String(valor);
+            const coincidencia=texto.match(/^dia([0-6]):(.+)$/);
+            const dia=coincidencia ? coincidencia[1] : String(new Date().getDay());
+            (resultado[dia] ||= []).push(coincidencia ? coincidencia[2] : texto);
+          });
+          return resultado;
+        }
+        return dato && typeof dato === "object" ? Object.fromEntries(Object.entries(dato)
+          .filter(([k,v]) => /^[0-6]$/.test(k) && Array.isArray(v))
+          .map(([k,v]) => [k, v.map(String)])) : {};
+      };
+      try { local = normalizarRutas(JSON.parse(localStorage.getItem(claveRuta) || "{}")); }
+      catch (error) { console.warn("Simplex - ruta local ilegible", error); }
+      if (!cancelado) setRutasSemana(local);
       try {
         const { data: authData, error: authError } = await supabase.auth.getUser();
         if (authError) throw authError;
@@ -200,9 +228,9 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           .eq("usuario_id", usuarioId).maybeSingle();
         if (error) throw error;
         if (cancelado) return;
-        if (data && Array.isArray(data.paradas)) {
-          const remota = data.paradas.map(String);
-          setParadasRuta(remota);
+        if (data && data.paradas) {
+          const remota = normalizarRutas(data.paradas);
+          setRutasSemana(remota);
           localStorage.setItem(claveRuta, JSON.stringify(remota));
           setEstadoRuta("☁️ Recorrido recuperado correctamente.");
         } else {
@@ -233,11 +261,11 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
       const { error } = await supabase.from("simplex_recorridos").upsert({
         empresa_id: perfil.empresa_id,
         usuario_id: usuarioId,
-        paradas: paradasRuta.map(String),
+        paradas: Object.entries(rutasSemana).flatMap(([dia,ids]) => ids.map(id => `dia${dia}:${id}`)),
         actualizado_en: new Date().toISOString()
       }, { onConflict: "empresa_id,usuario_id" });
       if (error) throw error;
-      try { localStorage.setItem(claveRuta, JSON.stringify(paradasRuta)); }
+      try { localStorage.setItem(claveRuta, JSON.stringify(rutasSemana)); }
       catch (localError) { console.warn("Simplex - no se pudo actualizar copia local", localError); }
       setEstadoRuta("☁️ Recorrido guardado y disponible en otros dispositivos.");
       alert("✅ Recorrido guardado correctamente. Ya podés abrirlo desde otro dispositivo con la misma cuenta.");
@@ -1159,6 +1187,46 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     }
   };
 
+  const guardarEdicionCliente = async (e) => {
+    e.preventDefault();
+    if (!clienteEditando?.id || !perfil?.empresa_id || !nuevoCliente.nombre.trim()) return alert("Completá el nombre del cliente.");
+    setGuardandoEdicion(true);
+    try {
+      const campos = ["nombre","direccion","localidad","partido","provincia","pais","rubro","telefono"];
+      const cambios = Object.fromEntries(campos.map(k => [k, String(nuevoCliente[k]||"").trim()]));
+      const {data,error}=await supabase.from("comercios").update(cambios)
+        .eq("id",clienteEditando.id).eq("empresa_id",perfil.empresa_id).select("*").single();
+      if(error) throw error;
+      setComercios(prev=>prev.map(c=>String(c.id)===String(data.id)?data:c));
+      setComercioSeleccionado(data);setClienteEditando(null);setVista("clientes");
+      alert("✅ Cliente actualizado.");
+    } catch(error) { alert(`No se pudo editar el cliente: ${error.message}`); }
+    finally {setGuardandoEdicion(false);}
+  };
+
+  const eliminarCliente = async () => {
+    const c = comercioSeleccionado;
+    if (!c?.id || !perfil?.empresa_id) return;
+    if (!window.confirm(`¿Eliminar definitivamente a ${c.nombre} de la cartera de clientes?\n\nNo es solamente quitarlo del recorrido.`)) return;
+    try {
+      // No borrar registros históricos de ventas o visitas.
+      for(const tabla of ["pedidos","visitas"]){
+        const {count,error}=await supabase.from(tabla).select("id",{count:"exact",head:true})
+          .eq("empresa_id",perfil.empresa_id).eq("comercio_id",c.id);
+        if(error) throw error;
+        if(count>0) { alert(`Este cliente tiene registros en ${tabla}. No se elimina para conservar el historial.`);return; }
+      }
+      const {data,error}=await supabase.from("comercios").delete().eq("id",c.id)
+        .eq("empresa_id",perfil.empresa_id).select("id");
+      if(error) throw error;
+      if(!data?.length) throw new Error("No se confirmó la eliminación.");
+      setComercios(prev=>prev.filter(x=>String(x.id)!==String(c.id)));
+      setRutasSemana(prev=>Object.fromEntries(Object.entries(prev).map(([dia,ids])=>[dia,ids.filter(id=>String(id)!==String(c.id))])));
+      setComercioSeleccionado(null);setMapaClienteAbierto(false);
+      alert("Cliente eliminado de la cartera.");
+    } catch(error){alert(`No se pudo eliminar el cliente: ${error.message}`);}
+  };
+
   const guardarNuevoCliente = async (e) => {
     e.preventDefault();
     if (!nuevoCliente.nombre.trim()) return alert("⚠️ Escribí el nombre del cliente.");
@@ -1330,7 +1398,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
   }
   if (vista === "dia") {
     const ids = new Set(comercios.map(c=>String(c.id)));
-    const paradas = paradasRuta.filter(id=>ids.has(String(id))).map(id=>comercios.find(c=>String(c.id)===String(id))).filter(Boolean);
+    const paradas = paradasHoy.filter(id=>ids.has(String(id))).map(id=>comercios.find(c=>String(c.id)===String(id))).filter(Boolean);
     const visitadas = new Map();
     visitasHoy.forEach(v=>{const id=String(v.comercio_id);if(!visitadas.has(id))visitadas.set(id,v);});
     const pendientes = paradas.filter(c=>!visitadas.has(String(c.id)));
@@ -1367,6 +1435,18 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     const paradas = paradasRuta.filter(id => idsValidos.has(String(id)))
       .map(id => comercios.find(c => String(c.id) === String(id))).filter(Boolean);
     const sinUbicar = comercios.filter(c => !ubicados.some(u => String(u.id) === String(c.id)));
+    const puntosRecorrido = paradas.filter(c => ubicados.some(u => String(u.id) === String(c.id)));
+    const reordenar = (origen, destino) => {
+      if (origen == null || destino == null || origen === destino || destino < 0 || destino >= paradas.length) return;
+      setParadasRuta(actual => { const copia=[...actual]; const [elemento]=copia.splice(origen,1); copia.splice(destino,0,elemento); return copia; });
+    };
+    const finalizarArrastre = (e) => {
+      const origen = arrastreRutaRef.current;
+      const elemento = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-parada-indice]");
+      const destino = elemento ? Number(elemento.dataset.paradaIndice) : null;
+      arrastreRutaRef.current = null; setArrastrandoRuta(null);
+      reordenar(origen, destino);
+    };
     const alternar = id => setParadasRuta(actual => actual.includes(String(id))
       ? actual.filter(x => x !== String(id)) : [...actual, String(id)]);
     return (
@@ -1380,15 +1460,20 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           <div style={{fontSize:"12px",color:"#cbd5e1",marginBottom:"12px"}}>
             Elegí los clientes y acomodalos en el orden en que quieras visitarlos.
           </div>
-          {ubicados.length > 0 ? (
+          <label style={{display:"block",marginBottom:12,fontWeight:800}}>📅 Recorrido para:
+            <select value={diaRuta} onChange={e=>setDiaRuta(Number(e.target.value))} style={{...estilos.input,marginTop:6}}>
+              {diasRuta.map((dia,i)=><option key={dia} value={i}>{dia}</option>)}
+            </select>
+          </label>
+          {puntosRecorrido.length > 0 ? (
             <div style={{height:"340px",width:"100%",overflow:"hidden",borderRadius:"12px",marginBottom:"12px"}}>
               <MapContainer center={[-34.72,-58.29]} zoom={11} scrollWheelZoom={false}
                 style={{height:"100%",width:"100%"}}>
                 <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <AjustarMapaRutaSimplex puntos={ubicados} />
-                {ubicados.map(c => (
-                  <Marker key={c.id} position={[Number(c.latitud),Number(c.longitud)]} icon={iconoClienteSimplex}>
+                <AjustarMapaRutaSimplex puntos={puntosRecorrido} />
+                {puntosRecorrido.map((c,i) => (
+                  <Marker key={c.id} position={[Number(c.latitud),Number(c.longitud)]} icon={iconoParadaSimplex(i+1)}>
                     <Popup><strong>{c.nombre || "Cliente"}</strong><div>{c.direccion || "Sin dirección"}</div>
                       <button type="button" onClick={() => alternar(c.id)}>
                         {paradasRuta.includes(String(c.id)) ? "Quitar del recorrido" : "Agregar al recorrido"}
@@ -1398,7 +1483,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
                 ))}
               </MapContainer>
             </div>
-          ) : <div style={estilos.mensaje}>Todavía no hay clientes ubicados en el mapa.</div>}
+          ) : <div style={estilos.mensaje}>Seleccioná clientes con ubicación para ver el recorrido de {diasRuta[diaRuta]} en el mapa.</div>}
           <div style={estilos.panelSeccion}>
             <div style={{fontWeight:900,marginBottom:"10px"}}>🏪 Clientes ubicados ({ubicados.length})</div>
             {ubicados.map(c => (
@@ -1411,11 +1496,14 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             {!ubicados.length && <div style={{fontSize:"12px",color:"#94a3b8"}}>Ubicá primero un cliente desde su ficha.</div>}
           </div>
           <div style={estilos.panelSeccion}>
-            <div style={{fontWeight:900,marginBottom:"10px"}}>🚗 Mi recorrido ({paradas.length} paradas)</div>
+            <div style={{fontWeight:900,marginBottom:"10px"}}>🚗 Recorrido de {diasRuta[diaRuta]} ({paradas.length} paradas)</div>
+            <div style={{fontSize:12,color:"#cbd5e1",marginBottom:8}}>Arrastrá el símbolo ☰ para cambiar el orden, también desde el celular.</div>
             {paradas.length === 0 ? <div style={{fontSize:"12px",color:"#94a3b8"}}>Seleccioná clientes para armar tu recorrido.</div>
               : paradas.map((c,i) => (
-                <div key={c.id} style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px 0",borderBottom:"1px solid #334155"}}>
-                  <span style={{fontWeight:900,minWidth:"22px"}}>{i+1}.</span>
+                <div key={c.id} data-parada-indice={i} style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px 0",borderBottom:"1px solid #334155",opacity:arrastrandoRuta===i?0.65:1}}>
+                  <span onPointerDown={e=>{arrastreRutaRef.current=i;setArrastrandoRuta(i);e.currentTarget.setPointerCapture(e.pointerId);}}
+                    onPointerUp={finalizarArrastre} onPointerCancel={()=>{arrastreRutaRef.current=null;setArrastrandoRuta(null);}}
+                    style={{fontWeight:900,minWidth:40,touchAction:"none",cursor:"grab",userSelect:"none",padding:8}}>☰ {i+1}.</span>
                   <span style={{flex:1,fontSize:"13px"}}>{c.nombre || "Cliente"}</span>
                   <button type="button" aria-label="Subir parada" disabled={i===0}
                     onClick={() => moverParada(i,-1)} style={{padding:"7px",opacity:i===0?0.35:1}}>↑</button>
@@ -1912,7 +2000,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     );
   }
 
-  if (vista === "nuevoCliente") {
+  if (vista === "nuevoCliente" || vista === "editarCliente") {
     const campo = (label, key, placeholder="", type="text") => (
       <>
         <label style={estilos.label}>{label}</label>
@@ -1935,12 +2023,12 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
           <div style={estilos.marcaChica}>RutaComercios Simplex · V1.2</div>
         </header>
         <main style={estilos.contenedorFicha}>
-          <h2 style={{ marginTop: 0 }}>➕ Nuevo cliente</h2>
+          <h2 style={{ marginTop: 0 }}>{vista === "editarCliente" ? "✏️ Editar cliente" : "➕ Nuevo cliente"}</h2>
           <div style={estilos.ayudaAlta}>
             Alta manual para trabajar desde escritorio. Más adelante también conectaremos
             la captura con ubicación para los días de trabajo en calle.
           </div>
-          <form onSubmit={guardarNuevoCliente}>
+          <form onSubmit={vista === "editarCliente" ? guardarEdicionCliente : guardarNuevoCliente}>
             {campo("Nombre del cliente *", "nombre", "Ej.: Almacén Don José")}
             {campo("Dirección", "direccion", "Calle y número")}
             {campo("Localidad", "localidad", "Ej.: Quilmes")}
@@ -1949,9 +2037,9 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             {campo("País", "pais")}
             {campo("Rubro", "rubro", "General")}
             {campo("Teléfono / WhatsApp", "telefono", "Ej.: 11 2250 1680", "tel")}
-            <button type="submit" disabled={guardandoCliente}
-              style={{...estilos.botonGrande, backgroundColor: guardandoCliente ? "#475569" : "#16a34a"}}>
-              {guardandoCliente ? "⏳ GUARDANDO..." : "💾 GUARDAR CLIENTE"}
+            <button type="submit" disabled={guardandoCliente || guardandoEdicion}
+              style={{...estilos.botonGrande, backgroundColor: guardandoCliente || guardandoEdicion ? "#475569" : "#16a34a"}}>
+              {guardandoCliente || guardandoEdicion ? "⏳ GUARDANDO..." : "💾 GUARDAR CLIENTE"}
             </button>
           </form>
         </main>
@@ -1982,6 +2070,12 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
             {comercioSeleccionado.direccion || "Sin dirección cargada"}
           </div>
 
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+            <button type="button" style={{...estilos.botonGrande,backgroundColor:"#2563eb",margin:0}}
+              onClick={()=>{setClienteEditando(comercioSeleccionado);setNuevoCliente(Object.fromEntries(["nombre","direccion","localidad","partido","provincia","pais","rubro","telefono"].map(k=>[k,String(comercioSeleccionado[k]||"")])));setVista("editarCliente");}}>✏️ EDITAR CLIENTE</button>
+            <button type="button" style={{...estilos.botonGrande,backgroundColor:"#991b1b",margin:0}}
+              onClick={eliminarCliente}>🗑️ ELIMINAR CLIENTE</button>
+          </div>
           <button type="button" onClick={abrirMapaCliente}
             style={{ ...estilos.botonGrande, backgroundColor: "#0369a1", marginBottom: "12px" }}>
             📍 {comercioSeleccionado.latitud != null && comercioSeleccionado.longitud != null
@@ -1993,7 +2087,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
               <div style={{ fontWeight: 900, marginBottom: "6px" }}>🗺️ Ubicación manual del cliente</div>
               <div style={{ fontSize: "12px", color: "#cbd5e1", marginBottom: "10px" }}>
                 Mové el mapa y tocá el lugar del comercio. También podés arrastrar el marcador para corregirlo.
-                No se consulta tu GPS ni se buscan direcciones automáticamente.
+
               </div>
               <div style={{ height: "330px", width: "100%", overflow: "hidden", borderRadius: "10px" }}>
                 <MapContainer
