@@ -43,6 +43,27 @@ const ESTADO_LABEL = {
 
 const PROVINCIAS_ARGENTINAS = ["Buenos Aires", "Catamarca", "Chaco", "Chubut", "Ciudad Autónoma de Buenos Aires", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego, Antártida e Islas del Atlántico Sur", "Tucumán"];
 
+const esProvinciaCABA = provincia => ["ciudad autonoma de buenos aires", "caba", "capital federal"].includes(
+  String(provincia || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
+);
+
+// Filtro geográfico aproximado para CABA. El rectángulo no reemplaza la
+// comprobación visual de la dirección, porque incluye algunas zonas limítrofes.
+const dentroAreaCABA = (lat, lon) => Number.isFinite(Number(lat)) && Number.isFinite(Number(lon)) &&
+  Number(lat) >= -34.72 && Number(lat) <= -34.52 &&
+  Number(lon) >= -58.55 && Number(lon) <= -58.32;
+const candidatoEsCABA = r => {
+  if (!dentroAreaCABA(r.lat, r.lon)) return false;
+  const normalizar = v => String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const estado = normalizar(r.state);
+  const condado = normalizar(r.county);
+  // Si Geoapify identifica expresamente un partido del conurbano, rechazarlo.
+  const fuera = ["quilmes", "avellaneda", "lanus", "lomas de zamora", "vicente lopez", "san martin", "tres de febrero", "la matanza"];
+  if (fuera.some(v => condado === v || condado.includes(`partido de ${v}`))) return false;
+  return ["buenos aires", "ciudad autonoma de buenos aires", "capital federal", "caba"].some(v => estado === v) ||
+    ["capital federal", "ciudad autonoma de buenos aires"].some(v => condado.includes(v));
+};
+
 const fechaLocalISO = () => {
   const d = new Date();
   const y = d.getFullYear();
@@ -1134,6 +1155,8 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
   const [entregaManualActiva, setEntregaManualActiva] = useState(null);
   const [guardandoManual, setGuardandoManual] = useState(false);
   const [corrigiendoPunto, setCorrigiendoPunto] = useState(false);
+  const [editandoDomicilio, setEditandoDomicilio] = useState(false);
+  const [domicilioEditado, setDomicilioEditado] = useState({direccion:"",localidad:"",provincia:"",partido:""});
   const [puntoElegido, setPuntoElegido] = useState(null);
   const [manual, setManual] = useState({ destinatario: "", direccion: "", localidad: "", provincia: "", partido: "", telefono: "", referencia_domicilio: "", bultos: "1", fecha_programada: fechaLocalISO(), numero_remito: "", numero_factura: "", observaciones: "" });
   const [pedidos, setPedidos] = useState([]);
@@ -1195,7 +1218,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
 
   // Catálogo público de municipios/departamentos argentinos; nunca se escribe en Supabase.
   useEffect(() => {
-    if (!manual.provincia || !nuevaEntregaAbierta) { setMunicipios([]); return; }
+    if (!manual.provincia || esProvinciaCABA(manual.provincia) || !nuevaEntregaAbierta) { setMunicipios([]); return; }
     const controller = new AbortController();
     const obtener = async () => {
       setCargandoMunicipios(true); setMunicipiosError(""); setMunicipios([]);
@@ -1867,10 +1890,43 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
     finally { setGuardandoManual(false); }
   };
 
+  const guardarDomicilioEditado = async () => {
+    const e = entregaManualActiva;
+    if (!e || guardandoManual) return;
+    const d = domicilioEditado;
+    if (!d.direccion.trim() || !d.provincia.trim() || (!esProvinciaCABA(d.provincia) && (!d.localidad.trim() || !d.partido.trim()))) {
+      alert("Completá la dirección, provincia y, fuera de CABA, localidad y partido."); return;
+    }
+    if (e.pedido_id || e.repartidor_id || e.reparto_orden_id || !["pendiente_preparacion","preparado"].includes(e.estado)) {
+      alert("Solo se puede editar el domicilio de una entrega manual todavía sin asignar ni iniciar."); return;
+    }
+    if (!window.confirm("¿Guardar el nuevo domicilio? Se quitará el punto anterior del mapa para que puedas geolocalizarlo nuevamente.")) return;
+    setGuardandoManual(true);
+    try {
+      const cambios = {direccion:d.direccion.trim(), provincia:d.provincia.trim(),
+        localidad:esProvinciaCABA(d.provincia)?null:d.localidad.trim(),
+        partido:esProvinciaCABA(d.provincia)?null:d.partido.trim(),
+        latitud:null,longitud:null,actualizado_at:new Date().toISOString()};
+      const {data,error} = await supabase.from("repartos_entregas").update(cambios)
+        .eq("id",e.id).eq("empresa_id",empresaId)
+        .in("estado",["pendiente_preparacion","preparado"])
+        .is("repartidor_id",null).is("reparto_orden_id",null).select("id");
+      if(error) throw error;
+      if(!data?.length) throw new Error("No se guardó: la entrega pudo haber cambiado de estado. Actualizá la pantalla.");
+      setEditandoDomicilio(false);setCorrigiendoPunto(false);setEntregaManualActiva(null);
+      await cargarDatos();
+      alert("✅ Domicilio actualizado. Ahora geolocalizá nuevamente esta entrega.");
+    } catch(err) {alert("❌ No se pudo editar el domicilio: "+(err.message||err));}
+    finally {setGuardandoManual(false);}
+  };
+
   const crearEntregaManual = async () => {
     if (guardandoManual || !empresaId) return;
-    if (!manual.destinatario.trim() || !manual.direccion.trim() || !manual.provincia.trim() || !manual.partido.trim() || !manual.localidad.trim()) {
-      alert("Ingresá destinatario, calle, provincia, partido y localidad."); return;
+    if (!manual.destinatario.trim() || !manual.direccion.trim() || !manual.provincia.trim() ||
+        (!esProvinciaCABA(manual.provincia) && (!manual.partido.trim() || !manual.localidad.trim()))) {
+      alert(esProvinciaCABA(manual.provincia)
+        ? "Ingresá destinatario, dirección y provincia."
+        : "Ingresá destinatario, calle, provincia, partido y localidad."); return;
     }
     const bultos = Number(manual.bultos);
     if (!Number.isInteger(bultos) || bultos < 1) {
@@ -1881,8 +1937,8 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
       const { error } = await supabase.from("repartos_entregas").insert([{
         empresa_id: empresaId, pedido_id: null, deposito_id: null, repartidor_id: null,
         destinatario: manual.destinatario.trim(), direccion: manual.direccion.trim(),
-        localidad: manual.localidad.trim() || null, provincia: manual.provincia.trim() || null,
-        partido: manual.partido.trim() || null,
+        localidad: esProvinciaCABA(manual.provincia) ? null : (manual.localidad.trim() || null), provincia: manual.provincia.trim() || null,
+        partido: esProvinciaCABA(manual.provincia) ? null : (manual.partido.trim() || null),
         telefono: manual.telefono.trim() || null, referencia_domicilio: manual.referencia_domicilio.trim() || null,
         bultos, fecha_programada: manual.fecha_programada || null,
         numero_remito: manual.numero_remito.trim() || null, numero_factura: manual.numero_factura.trim() || null,
@@ -2007,6 +2063,10 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
     const latitud = Number(puntoElegido[0]);
     const longitud = Number(puntoElegido[1]);
     if (!puntoValido(latitud, longitud)) { alert("El punto seleccionado no es válido."); return; }
+    if (esProvinciaCABA(entregaManualActiva.provincia) && !dentroAreaCABA(latitud, longitud)) {
+      alert("El punto elegido está fuera del área aproximada de CABA. No se guardó. Buscá el domicilio dentro de la Ciudad Autónoma de Buenos Aires.");
+      return;
+    }
     if (!window.confirm(`¿Guardar este punto para ${entregaManualActiva.destinatario}?\n\nLatitud: ${latitud.toFixed(6)}\nLongitud: ${longitud.toFixed(6)}\n\nConfirmá solo si está en el domicilio correcto.`)) return;
     setGuardandoManual(true);
     try {
@@ -2039,11 +2099,15 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
   // Las búsquedas individuales permiten revisar y elegir el punto.
   // La búsqueda masiva solo guarda resultados con número y localidad verificables.
   const pendientesGeo = entregas.filter(e => !e.pedido_id && !puntoValido(e.latitud, e.longitud) && e.direccion);
-  const textoDireccionGeo = e => [e.direccion, e.localidad, e.partido, e.provincia, "Argentina"].filter(Boolean).join(", ");
+  const textoDireccionGeo = e => esProvinciaCABA(e.provincia)
+    ? [e.direccion, "Ciudad Autónoma de Buenos Aires", "Argentina"].filter(Boolean).join(", ")
+    : [e.direccion, e.localidad, e.partido, e.provincia, "Argentina"].filter(Boolean).join(", ");
   const normalizarGeo = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
   const buscarGeo = async (e, clave) => {
     const texto = textoDireccionGeo(e);
-    const params = new URLSearchParams({text:texto,filter:"countrycode:ar",format:"json",limit:"10",apiKey:clave});
+    const params = new URLSearchParams({text:texto,filter:esProvinciaCABA(e.provincia)
+      ? "rect:-58.55,-34.72,-58.32,-34.52"
+      : "countrycode:ar",format:"json",limit:"10",apiKey:clave});
     const respuesta = await fetch(`https://api.geoapify.com/v1/geocode/search?${params}`);
     if (!respuesta.ok) throw new Error(`Geoapify respondió ${respuesta.status}`);
     const data = await respuesta.json();
@@ -2079,8 +2143,10 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
           const numero = calleNumero?.[1];
           const aceptables = candidatos.filter(r => {
             const texto = normalizarGeo([r.formatted,r.city,r.county,r.suburb,r.state].join(" "));
-            const ciudadOk = (!e.localidad || texto.includes(normalizarGeo(e.localidad))) &&
-              (!e.partido || texto.includes(normalizarGeo(e.partido)));
+            const ciudadOk = esProvinciaCABA(e.provincia)
+              ? candidatoEsCABA(r)
+              : (!e.localidad || texto.includes(normalizarGeo(e.localidad))) &&
+                (!e.partido || texto.includes(normalizarGeo(e.partido)));
             const numeroOk = numero && String(r.housenumber || "") === numero;
             const precisa = r.result_type === "building" || r.result_type === "amenity" || r.result_type === "street" && Boolean(r.housenumber);
             return ciudadOk && numeroOk && precisa && Number(r.rank?.confidence ?? 0) >= 0.85;
@@ -2113,13 +2179,31 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
     const e = seleccionUbicacion.entrega;
     const normalizar = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
     const ubicacion = normalizar([r.formatted,r.county,r.city,r.state,r.suburb].join(" "));
-    const partidoOk = !e.partido || ubicacion.includes(normalizar(e.partido));
-    const localidadOk = !e.localidad || ubicacion.includes(normalizar(e.localidad));
-    if (!partidoOk || !localidadOk) {
-      alert("La opción seleccionada no coincide con el partido o localidad cargados. No se guardó. Usá el punto manual si Geoapify no encuentra la dirección correcta.");
+    const esCaba = esProvinciaCABA(e.provincia);
+    const partidoOk = esCaba || !e.partido || ubicacion.includes(normalizar(e.partido));
+    const localidadOk = esCaba || !e.localidad || ubicacion.includes(normalizar(e.localidad));
+    const provinciaSolicitada = normalizar(e.provincia);
+    const estadoCandidato = normalizar(r.state);
+    const provinciaOk = esCaba
+      ? candidatoEsCABA(r)
+      : provinciaSolicitada === "buenos aires"
+        ? estadoCandidato === "buenos aires" && !candidatoEsCABA(r)
+        : estadoCandidato === provinciaSolicitada;
+    if (!provinciaOk) {
+      alert("La ubicación elegida no corresponde a la provincia indicada. No se guardó. Revisá el resultado o elegí el punto manualmente.");
       return;
     }
-    if (!window.confirm(`¿Guardar esta ubicación para ${e.destinatario}?\n\n${r.formatted}\n\nConfirmá solamente si es el domicilio correcto.`)) return;
+    const numeroSolicitado = String(e.direccion || "").match(/\b(\d{1,6})\b/)?.[1];
+    const numeroDevuelto = String(r.housenumber || "").trim();
+    if (numeroSolicitado && numeroDevuelto && numeroSolicitado !== numeroDevuelto) {
+      alert(`La altura encontrada (${numeroDevuelto}) no coincide con la solicitada (${numeroSolicitado}). No se guardó. Elegí otro resultado o marcá el punto manualmente.`);
+      return;
+    }
+    const diferenciaAdministrativa = !partidoOk || !localidadOk;
+    const aviso = diferenciaAdministrativa
+      ? `⚠️ Geoapify usa otra denominación para la localidad o el partido.\n\nCargado: ${[e.localidad,e.partido,e.provincia].filter(Boolean).join(", ")}\nEncontrado: ${r.formatted}\n\nVerificá que la calle y altura sean correctas. ¿Confirmás que corresponde al domicilio?`
+      : `¿Guardar esta ubicación para ${e.destinatario}?\n\n${r.formatted}\n\nConfirmá solamente si es el domicilio correcto.`;
+    if (!window.confirm(aviso)) return;
     setUbicandoDestinos(true);
     try {
       const {data: actualizadas, error} = await supabase.from("repartos_entregas")
@@ -2343,7 +2427,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
             <div style={{ display: "grid", gap: 8 }}>{filtradas.map(e => {
               const aviso = avisoFecha(e);
               const referenciaHistorial = bandeja === "retiradas" ? datosRepartoHistorial(e) : null;
-              return <button key={e.id} onClick={() => { setEntregaManualActiva(e); setNuevaEntregaAbierta(false); setRepartidorSeleccionado(e.repartidor_id || ""); }}
+              return <button key={e.id} onClick={() => { setEntregaManualActiva(e); setEditandoDomicilio(false); setNuevaEntregaAbierta(false); setRepartidorSeleccionado(e.repartidor_id || ""); }}
                 style={{ textAlign: "left", padding: 14, background: "white", color: "#111111", border: "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", color: "#111111" }}><strong>📦 {e.destinatario || "Sin destinatario"}</strong><strong>{e.estado === "asignado" ? (e.repartidor_id ? `🚚 ASIGNADO A: ${repartidores.find(r => String(r.id) === String(e.repartidor_id))?.nombre || repartidores.find(r => String(r.id) === String(e.repartidor_id))?.email || "Repartidor"}` : "🚚 SIN REPARTIDOR") : e.estado === "en_reparto" ? `🚚 EN REPARTO · ${repartidores.find(r => String(r.id) === String(e.repartidor_id))?.nombre || repartidores.find(r => String(r.id) === String(e.repartidor_id))?.email || "Repartidor"}` : (ESTADO_LABEL[e.estado] || e.estado)}</strong></div>
                 <div style={{ marginTop: 9, padding: "9px 12px", borderRadius: 8, background: aviso.fondo, border: `2px solid ${aviso.borde}`, color: "#111111", fontSize: 17, fontWeight: 900, lineHeight: 1.35 }}>
@@ -2373,7 +2457,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
             <div style={{maxWidth:680,margin:"25px auto",padding:20,background:"white",borderRadius:12}}>
               <h3>📍 Elegir ubicación — {seleccionUbicacion.entrega.destinatario}</h3>
               <p style={{fontSize:13}}>Dirección solicitada: {seleccionUbicacion.texto}</p>
-              <p style={{fontSize:12,color:"#92400e"}}>Elegí una opción que corresponda al partido y localidad indicados. Si no aparece, usá el mapa manual.</p>
+              <p style={{fontSize:12,color:"#92400e"}}>Revisá la calle, la altura y la provincia. Si Geoapify usa otro nombre para la localidad o partido, podrás confirmar el domicilio antes de guardarlo.</p>
               <div style={{display:"grid",gap:9,maxHeight:300,overflowY:"auto"}}>
                 {seleccionUbicacion.candidatos.length===0 && <p>Geoapify no encontró alternativas.</p>}
                 {seleccionUbicacion.candidatos.map((r,i)=><label key={i} style={{display:"flex",gap:10,padding:10,border:"1px solid #cbd5e1",borderRadius:8,cursor:"pointer"}}>
@@ -2394,13 +2478,13 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
                 {campo("destinatario", "Destinatario *", "text", true)}
                 {campo("direccion", "Dirección *", "text", true)}
-                {campo("localidad", "Localidad *", "text", true)}
+                {!esProvinciaCABA(manual.provincia) && campo("localidad", "Localidad *", "text", true)}
                 <label style={{display:"block",fontSize:12,fontWeight:800}}>Provincia *
-                  <select required value={manual.provincia} onChange={e=>setManual(m=>({...m,provincia:e.target.value,partido:""}))} style={{...inputStyle,marginTop:5}}>
+                  <select required value={manual.provincia} onChange={e=>setManual(m=>({...m,provincia:e.target.value,partido:"",localidad:esProvinciaCABA(e.target.value) ? "" : m.localidad}))} style={{...inputStyle,marginTop:5}}>
                     <option value="">Seleccionar provincia...</option>{PROVINCIAS_ARGENTINAS.map(p=><option key={p} value={p}>{p}</option>)}
                   </select>
                 </label>
-                <label style={{display:"block",fontSize:12,fontWeight:800}}>Partido / Departamento *
+                {!esProvinciaCABA(manual.provincia) && <label style={{display:"block",fontSize:12,fontWeight:800}}>Partido / Departamento *
                   <input
                     required
                     type="text"
@@ -2417,7 +2501,8 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
                   </datalist>
                   {municipiosError && <span style={{fontSize:11,color:"#92400e"}}>{municipiosError}</span>}
                   <span style={{display:"block",fontSize:11,color:"#64748b",marginTop:4}}>Podés buscar por nombre o escribirlo manualmente.</span>
-                </label>
+                </label>}
+                {esProvinciaCABA(manual.provincia) && <div style={{gridColumn:"1 / -1",fontSize:12,color:"#166534",background:"#f0fdf4",padding:9,borderRadius:7}}>Para CABA no hace falta indicar barrio ni comuna. Geoapify buscará la calle y altura dentro de la Ciudad Autónoma de Buenos Aires.</div>}
                 {campo("telefono", "Teléfono", "tel")}
                 {campo("referencia_domicilio", "Referencia del domicilio")}{campo("bultos", "Cantidad de bultos *", "number", true)}
                 {campo("fecha_programada", "Fecha programada", "date")}{campo("numero_remito", "Nº remito")}{campo("numero_factura", "Nº factura")}
@@ -2430,6 +2515,19 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
             <div style={{ maxWidth: 600, margin: "40px auto", background: "white", padding: 20, borderRadius: 12 }}>
               <h3>📦 {entregaManualActiva.destinatario}</h3>
               <p>📍 {[entregaManualActiva.direccion, entregaManualActiva.localidad, entregaManualActiva.partido, entregaManualActiva.provincia].filter(Boolean).join(", ")}</p>
+              {!entregaManualActiva.pedido_id && !entregaManualActiva.repartidor_id && !entregaManualActiva.reparto_orden_id && ["pendiente_preparacion","preparado"].includes(entregaManualActiva.estado) && <div style={{marginBottom:12}}>
+                <button type="button" onClick={()=>{setEditandoDomicilio(v=>!v);setDomicilioEditado({direccion:entregaManualActiva.direccion||"",localidad:entregaManualActiva.localidad||"",provincia:entregaManualActiva.provincia||"",partido:entregaManualActiva.partido||""});}} style={{padding:10,fontWeight:800}}>✏️ EDITAR DOMICILIO</button>
+                {editandoDomicilio && <div style={{padding:12,marginTop:8,border:"1px solid #cbd5e1",borderRadius:9,display:"grid",gap:9}}>
+                  <label>Dirección *<input value={domicilioEditado.direccion} onChange={ev=>setDomicilioEditado(d=>({...d,direccion:ev.target.value}))} style={{width:"100%",padding:9,boxSizing:"border-box"}} /></label>
+                  <label>Provincia *<select value={domicilioEditado.provincia} onChange={ev=>setDomicilioEditado(d=>({...d,provincia:ev.target.value,localidad:"",partido:""}))} style={{width:"100%",padding:9}}><option value="">Seleccionar provincia</option>{PROVINCIAS_ARGENTINAS.map(p=><option key={p} value={p}>{p}</option>)}</select></label>
+                  {!esProvinciaCABA(domicilioEditado.provincia) && <>
+                    <label>Localidad *<input value={domicilioEditado.localidad} onChange={ev=>setDomicilioEditado(d=>({...d,localidad:ev.target.value}))} style={{width:"100%",padding:9,boxSizing:"border-box"}} /></label>
+                    <label>Partido *<input value={domicilioEditado.partido} onChange={ev=>setDomicilioEditado(d=>({...d,partido:ev.target.value}))} style={{width:"100%",padding:9,boxSizing:"border-box"}} /></label>
+                  </>}
+                  {esProvinciaCABA(domicilioEditado.provincia) && <small>En CABA no se exige barrio ni comuna.</small>}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button type="button" disabled={guardandoManual} onClick={guardarDomicilioEditado} style={{padding:10,background:"#166534",color:"white",border:0,borderRadius:7}}>💾 GUARDAR DOMICILIO</button><button type="button" onClick={()=>setEditandoDomicilio(false)}>CANCELAR</button></div>
+                </div>}
+              </div>}
               {puntoValido(entregaManualActiva.latitud, entregaManualActiva.longitud) && <button type="button" disabled={corrigiendoUbicacion} onClick={async()=>{
                 if (!window.confirm("¿Quitar la ubicación guardada de esta entrega para poder ubicarla nuevamente? No se borra la entrega.")) return;
                 setCorrigiendoUbicacion(true);
@@ -2440,7 +2538,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
               {corrigiendoPunto && <div style={{marginBottom:12}}>
                 <p style={{fontSize:12}}>Tocá el domicilio correcto en el mapa. No se guarda hasta que confirmes.</p>
                 <div style={{height:310,overflow:"hidden",borderRadius:9}}>
-                  <MapContainer center={puntoValido(entregaManualActiva.latitud, entregaManualActiva.longitud) ? [Number(entregaManualActiva.latitud),Number(entregaManualActiva.longitud)] : [-34.724,-58.254]} zoom={13} style={{height:"100%",width:"100%"}}>
+                  <MapContainer key={`${entregaManualActiva.id}-${entregaManualActiva.provincia || ""}`} center={puntoValido(entregaManualActiva.latitud, entregaManualActiva.longitud) ? [Number(entregaManualActiva.latitud),Number(entregaManualActiva.longitud)] : esProvinciaCABA(entregaManualActiva.provincia) ? [-34.6037,-58.3816] : [-34.724,-58.254]} zoom={13} style={{height:"100%",width:"100%"}}>
                     <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
                     <ElegirPuntoMapa onElegir={setPuntoElegido}/>
                     {puntoElegido && <Marker position={puntoElegido}/>}
@@ -2479,10 +2577,6 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
                 </div>}
               </div>}
               {entregaManualActiva.estado === "pendiente_preparacion" && <button disabled={guardandoManual} onClick={() => actualizarEntregaManual("preparado")} style={{ padding: 12, background: "#16a34a", color: "white", border: 0, borderRadius: 8, fontWeight: 800 }}>✅ MARCAR PREPARADA</button>}
-              {entregaManualActiva.estado === "preparado" && <div style={{ display: "grid", gap: 10 }}>
-                {repartidores.length === 0 ? <p>No hay repartidores habilitados para esta empresa.</p> : <><label>Elegir repartidor<select value={repartidorSeleccionado} onChange={e => setRepartidorSeleccionado(e.target.value)} style={inputStyle}><option value="">Seleccionar...</option>{repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}</select></label>
-                  <button disabled={guardandoManual || !repartidorSeleccionado} onClick={() => actualizarEntregaManual("asignado", repartidorSeleccionado)} style={{ padding: 12, background: "#2563eb", color: "white", border: 0, borderRadius: 8, fontWeight: 800 }}>🚚 ASIGNAR REPARTO</button></>}
-              </div>}
               {["pendiente_preparacion", "preparado"].includes(entregaManualActiva.estado) && !entregaManualActiva.repartidor_id && !entregaManualActiva.pedido_id && (
                 <div style={{ marginTop: 16 }}>
                   <button type="button" disabled={guardandoManual} onClick={eliminarEntregaSinAsignar}

@@ -279,6 +279,19 @@ console.log("🚗 APP SE ESTÁ RENDERIZANDO");
 
   // Función oficial de cierre de sesión
   const handleCerrarSesion = async () => {
+    // Solo registra una desconexión cuando el usuario la solicita explícitamente.
+    const usuario = sesion?.user?.id || sesionProp?.user?.id;
+    const perfilActual = perfil || perfilProp;
+    if (usuario && perfilActual?.empresa_id && perfilActual?.rol === "preventista") {
+      try {
+        const { error } = await supabase.from("preventistas_actividad").insert({
+          empresa_id: perfilActual.empresa_id,
+          preventista_id: usuario,
+          tipo_evento: "desconexion"
+        });
+        if (error) console.warn("Historial: no se pudo guardar la desconexión:", error.message);
+      } catch (e) { console.warn("Historial: desconexión:", e); }
+    }
     try {
       if (typeof supabase !== 'undefined' && supabase.auth) {
         await supabase.auth.signOut();
@@ -661,6 +674,95 @@ useEffect(() => {
 
    const [perfil, setPerfil] = useState(null);
    const [ventasHoy, setVentasHoy] = useState(0);
+
+  // 📒 HISTORIAL DE ACTIVIDAD: eventos de aplicación, independientes del GPS.
+  // Una conexión por sesión de pestaña; señales cada 5 minutos mientras está visible.
+  const ultimaSenalHistorialRef = useRef(0);
+  useEffect(() => {
+    const usuario = sesion?.user?.id || sesionProp?.user?.id;
+    const perfilActual = perfil || perfilProp;
+    if (!usuario || !perfilActual?.empresa_id || perfilActual?.rol !== "preventista") return;
+
+    let cancelado = false;
+    const claveBase = `rutac_hist_${perfilActual.empresa_id}_${usuario}`;
+    const claveConexion = `${claveBase}_conexion_sesion`;
+    const claveSenal = `${claveBase}_ultima_senal`;
+
+    const registrar = async (tipo_evento) => {
+      if (cancelado) return false;
+      try {
+        const { error } = await supabase.from("preventistas_actividad").insert({
+          empresa_id: perfilActual.empresa_id,
+          preventista_id: usuario,
+          tipo_evento
+        });
+        if (error) {
+          console.warn("Historial preventista:", error.message);
+          return false;
+        }
+        return true;
+      } catch (e) {
+        console.warn("Historial preventista:", e);
+        return false;
+      }
+    };
+
+    // sessionStorage sobrevive a recargas, pero se reinicia en una pestaña nueva.
+    // Marcamos antes de enviar para evitar duplicados por montajes simultáneos.
+    // Si falla el envío, liberamos la marca para permitir otro intento.
+    try {
+      if (!sessionStorage.getItem(claveConexion)) {
+        sessionStorage.setItem(claveConexion, "pendiente");
+        registrar("conexion").then((ok) => {
+          if (ok) {
+            try { sessionStorage.setItem(claveConexion, "registrada"); } catch (e) {}
+          } else {
+            try {
+              if (sessionStorage.getItem(claveConexion) === "pendiente") {
+                sessionStorage.removeItem(claveConexion);
+              }
+            } catch (e) {}
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Historial: almacenamiento de sesión no disponible:", e);
+    }
+
+    // Una señal representa actividad de la app, NO una posición GPS certificada.
+    // Guardamos la última hora en la pestaña para evitar duplicados por recargas.
+    const enviarSenal = async () => {
+      if (cancelado || document.visibilityState !== "visible") return;
+      const ahora = Date.now();
+      let anterior = ultimaSenalHistorialRef.current;
+      try { anterior = Math.max(anterior, Number(sessionStorage.getItem(claveSenal)) || 0); } catch (e) {}
+      if (ahora - anterior < 5 * 60 * 1000) return;
+      ultimaSenalHistorialRef.current = ahora;
+      try { sessionStorage.setItem(claveSenal, String(ahora)); } catch (e) {}
+      const ok = await registrar("senal");
+      if (!ok && !cancelado) {
+        ultimaSenalHistorialRef.current = anterior;
+        try {
+          if (sessionStorage.getItem(claveSenal) === String(ahora)) {
+            if (anterior) sessionStorage.setItem(claveSenal, String(anterior));
+            else sessionStorage.removeItem(claveSenal);
+          }
+        } catch (e) {}
+      }
+    };
+    enviarSenal();
+    const intervalo = window.setInterval(enviarSenal, 5 * 60 * 1000);
+    const alVolver = () => enviarSenal();
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("focus", alVolver);
+    return () => {
+      cancelado = true;
+      window.clearInterval(intervalo);
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("focus", alVolver);
+    };
+  }, [sesion?.user?.id, sesionProp?.user?.id, perfil?.empresa_id, perfil?.rol, perfilProp?.empresa_id, perfilProp?.rol]);
+
 
    // 📊 MÉTRICAS REALES DEL PREVENTISTA
    // Venta hoy se calcula por la fecha real de la NVI, sin importar el día de visita del cliente.

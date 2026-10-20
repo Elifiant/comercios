@@ -155,13 +155,145 @@ function ControlCentradoMapa({ accion, puntoPreventista, puntosRecorrido }) {
   return null;
 }
 
-function iconoAutoGPS(nombre) {
+function iconoAutoGPS(nombre, estado = "inactivo") {
+  const enVivo = estado === "vivo";
+  const referencia = estado === "referencia";
+  const color = enVivo ? "#2563eb" : referencia ? "#64748b" : estado === "reciente" ? "#d97706" : "#475569";
+  const estadoTexto = enVivo ? "En vivo" : referencia ? "Ubicación de referencia" : estado === "reciente" ? "Sin señal reciente" : "Inactivo";
+  // El nombre proviene de datos de usuarios: evitar inyectarlo como HTML.
+  const nombreSeguro = String(nombre || "Preventista").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   return L.divIcon({
     className: "pin-auto-gps",
-    html: '<div style="background:#2563eb; color:#fff; border:2px solid #fff; border-radius:50%; width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:20px; box-shadow:0 0 16px rgba(37,99,235,0.95); position:relative;"><span style="position:absolute; width:100%; height:100%; border-radius:50%; border:2px solid #38bdf8; animation:ping 1.5s infinite;"></span>🚗</div><div style="background:#0f172a; color:#fff; font-size:10px; font-weight:800; padding:4px 10px; min-width:92px; border-radius:5px; margin-top:2px; white-space:nowrap; text-align:center; box-shadow:0 2px 6px rgba(0,0,0,0.6); position:relative; left:50%; transform:translateX(-50%); width:max-content;">' + (nombre || "Preventista") + ' (En vivo)</div>',
+    html: `<div style="background:${color};color:#fff;border:2px solid #fff;border-radius:50%;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 2px 6px rgba(0,0,0,0.4);position:relative;">${enVivo ? '<span style="position:absolute;width:100%;height:100%;border-radius:50%;border:2px solid #38bdf8;animation:ping 1.5s infinite;"></span>' : ""}${referencia ? "📍" : "🚗"}</div><div style="background:#0f172a;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;min-width:92px;border-radius:5px;margin-top:2px;white-space:nowrap;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,0.6);position:relative;left:50%;transform:translateX(-50%);width:max-content;">${nombreSeguro} (${estadoTexto})</div>`,
     iconSize: [38, 54],
     iconAnchor: [19, 27]
   });
+}
+
+
+// Historial independiente: consultas bajo demanda, sin interferir con GPS en vivo.
+const ZONA_HIST = "America/Argentina/Buenos_Aires";
+const fechaHist = (valor) => new Intl.DateTimeFormat("en-CA", { timeZone: ZONA_HIST, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(valor));
+const horaHist = (valor) => valor ? new Date(valor).toLocaleTimeString("es-AR", { timeZone: ZONA_HIST, hour: "2-digit", minute: "2-digit" }) : "—";
+const dineroHist = (valor) => `$ ${Number(valor || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const nombreHist = (valor) => String(valor || "").trim().toLocaleLowerCase("es-AR");
+function HistorialPreventistas({ empresaId }) {
+  const [personas, setPersonas] = useState([]);
+  const [visitas, setVisitas] = useState([]);
+  const [pedidos, setPedidos] = useState([]);
+  const [actividad, setActividad] = useState([]);
+  const [filtro, setFiltro] = useState("TODOS");
+  const [cargandoHist, setCargandoHist] = useState(false);
+  const [errorHist, setErrorHist] = useState("");
+  const [limiteHist, setLimiteHist] = useState(false);
+  const [versionHist, setVersionHist] = useState(0);
+  const [fechaInicioHist, setFechaInicioHist] = useState("");
+  const [fechaFinHist, setFechaFinHist] = useState("");
+  useEffect(() => {
+    if (!empresaId) return;
+    let vigente = true;
+    const consultar = async () => {
+      setCargandoHist(true); setErrorHist(""); setLimiteHist(false);
+      try {
+        // Fechas calendario de Buenos Aires; límites UTC exactos para UTC-3.
+        const hoy = fechaHist(new Date());
+        const fin = new Date(`${hoy}T03:00:00.000Z`);
+        fin.setUTCDate(fin.getUTCDate() + 1);
+        const inicio = new Date(`${hoy}T03:00:00.000Z`);
+        inicio.setUTCDate(inicio.getUTCDate() - 6);
+        const desde = inicio.toISOString(), hasta = fin.toISOString();
+        const leer = async (tabla, columnas, campoFecha) => {
+          let todas = [];
+          for (let offset = 0; offset < 10000; offset += 1000) {
+            const { data, error } = await supabase.from(tabla).select(columnas)
+              .eq("empresa_id", empresaId).gte(campoFecha, desde).lt(campoFecha, hasta)
+              .order(campoFecha, { ascending: true }).range(offset, offset + 999);
+            if (error) throw new Error(`${tabla}: ${error.message}`);
+            todas.push(...(data || []));
+            if ((data || []).length < 1000) return { filas: todas, truncado: false };
+          }
+          return { filas: todas, truncado: true };
+        };
+        const [rPersonas, rVisitas, rPedidos, rActividad] = await Promise.all([
+          supabase.from("perfiles").select("id,nombre,rol,activo,ultima_conexion,ultima_posicion_at").eq("empresa_id", empresaId).eq("rol", "preventista"),
+          leer("visitas", "id,preventista,comercio_nombre,resultado,observacion,fecha", "fecha"),
+          leer("pedidos", "id,numero_pedido,preventista,comercio_nombre,estado,total,fecha", "fecha"),
+          leer("preventistas_actividad", "id,preventista_id,tipo_evento,fecha", "fecha")
+        ]);
+        if (rPersonas.error) throw new Error(`perfiles: ${rPersonas.error.message}`);
+        if (!vigente) return;
+        setPersonas(rPersonas.data || []);
+        setVisitas(rVisitas.filas); setPedidos(rPedidos.filas); setActividad(rActividad.filas);
+        setLimiteHist(rVisitas.truncado || rPedidos.truncado || rActividad.truncado);
+        setFechaInicioHist(fechaHist(inicio)); setFechaFinHist(hoy);
+      } catch (e) { if (vigente) setErrorHist(e.message || "No se pudo consultar el historial."); }
+      finally { if (vigente) setCargandoHist(false); }
+    };
+    consultar();
+    return () => { vigente = false; };
+  }, [empresaId, versionHist]);
+  const visibles = personas.filter(p => filtro === "TODOS" || (filtro === "ACTIVOS" ? p.activo !== false : p.id === filtro));
+  const nombres = new Set(visibles.map(p => nombreHist(p.nombre)));
+  const ids = new Set(visibles.map(p => p.id));
+  const visitasFiltradas = visitas.filter(v => nombres.has(nombreHist(v.preventista)));
+  const pedidosFiltrados = pedidos.filter(v => nombres.has(nombreHist(v.preventista)));
+  const actividadFiltrada = actividad.filter(a => ids.has(a.preventista_id));
+  const anulado = (estado) => /anulad|cancelad|rechazad/.test(String(estado || "").toLowerCase());
+  const fechas = [];
+  if (fechaInicioHist) {
+    const base = new Date(`${fechaInicioHist}T12:00:00Z`);
+    for (let i = 0; i < 7; i++) { const d = new Date(base); d.setUTCDate(d.getUTCDate() + i); fechas.push(fechaHist(d)); }
+  }
+  const totalVendido = pedidosFiltrados.filter(p => !anulado(p.estado)).reduce((n,p) => n + Number(p.total || 0), 0);
+  const filasDia = fechas.map(dia => {
+    const v = visitasFiltradas.filter(x => fechaHist(x.fecha) === dia);
+    const p = pedidosFiltrados.filter(x => fechaHist(x.fecha) === dia);
+    const a = actividadFiltrada.filter(x => fechaHist(x.fecha) === dia);
+    return { dia, v, p, a, monto: p.filter(x => !anulado(x.estado)).reduce((n,x) => n + Number(x.total || 0), 0) };
+  }).reverse();
+  const bordeHist = { background: "#fff", border: "1px solid #dbe4f0", borderRadius: 10, padding: 14 };
+  return <div style={{ display: "grid", gap: 14 }}>
+    <div style={bordeHist}>
+      <h2 style={{ margin: "0 0 6px", fontSize: 19 }}>📅 Historial de preventistas · últimos 7 días</h2>
+      <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 12 }}>Hoy y los seis días anteriores · horario de Argentina · visitas con o sin venta, NVI y actividad registrada. No es un recorrido GPS.</p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <select value={filtro} onChange={e => setFiltro(e.target.value)} style={{ padding: 9, border: "1px solid #cbd5e1", borderRadius: 7 }}>
+          <option value="TODOS">Todos los preventistas</option>
+          <option value="ACTIVOS">Solo activos (habilitados)</option>
+          {personas.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+        <button type="button" onClick={() => setVersionHist(v => v + 1)} disabled={cargandoHist} style={{ padding: "9px 14px", border: "1px solid #cbd5e1", borderRadius: 7, cursor: "pointer" }}>↻ Actualizar historial</button>
+        <span style={{ fontSize: 12, color: "#64748b" }}>{fechaInicioHist} al {fechaFinHist}</span>
+      </div>
+      {cargandoHist && <p>Consultando historial…</p>}
+      {errorHist && <p style={{ color: "#b91c1c" }}>❌ {errorHist}. No se muestran resultados incompletos como definitivos.</p>}
+      {limiteHist && <p style={{ color: "#b45309" }}>⚠️ Hay más de 10.000 registros en alguna consulta. Los resultados podrían estar incompletos.</p>}
+    </div>
+    {!errorHist && !cargandoHist && <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10 }}>
+        {[ ["Visitas registradas", visitasFiltradas.length], ["NVI (incluye anuladas)", pedidosFiltrados.length], ["Total vendido (sin anuladas)", dineroHist(totalVendido)], ["Señales registradas", actividadFiltrada.filter(x => x.tipo_evento === "senal").length] ].map(([etiqueta,valor]) => <div key={etiqueta} style={bordeHist}><div style={{ color: "#64748b", fontSize: 11 }}>{etiqueta}</div><strong style={{ fontSize: 19 }}>{valor}</strong></div>)}
+      </div>
+      {filasDia.map(({dia,v,p,a,monto}) => {
+        const registros = [
+          ...v.map(x => ({ id:`v-${x.id}`, fecha:x.fecha, tipo:"Visita", nombre:x.preventista, detalle:`${x.comercio_nombre || "Comercio"} · ${x.resultado || "Sin resultado"}${x.observacion ? ` · ${x.observacion}` : ""}` })),
+          ...p.map(x => ({ id:`p-${x.id}`, fecha:x.fecha, tipo:"NVI", nombre:x.preventista, detalle:`${x.numero_pedido ? `#${String(x.numero_pedido).padStart(6,"0")}` : "Pedido"} · ${x.comercio_nombre || "Comercio"} · ${x.estado || "Sin estado"} · ${anulado(x.estado) ? "ANULADA · " : ""}${dineroHist(x.total)}` })),
+          ...a.filter(x => x.tipo_evento !== "senal").map(x => ({ id:`a-${x.id}`, fecha:x.fecha, tipo:"Actividad", nombre:personas.find(t => t.id === x.preventista_id)?.nombre || "Preventista", detalle:x.tipo_evento === "conexion" ? "Conexión registrada" : "Desconexión voluntaria registrada" }))
+        ].sort((x,y) => new Date(x.fecha) - new Date(y.fecha));
+        const actividadPorPersona = visibles.map(persona => {
+          const senales = a.filter(x => x.preventista_id === persona.id && (x.tipo_evento === "senal" || x.tipo_evento === "conexion"));
+          if (!senales.length) return null;
+          const orden = [...senales].sort((x,y) => new Date(x.fecha) - new Date(y.fecha));
+          return `${persona.nombre}: primera actividad ${horaHist(orden[0].fecha)}, última señal/actividad ${horaHist(orden[orden.length - 1].fecha)}`;
+        }).filter(Boolean);
+        return <details key={dia} style={bordeHist} open={dia === fechaFinHist}>
+          <summary style={{ cursor: "pointer", fontWeight: 800 }}>{new Date(`${dia}T12:00:00Z`).toLocaleDateString("es-AR", { timeZone: ZONA_HIST, weekday: "long", day: "2-digit", month: "2-digit" })} · {v.length} visitas · {p.length} NVI · {dineroHist(monto)}</summary>
+          {actividadPorPersona.length > 0 && <div style={{ marginTop: 10, padding: 9, background: "#f1f5f9", borderRadius: 7, fontSize: 12 }}>{actividadPorPersona.map(t => <div key={t}>{t}</div>)}</div>}
+          {registros.length === 0 ? <p style={{ color: "#64748b", fontSize: 12 }}>Sin visitas, NVI ni conexiones/desconexiones registradas para este filtro.</p> : <div style={{ overflowX: "auto", marginTop: 10 }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><thead><tr>{["Hora", "Preventista", "Tipo", "Detalle"].map(t => <th key={t} style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #cbd5e1" }}>{t}</th>)}</tr></thead><tbody>{registros.map(r => <tr key={r.id}><td style={{ padding: 8, borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" }}>{horaHist(r.fecha)}</td><td style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}>{r.nombre}</td><td style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}>{r.tipo}</td><td style={{ padding: 8, borderBottom: "1px solid #f1f5f9" }}>{r.detalle}</td></tr>)}</tbody></table></div>}
+        </details>;
+      })}
+      <p style={{ color: "#64748b", fontSize: 11 }}>«Primera actividad» no implica inicio de sesión. «Última señal» no implica cierre de sesión. Los días anteriores a la instalación del registro de actividad pueden no tener señales guardadas.</p>
+    </>}
+  </div>;
 }
 
 export default function Supervisor() {
@@ -344,7 +476,7 @@ const reactivarComercio = async (comercio) => {
   const [busquedaDisponibilidad, setBusquedaDisponibilidad] = useState("");
   const [seccionActiva, setSeccionActiva] = useState(() => {
     const seccionUrl = new URLSearchParams(window.location.search).get("seccion");
-    const seccionesValidas = ["monitoreo", "planificador", "stock", "disponibilidad", "clientes", "estadoCuenta", "listasPrecios", "repartos", "mensajes", "solicitudes"];
+    const seccionesValidas = ["monitoreo", "historial", "planificador", "stock", "disponibilidad", "clientes", "estadoCuenta", "listasPrecios", "repartos", "mensajes", "solicitudes"];
     return seccionesValidas.includes(seccionUrl) ? seccionUrl : "monitoreo";
   });
   const [cargando, setCargando] = useState(true);
@@ -465,6 +597,7 @@ const reactivarComercio = async (comercio) => {
   const [filtroDiaMapa, setFiltroDiaMapa] = useState("TODOS");
   const diaSemana = filtroDiaMapa || "TODOS";
   const [preventistaSeleccionado, setPreventistaSeleccionado] = useState(null);
+  const [filtroFlotaPreventista, setFiltroFlotaPreventista] = useState("TODOS");
   const [accionMapa, setAccionMapa] = useState({ tipo: null, id: 0 });
   const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
   const [comercioFoco, setComercioFoco] = useState(null);
@@ -3596,6 +3729,12 @@ useEffect(() => {
           📡 Monitoreo en Vivo
         </button>
         <button
+          onClick={() => setSeccionActiva("historial")}
+          style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "historial" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "historial" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
+        >
+          📅 Historial de preventistas
+        </button>
+        <button
           onClick={() => setSeccionActiva("planificador")}
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "planificador" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "planificador" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
         >
@@ -4131,7 +4270,9 @@ useEffect(() => {
             </div>
           </div>
         )}
-        {seccionActiva === "planificador" ? (
+        {seccionActiva === "historial" ? (
+          <HistorialPreventistas empresaId={perfilSupervisor?.empresa_id} />
+        ) : seccionActiva === "planificador" ? (
           <DisenadorRutas
             perfilSupervisor={perfilSupervisor}
             perfiles={perfiles}
@@ -5554,15 +5695,32 @@ useEffect(() => {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginBottom: "6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>Flota de Preventistas</span>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <select
+                aria-label="Filtrar flota por preventista"
+                value={filtroFlotaPreventista}
+                onChange={(e) => {
+                  const nombre = e.target.value;
+                  setFiltroFlotaPreventista(nombre);
+                  setPreventistaSeleccionado(nombre === "TODOS" || nombre === "ACTIVOS" || nombre === "INACTIVOS" ? null : telemetriaFlota.find(p => p.nombre === nombre) || null);
+                }}
+                style={{ maxWidth: "220px", padding: "6px 9px", border: "1px solid #cbd5e1", borderRadius: "7px", background: "#fff", color: "#334155", fontSize: "11px", fontWeight: "700", textTransform: "none" }}
+              >
+                <option value="TODOS">Todos los preventistas</option>
+                <option value="ACTIVOS">🟢 Activos (con señal reciente)</option>
+                <option value="INACTIVOS">⚫ Inactivos (sin señal activa)</option>
+                {telemetriaFlota.map(p => <option key={p.nombre} value={p.nombre}>{p.nombre}</option>)}
+              </select>
             {preventistaSeleccionado && (
               <button
                 type="button"
-                onClick={() => setPreventistaSeleccionado(null)}
+                onClick={() => { setPreventistaSeleccionado(null); setFiltroFlotaPreventista("TODOS"); }}
                 style={{ background: "none", border: "none", color: "#2563eb", fontSize: "11px", fontWeight: "bold", cursor: "pointer" }}
               >
                 ✕ Ver Todos
               </button>
             )}
+            </div>
           </div>
           {/* Cabecera de lectura para los datos compactos de la flota. */}
           <div style={{ overflowX: "hidden", marginBottom: "5px" }}>
@@ -5571,7 +5729,7 @@ useEffect(() => {
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-            {telemetriaFlota.map((prev, idx) => {
+            {telemetriaFlota.filter(prev => filtroFlotaPreventista === "TODOS" || (filtroFlotaPreventista === "ACTIVOS" && prev.activoHoy) || (filtroFlotaPreventista === "INACTIVOS" && !prev.activoHoy) || prev.nombre === filtroFlotaPreventista).map((prev, idx) => {
               const seleccionado = (preventistaSeleccionado?.nombre || preventistaSeleccionado) === prev.nombre;
               const minutos = prev.ultimaSenal
                 ? (Date.now() - new Date(prev.ultimaSenal).getTime()) / 60000
@@ -5586,7 +5744,10 @@ useEffect(() => {
               return (
                 <div
                   key={prev.nombre || idx}
-                  onClick={() => setPreventistaSeleccionado(seleccionado ? null : prev)}
+                  onClick={() => {
+                    setPreventistaSeleccionado(seleccionado ? null : prev);
+                    setFiltroFlotaPreventista(seleccionado ? "TODOS" : prev.nombre);
+                  }}
                   style={{
                     backgroundColor: seleccionado ? "#eff6ff" : "#ffffff",
                     border: seleccionado ? "2px solid #2563eb" : "1px solid #e2e8f0",
@@ -5920,6 +6081,7 @@ useEffect(() => {
                   // 1. Prioridad absoluta: Coordenadas del GPS real transmitido por el celular
                   let latA = parseFloat(pVivo?.latitud);
                   let lngA = parseFloat(pVivo?.longitud);
+                  let ubicacionDeReferencia = false;
 
                   // 2. Si aún no hay GPS en perfil, busca el comercio con la FECHA/HORA más reciente (NUNCA por orden de ruta)
                   if ((!latA || !lngA || isNaN(latA) || isNaN(lngA)) && comercios && comercios.length > 0) {
@@ -5932,21 +6094,35 @@ useEffect(() => {
                       const masReciente = ordenadosPorFecha[0];
                       latA = parseFloat(masReciente?.ubicacion_exacta_latitud || masReciente?.latitud);
                       lngA = parseFloat(masReciente?.ubicacion_exacta_longitud || masReciente?.longitud);
+                      ubicacionDeReferencia = true;
                     }
                   }
 
                   if (!latA || !lngA || isNaN(latA) || isNaN(lngA)) return null;
 
                   const etiquetaNombre = pVivo?.nombre || targetNom || "Preventista";
+                  const fechaGPS = pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at) : null;
+                  const fechaGPSValida = fechaGPS && Number.isFinite(fechaGPS.getTime());
+                  const minutosGPS = fechaGPSValida ? (Date.now() - fechaGPS.getTime()) / 60000 : Infinity;
+                  // Una conexión de sesión NO equivale a una posición GPS reciente.
+                  const estadoGPS = ubicacionDeReferencia ? "referencia" :
+                    minutosGPS >= 0 && minutosGPS <= 2 ? "vivo" :
+                    minutosGPS >= 0 && minutosGPS <= 10 ? "reciente" : "inactivo";
+                  const textoEstado = estadoGPS === "vivo" ? "● GPS en vivo" :
+                    estadoGPS === "reciente" ? "● Sin señal GPS reciente" :
+                    estadoGPS === "referencia" ? "📍 Ubicación de comercio (no es GPS del preventista)" :
+                    "● GPS inactivo";
+                  const colorEstado = estadoGPS === "vivo" ? "#16a34a" : estadoGPS === "reciente" ? "#d97706" : "#64748b";
 
                   return (
-                    <Marker position={[latA, lngA]} icon={iconoAutoGPS(etiquetaNombre)}>
+                    <Marker position={[latA, lngA]} icon={iconoAutoGPS(etiquetaNombre, estadoGPS)}>
                       <Popup>
                         <div style={{ textAlign: "center", fontSize: "12px", padding: "6px" }}>
-                          <strong style={{ color: "#2563eb", fontSize: "14px" }}>🚗 {etiquetaNombre}</strong>
-                          <div style={{ color: "#16a34a", fontWeight: "bold", marginTop: "3px" }}>● En ruta en tiempo real</div>
+                          <strong style={{ color: "#2563eb", fontSize: "14px" }}>{estadoGPS === "referencia" ? "📍" : "🚗"} {etiquetaNombre}</strong>
+                          <div style={{ color: colorEstado, fontWeight: "bold", marginTop: "3px" }}>{textoEstado}</div>
                           <div style={{ color: "#64748b", fontSize: "11px", marginTop: "3px" }}>
-                            Última señal GPS: {pVivo?.ultima_posicion_at ? new Date(pVivo.ultima_posicion_at).toLocaleTimeString() : "Hoy en ruta"}
+                            {estadoGPS === "referencia" ? "Referencia: comercio asignado" :
+                              `Última señal GPS: ${fechaGPSValida ? fechaGPS.toLocaleString("es-AR") : "Sin fecha registrada"}`}
                           </div>
                         </div>
                       </Popup>
