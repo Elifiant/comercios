@@ -133,37 +133,58 @@ function EnrutadorSeguro() {
   if (cargando) {
     return (
       <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: "sans-serif" }}>
-        Iniciando RutaComercio...
+        Iniciando RutaComercios...
       </div>
     );
   }
 
-  // Si no hay sesión activa: mostramos el login oficial con logo
+  // Login visual animado. La autenticación y los permisos no se modifican.
   if (!sesion) {
     return (
-      <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif" }}>
-        <div style={{ width: "100%", maxWidth: "380px", backgroundColor: "#1e293b", borderRadius: "16px", padding: "32px 24px", textAlign: "center", border: "1px solid #334155", boxShadow: "0 10px 25px rgba(0,0,0,0.5)" }}>
-          <img src="/logo.svg" alt="RutaComercio" style={{ width: "160px", margin: "0 auto 16px auto", display: "block" }} />
-          <h2 style={{ color: "#fff", fontSize: "20px", margin: "0 0 6px 0", fontWeight: "bold" }}>Acceso Seguro</h2>
-          <p style={{ color: "#94a3b8", fontSize: "13px", margin: "0 0 20px 0" }}>Ingresá tu correo y contraseña</p>
-          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "12px", textAlign: "left" }}>
-            {errorLogin && (
-              <div style={{ backgroundColor: "rgba(239,68,68,0.2)", border: "1px solid #ef4444", color: "#f87171", padding: "8px 12px", borderRadius: "6px", fontSize: "12px" }}>
-                {errorLogin}
+      <div style={{ minHeight: "100vh", background: "radial-gradient(circle at 50% 10%, #163d7c 0%, #0b2145 42%, #07152e 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", fontFamily: "system-ui, sans-serif" }}>
+        <style>{`
+          @keyframes rcLogoEntrada { from { opacity: 0; transform: translateY(-22px) scale(.94); } to { opacity: 1; transform: translateY(0) scale(1); } }
+          @keyframes rcTarjetaEntrada { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+          @keyframes rcPulso { 0%,100% { box-shadow: 0 0 0 0 rgba(36,211,114,.22); } 50% { box-shadow: 0 0 0 12px rgba(36,211,114,0); } }
+          .rc-login-logo { animation: rcLogoEntrada 1.1s ease-out both; }
+          .rc-login-form { animation: rcTarjetaEntrada .9s .35s ease-out both; }
+          .rc-login-dot { animation: rcPulso 2.5s 1.1s infinite; }
+          @media (prefers-reduced-motion: reduce) { .rc-login-logo, .rc-login-form, .rc-login-dot { animation: none !important; } }
+        `}</style>
+        <div style={{ width: "100%", maxWidth: "400px", textAlign: "center" }}>
+          <div className="rc-login-logo" style={{ margin: "0 auto 18px", maxWidth: "310px" }}>
+            <video
+              autoPlay
+              muted
+              playsInline
+              poster="/logo-login-rutacomercios.png"
+              aria-label="Animación del logo de RutaComercios"
+              style={{ width: "100%", height: "auto", display: "block", objectFit: "contain" }}
+            >
+              <source src="/RutaComercios_ANIMACION_MAS_MOVIMIENTO.mp4" type="video/mp4" />
+            </video>
+          </div>
+          <div className="rc-login-form" style={{ background: "rgba(20, 40, 75, .94)", border: "1px solid rgba(143, 183, 240, .24)", borderRadius: "20px", padding: "28px 24px", boxShadow: "0 18px 45px rgba(0,0,0,.35)", textAlign: "left" }}>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "9px", marginBottom: "8px" }}>
+              <span className="rc-login-dot" aria-hidden="true" style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#24d372" }} />
+              <h2 style={{ color: "#fff", fontSize: "21px", margin: 0, fontWeight: 750 }}>Acceso seguro</h2>
+            </div>
+            <p style={{ color: "#b4c6e4", fontSize: "13px", textAlign: "center", margin: "0 0 24px" }}>Ingresá con tu correo y contraseña</p>
+            <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {errorLogin && <div role="alert" style={{ background: "rgba(239,68,68,.14)", border: "1px solid #ef4444", color: "#fecaca", padding: "10px 12px", borderRadius: "8px", fontSize: "13px" }}>{errorLogin}</div>}
+              <div>
+                <label htmlFor="rc-email" style={{ color: "#dce7fa", fontSize: "13px", display: "block", marginBottom: "6px" }}>Correo electrónico</label>
+                <input id="rc-email" type="email" autoComplete="username" required value={emailLogin} onChange={e => setEmailLogin(e.target.value)} style={{ width: "100%", padding: "12px", backgroundColor: "#0b1b36", border: "1px solid #4b668e", borderRadius: "10px", color: "#fff", boxSizing: "border-box", fontSize: "15px" }} />
               </div>
-            )}
-            <div>
-              <label style={{ color: "#cbd5e1", fontSize: "12px", display: "block", marginBottom: "4px" }}>Correo electrónico</label>
-              <input type="email" required value={emailLogin} onChange={e => setEmailLogin(e.target.value)} style={{ width: "100%", padding: "10px", backgroundColor: "#0f172a", border: "1px solid #475569", borderRadius: "8px", color: "#fff", boxSizing: "border-box", fontSize: "14px" }} />
-            </div>
-            <div>
-              <label style={{ color: "#cbd5e1", fontSize: "12px", display: "block", marginBottom: "4px" }}>Contraseña</label>
-              <input type="password" required value={passwordLogin} onChange={e => setPasswordLogin(e.target.value)} style={{ width: "100%", padding: "10px", backgroundColor: "#0f172a", border: "1px solid #475569", borderRadius: "8px", color: "#fff", boxSizing: "border-box", fontSize: "14px" }} />
-            </div>
-            <button type="submit" disabled={enviandoLogin} style={{ width: "100%", padding: "12px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", marginTop: "8px", fontSize: "14px" }}>
-              {enviandoLogin ? "Ingresando..." : "Iniciar Sesión"}
-            </button>
-          </form>
+              <div>
+                <label htmlFor="rc-password" style={{ color: "#dce7fa", fontSize: "13px", display: "block", marginBottom: "6px" }}>Contraseña</label>
+                <input id="rc-password" type="password" autoComplete="current-password" required value={passwordLogin} onChange={e => setPasswordLogin(e.target.value)} style={{ width: "100%", padding: "12px", backgroundColor: "#0b1b36", border: "1px solid #4b668e", borderRadius: "10px", color: "#fff", boxSizing: "border-box", fontSize: "15px" }} />
+              </div>
+              <button type="submit" disabled={enviandoLogin} style={{ width: "100%", padding: "14px", backgroundColor: enviandoLogin ? "#5c80bc" : "#2563eb", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 750, cursor: enviandoLogin ? "wait" : "pointer", marginTop: "6px", fontSize: "15px" }}>
+                {enviandoLogin ? "Ingresando..." : "Iniciar Sesión"}
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     );
@@ -187,7 +208,7 @@ if (!perfil) {
       color: "#94a3b8",
       fontFamily: "sans-serif"
     }}>
-      Iniciando RutaComercio...
+      Iniciando RutaComercios...
     </div>
   );
 }
@@ -255,7 +276,7 @@ if (ruta.startsWith("/promotores")) {
     return (
       <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif" }}>
         <div style={{ width: "100%", maxWidth: "430px", background: "#1e293b", border: "1px solid #334155", borderRadius: "16px", padding: "26px", color: "#fff", textAlign: "center" }}>
-          <img src="/logo.svg" alt="RutaComercio" style={{ width: "150px", margin: "0 auto 14px" }} />
+          <img src="/logo.svg" alt="RutaComercios" style={{ width: "150px", margin: "0 auto 14px" }} />
           <h2>Hola, {perfil?.nombre || "supervisor"}</h2>
           <p style={{ color: "#94a3b8" }}>¿Con qué módulo querés trabajar?</p>
           <div style={{ display: "grid", gap: "10px" }}>
@@ -285,7 +306,7 @@ if (ruta.startsWith("/promotores")) {
     return (
       <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "sans-serif" }}>
         <div style={{ width: "100%", maxWidth: "430px", background: "#1e293b", border: "1px solid #334155", borderRadius: "16px", padding: "26px", color: "#fff", textAlign: "center" }}>
-          <img src="/logo.svg" alt="RutaComercio" style={{ width: "150px", margin: "0 auto 14px", display: "block" }} />
+          <img src="/logo.svg" alt="RutaComercios" style={{ width: "150px", margin: "0 auto 14px", display: "block" }} />
           <h2 style={{ margin: "0 0 6px" }}>Hola, {perfil?.nombre || "usuario"}</h2>
           <p style={{ margin: "0 0 22px", color: "#94a3b8", fontSize: "13px" }}>Elegí con qué función vas a trabajar.</p>
           <div style={{ display: "grid", gap: "10px" }}>
