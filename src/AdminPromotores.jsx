@@ -37,7 +37,7 @@ export default function AdminPromotores() {
   return <div style={{minHeight:"100vh",backgroundColor:"#f8fafc",fontFamily:"Arial,sans-serif",color:"#0f172a"}}>
     <style>{`.partner-editar-btn{background:#b45309 !important;background-color:#b45309 !important;color:#fff !important;-webkit-text-fill-color:#fff !important;border-color:#b45309 !important;opacity:1 !important}.partner-editar-btn:hover{background:#92400e !important;background-color:#92400e !important}`}</style>
     <header style={{backgroundColor:"#fff",borderBottom:"1px solid #e2e8f0",padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px",flexWrap:"wrap"}}>
-      <div><div style={{fontSize:"18px",fontWeight:900,color:"#0284c7"}}>RutaComercio <span style={{fontSize:"10px",color:"#16a34a"}}>SUPERADMIN</span></div><div style={{fontSize:"11px",color:"#64748b"}}>Partners • Comisiones • Historial de pagos</div></div>
+      <div><div style={{fontSize:"18px",fontWeight:900,color:"#0284c7"}}>RutaComercios <span style={{fontSize:"10px",color:"#16a34a"}}>SUPERADMIN</span></div><div style={{fontSize:"11px",color:"#64748b"}}>Partners • Comisiones • Historial de pagos</div></div>
       <div style={{display:"flex",gap:"8px"}}><a href="/admin" style={{padding:"8px 12px",border:"1px solid #cbd5e1",borderRadius:"8px",textDecoration:"none",color:"#334155",fontWeight:700,fontSize:"12px"}}>🏢 Empresas</a><button onClick={()=>setMostrarAlta(true)} style={{padding:"8px 14px",border:0,borderRadius:"8px",backgroundColor:"#b45309",color:"#fff",fontWeight:800,cursor:"pointer"}}>+ Alta Partner</button></div>
     </header>
     <main style={{maxWidth:"1200px",margin:"0 auto",padding:"22px"}}>

@@ -184,7 +184,7 @@ export default function MonitorPedidos() {
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <span style={{ fontSize: "22px" }}>📦</span>
           <div>
-            <h1 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#fff", letterSpacing: "-0.5px" }}>RutaComercio · Pedidos en Vivo</h1>
+            <h1 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#fff", letterSpacing: "-0.5px" }}>RutaComercios · Pedidos en Vivo</h1>
             <p style={{ margin: 0, fontSize: "11px", color: "#94a3b8" }}>Despacho y Gestión de Comandas de Campo</p>
           </div>
         </div>

@@ -2188,7 +2188,7 @@ export default function Simplex({ sesion: sesionProp, perfil: perfilProp }) {
     <div style={estilos.pagina}>
       <header style={estilos.headerPrincipal}>
         <div>
-          <div style={{ fontSize: "21px", fontWeight: 950 }}>💻 RutaComercio Simplex</div>
+          <div style={{ fontSize: "21px", fontWeight: 950 }}>💻 RutaComercios Simplex</div>
           <div style={{ color: "#94a3b8", fontSize: "12px", marginTop: "2px" }}>
             👤 {perfil?.nombre || sesion?.user?.email || "Usuario"} ·{" "}
             <span style={{ color: "#38bdf8" }}>{perfil?.empresa || "Empresa"}</span>

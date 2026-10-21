@@ -721,7 +721,7 @@ const reactivarComercio = async (comercio) => {
       hoja["!cols"] = [{ wch: 16 }, { wch: 38 }, { wch: 18 }, { wch: 12 }, { wch: 12 }];
       const libro = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(libro, hoja, "Stock");
-      XLSX.writeFile(libro, "RutaComercio_Plantilla_Stock.xlsx");
+      XLSX.writeFile(libro, "RutaComercios_Plantilla_Stock.xlsx");
     } catch (error) {
       console.error("Error descargando plantilla de stock:", error);
       alert("❌ No se pudo descargar la plantilla de stock.");
@@ -2475,8 +2475,8 @@ useEffect(() => {
     }
 
     const mensaje = modoImportacionCuenta === "completo"
-      ? "⚠️ REEMPLAZAR ESTADO DE CUENTA COMPLETO\n\nLos clientes que NO aparecen en la planilla pasarán a saldo $0.\n\n¿Confirmar carga en RutaComercio?"
-      : `Se actualizarán ${vistaPreviaCuenta.encontrados.length} clientes incluidos en la planilla.\n\n¿Confirmar carga en RutaComercio?`;
+      ? "⚠️ REEMPLAZAR ESTADO DE CUENTA COMPLETO\n\nLos clientes que NO aparecen en la planilla pasarán a saldo $0.\n\n¿Confirmar carga en RutaComercios?"
+      : `Se actualizarán ${vistaPreviaCuenta.encontrados.length} clientes incluidos en la planilla.\n\n¿Confirmar carga en RutaComercios?`;
     if (!window.confirm(mensaje)) return;
 
     setImportandoCuenta(true);
@@ -2548,7 +2548,7 @@ useEffect(() => {
           Object.fromEntries(encabezados.map((enc, i) => [enc, fila[i] ?? ""]))
         );
       } else {
-        // Orden oficial de la plantilla RutaComercio cuando el archivo no trae encabezados.
+        // Orden oficial de la plantilla RutaComercios cuando el archivo no trae encabezados.
         filas = filasUtiles.map(fila => ({
           codigo_cliente: fila[0] ?? "",
           razon_social: fila[1] ?? "",
@@ -2907,7 +2907,7 @@ useEffect(() => {
   const solicitudesPendientes = (solicitudesNoVisitar || []).filter(s => s.estado === "pendiente");
   const solicitudesHistorial = (solicitudesNoVisitar || []).filter(s => s.estado !== "pendiente");
 
-  // 📥 Plantilla oficial RutaComercio para importación de clientes
+  // 📥 Plantilla oficial RutaComercios para importación de clientes
   const descargarPlantillaClientes = () => {
     try {
       const encabezados = [
@@ -2954,7 +2954,7 @@ useEffect(() => {
         ["partido", "No", "Partido o municipio."],
         ["provincia_estado", "No", "Provincia o estado."],
         ["codigo_postal", "No", "Código postal."],
-        ["pais", "No", "País. Si se omite para geocodificar, RutaComercio usa Argentina como referencia."],
+        ["pais", "No", "País. Si se omite para geocodificar, RutaComercios usa Argentina como referencia."],
         ["telefono", "No", "Teléfono del cliente."],
         ["whatsapp", "No", "WhatsApp del cliente, separado del teléfono."],
         ["nombre_contacto", "No", "Persona de contacto."],
@@ -2972,7 +2972,7 @@ useEffect(() => {
       const libro = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(libro, hoja, "Clientes");
       XLSX.utils.book_append_sheet(libro, hojaInstrucciones, "Instrucciones");
-      XLSX.writeFile(libro, "Plantilla_Clientes_RutaComercio.xlsx");
+      XLSX.writeFile(libro, "Plantilla_Clientes_RutaComercios.xlsx");
     } catch (error) {
       console.error("Error descargando plantilla de clientes:", error);
       alert("❌ No se pudo descargar la plantilla de clientes.");
@@ -3003,7 +3003,7 @@ useEffect(() => {
     }
 
     const confirmacion = window.confirm(
-      `⚠️ CARGA DE CLIENTES\n\nSe van a cargar ${clientes.length} cliente(s) en RutaComercio para ${perfilSupervisor.empresa || "esta empresa"}.\n\nEsta acción cargará los clientes definitivamente en RutaComercio.\n\n¿Confirmar carga en RutaComercio?`
+      `⚠️ CARGA DE CLIENTES\n\nSe van a cargar ${clientes.length} cliente(s) en RutaComercios para ${perfilSupervisor.empresa || "esta empresa"}.\n\nEsta acción cargará los clientes definitivamente en RutaComercios.\n\n¿Confirmar carga en RutaComercios?`
     );
     if (!confirmacion) return;
 
@@ -3533,8 +3533,8 @@ useEffect(() => {
 
     const confirmar = window.confirm(
       comparacionListaPrecios.esPrimeraLista
-        ? `⚠️ CREAR PRIMERA LISTA\n\nLista: ${comparacionListaPrecios.nombreLista}\nProductos nuevos: ${productosNuevos.length}\n\nRutaComercio creará la primera lista de precios. ¿Confirmar?`
-        : `⚠️ ACTUALIZACIÓN REAL DE LISTA\n\nLista: ${comparacionListaPrecios.nombreLista}\nCambios de precio: ${cambiosPrecio.length}\nProductos nuevos: ${productosNuevos.length}\nQuitar de la lista: ${productosQuitar.length}\n\nRutaComercio actualizará esta lista de precios. ¿Confirmar?`
+        ? `⚠️ CREAR PRIMERA LISTA\n\nLista: ${comparacionListaPrecios.nombreLista}\nProductos nuevos: ${productosNuevos.length}\n\nRutaComercios creará la primera lista de precios. ¿Confirmar?`
+        : `⚠️ ACTUALIZACIÓN REAL DE LISTA\n\nLista: ${comparacionListaPrecios.nombreLista}\nCambios de precio: ${cambiosPrecio.length}\nProductos nuevos: ${productosNuevos.length}\nQuitar de la lista: ${productosQuitar.length}\n\nRutaComercios actualizará esta lista de precios. ¿Confirmar?`
     );
     if (!confirmar) return;
 
@@ -3630,10 +3630,10 @@ useEffect(() => {
       <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         {/* IZQUIERDA: MARCA Y LOGO OFICIAL */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <img src="/logo.svg" alt="RutaComercio" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
+          <img src="/logo.svg" alt="RutaComercios" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <h1 style={{ margin: 0, fontSize: "17px", fontWeight: "800", letterSpacing: "-0.5px", color: "#0f172a" }}>RutaComercio Web</h1>
+              <h1 style={{ margin: 0, fontSize: "17px", fontWeight: "800", letterSpacing: "-0.5px", color: "#0f172a" }}>RutaComercios Web</h1>
               <span style={{ backgroundColor: "#dcfce7", color: "#15803d", fontSize: "11px", fontWeight: "700", padding: "1px 6px", borderRadius: "10px" }}>
                 ● En Vivo
               </span>
@@ -3797,7 +3797,7 @@ useEffect(() => {
               <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
                 <div>
                   <h3 style={{ margin: 0 }}>💾 Confirmación final de carga</h3>
-                  <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Revisá qué clientes se van a cargar en RutaComercio.</div>
+                  <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Revisá qué clientes se van a cargar en RutaComercios.</div>
                 </div>
                 <button type="button" onClick={() => setPreConfirmacionImportacion(false)} style={{ border: "none", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}>✕</button>
               </div>
@@ -3828,7 +3828,7 @@ useEffect(() => {
               </div>
 
               <div style={{ marginTop: "12px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: "9px", padding: "10px", fontSize: "11px", color: "#9a3412" }}>
-                ⚠️ Esta es la última revisión. Al tocar IMPORTAR AHORA aparecerá una confirmación final y, si aceptás, los clientes se cargarán en RutaComercio.
+                ⚠️ Esta es la última revisión. Al tocar IMPORTAR AHORA aparecerá una confirmación final y, si aceptás, los clientes se cargarán en RutaComercios.
               </div>
 
               <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "12px" }}>
@@ -3897,7 +3897,7 @@ useEffect(() => {
                 <button type="button" onClick={() => setRevisionMapa(null)} style={{ padding: "9px 13px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#fff", cursor: "pointer", fontWeight: "800" }}>Cancelar</button>
                 <button type="button" onClick={confirmarRevisionMapa} style={{ padding: "9px 13px", border: "none", borderRadius: "8px", background: "#16a34a", color: "#fff", cursor: "pointer", fontWeight: "900" }}>✅ CONFIRMAR UBICACIÓN</button>
               </div>
-              <div style={{ marginTop: "8px", fontSize: "10px", color: "#64748b", textAlign: "center" }}>🔒 Sigue siendo una revisión previa: todavía no se cargó ningún cliente en RutaComercio.</div>
+              <div style={{ marginTop: "8px", fontSize: "10px", color: "#64748b", textAlign: "center" }}>🔒 Sigue siendo una revisión previa: todavía no se cargó ningún cliente en RutaComercios.</div>
             </div>
           </div>
         )}
@@ -3907,7 +3907,7 @@ useEffect(() => {
             <div style={{ width: "min(820px, 96vw)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: "14px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", padding: "18px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: "18px" }}>📥 Cargar Clientes a RutaComercio</h3>
+                  <h3 style={{ margin: 0, fontSize: "18px" }}>📥 Cargar Clientes a RutaComercios</h3>
                   <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
                     PASO 1 — Lee y revisa el Excel. <strong>No guarda nada todavía.</strong>
                   </div>
@@ -3963,7 +3963,7 @@ useEffect(() => {
                     <label style={{ border: !archivoClientesTieneEncabezados ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: "9px", padding: "10px", cursor: "pointer", background: !archivoClientesTieneEncabezados ? "#eff6ff" : "#fff" }}>
                       <input type="radio" name="encabezadosClientes" checked={!archivoClientesTieneEncabezados} onChange={() => { setArchivoClientesTieneEncabezados(false); setVistaPreviaClientes(null); }} />
                       <strong> Mi archivo NO tiene títulos de columnas</strong>
-                      <div style={{ marginLeft: "22px", marginTop: "3px", fontSize: "11px", color: "#64748b" }}>RutaComercio usará el orden esperado de columnas.</div>
+                      <div style={{ marginLeft: "22px", marginTop: "3px", fontSize: "11px", color: "#64748b" }}>RutaComercios usará el orden esperado de columnas.</div>
                     </label>
                   </div>
                 )}
@@ -3999,7 +3999,7 @@ useEffect(() => {
                     </div>
                     <div style={{ marginTop: "7px", textAlign: "center", fontSize: "10px", color: "#64748b" }}>
                       {pasoActual === 1 && "Elegí el archivo de clientes para comenzar."}
-                      {pasoActual === 2 && "RutaComercio está revisando los datos antes de importar."}
+                      {pasoActual === 2 && "RutaComercios está revisando los datos antes de importar."}
                       {pasoActual === 3 && "Todo está listo. Revisá el resumen y confirmá la importación."}
                     </div>
                   </div>
@@ -4046,7 +4046,7 @@ useEffect(() => {
                           <strong>{vistaPreviaClientes.validos?.length || 0}</strong>{" "}
                           {(vistaPreviaClientes.validos?.length || 0) === 1 ? "cliente encontrado" : "clientes encontrados"}.
                           {totalProblemas === 0
-                            ? " RutaComercio verificará direcciones y preventistas antes de cargarlos."
+                            ? " RutaComercios verificará direcciones y preventistas antes de cargarlos."
                             : " Revisá los avisos de abajo antes de continuar."}
                         </div>
                       </div>
@@ -4210,7 +4210,7 @@ useEffect(() => {
 
 
                       <div style={{ marginTop: "10px", background: "#f1f5f9", borderRadius: "8px", padding: "9px", fontSize: "11px", color: "#475569" }}>
-                        🔒 <strong>Todavía no se cargó ningún cliente en RutaComercio.</strong>
+                        🔒 <strong>Todavía no se cargó ningún cliente en RutaComercios.</strong>
                       </div>
                     </div>
                   )}
@@ -4340,7 +4340,7 @@ useEffect(() => {
                 </div>
 
                 <div style={{ padding: "10px 12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", color: "#1e3a8a", fontSize: "11px", lineHeight: 1.5, marginBottom: "12px" }}>
-                  <strong>Importante:</strong> el stock bajo generará alertas, pero RutaComercio nunca bloqueará automáticamente un artículo. El bloqueo seguirá siendo una decisión manual del Supervisor.
+                  <strong>Importante:</strong> el stock bajo generará alertas, pero RutaComercios nunca bloqueará automáticamente un artículo. El bloqueo seguirá siendo una decisión manual del Supervisor.
                 </div>
 
                 {archivoStockNombre && (
@@ -4492,7 +4492,7 @@ useEffect(() => {
                           <thead><tr style={{ background: "#f8fafc" }}>
                             <th style={{ textAlign: "left", padding: "8px" }}>Código Excel</th>
                             <th style={{ textAlign: "left", padding: "8px" }}>CGE</th>
-                            <th style={{ textAlign: "left", padding: "8px" }}>Producto RutaComercio</th>
+                            <th style={{ textAlign: "left", padding: "8px" }}>Producto RutaComercios</th>
                             <th style={{ textAlign: "left", padding: "8px" }}>Color</th>
                             <th style={{ textAlign: "left", padding: "8px" }}>Talle</th>
                             <th style={{ textAlign: "right", padding: "8px" }}>Stock informado</th>
@@ -4541,7 +4541,7 @@ useEffect(() => {
                             Revisión antes de incorporar productos nuevos
                           </div>
                           <div style={{ fontSize: "10px", color: "#92400e", lineHeight: 1.5, marginBottom: "9px" }}>
-                            Estos artículos no existen actualmente en el catálogo de esta empresa. RutaComercio puede prepararlos como productos nuevos, pero todavía no crea nada, no genera CGE y no modifica stock.
+                            Estos artículos no existen actualmente en el catálogo de esta empresa. RutaComercios puede prepararlos como productos nuevos, pero todavía no crea nada, no genera CGE y no modifica stock.
                           </div>
 
                           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -5417,7 +5417,7 @@ useEffect(() => {
                     <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start" }}>
                       <div>
                         <h3 style={{ margin: 0, fontSize: "18px" }}>💾 Confirmación previa de lista de precios</h3>
-                        <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Revisá qué haría RutaComercio antes de habilitar el guardado real.</div>
+                        <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>Revisá qué haría RutaComercios antes de habilitar el guardado real.</div>
                       </div>
                       <button type="button" onClick={() => setPreConfirmacionListaPrecios(false)} style={{ border: "none", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}>✕</button>
                     </div>
@@ -5453,7 +5453,7 @@ useEffect(() => {
                     {(comparacionListaPrecios.ausentes || []).length > 0 && (
                       <div style={{ marginTop: "12px", padding: "10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "9px", fontSize: "11px", color: "#9a3412" }}>
                         <strong>📤 Productos que estaban en la lista actual y ya no vienen en el archivo nuevo:</strong>
-                        <div style={{ marginTop: "6px", color: "#7c2d12" }}>Elegí qué hacer con cada uno. Por seguridad, RutaComercio los mantiene activos salvo que el supervisor indique lo contrario.</div>
+                        <div style={{ marginTop: "6px", color: "#7c2d12" }}>Elegí qué hacer con cada uno. Por seguridad, RutaComercios los mantiene activos salvo que el supervisor indique lo contrario.</div>
                         {comparacionListaPrecios.ausentes.map((p) => (
                           <div key={p.id} style={{ marginTop: "8px", padding: "8px", background: "#fff", borderRadius: "8px", display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                             <div><strong>{p.codigo}</strong> · {p.descripcion} · ${p.precioAnterior}</div>
@@ -5560,7 +5560,7 @@ useEffect(() => {
                           )}
 
                           <div style={{ marginTop: "12px", padding: "11px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "9px", fontSize: "11px", color: "#9a3412", fontWeight: "800", textAlign: "center" }}>
-                            ⚠️ Al confirmar, RutaComercio guardará los cambios de esta lista de precios de forma segura.
+                            ⚠️ Al confirmar, RutaComercios guardará los cambios de esta lista de precios de forma segura.
                           </div>
 
                           <div style={{ marginTop: "14px", display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>

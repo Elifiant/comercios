@@ -30,6 +30,6 @@
     <circle cx="188" cy="62" r="26" fill="none" stroke="#10b981" stroke-width="4" stroke-opacity="0.5"/>
   </g>
 
-  <text x="256" y="420" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="44" font-weight="800" fill="#0f172a" letter-spacing="-1">Ruta<tspan fill="#2563eb">Comercio</tspan></text>
+  <text x="256" y="420" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="44" font-weight="800" fill="#0f172a" letter-spacing="-1">Ruta<tspan fill="#2563eb">Comercios</tspan></text>
   <text x="256" y="456" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#64748b" letter-spacing="3">PREVENTA &amp; GEO-GESTIÓN</text>
 </svg>

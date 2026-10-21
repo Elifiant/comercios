@@ -1041,7 +1041,7 @@ export default function MonitorPedidos() {
 
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, "Stock");
-    XLSX.writeFile(libro, "RutaComercio_Plantilla_Stock.xlsx");
+    XLSX.writeFile(libro, "RutaComercios_Plantilla_Stock.xlsx");
   };
 
   const cargarArchivoStock = async (event) => {
@@ -1395,7 +1395,7 @@ export default function MonitorPedidos() {
           </style>
         </head>
         <body>
-          <h1>RutaComercio · NVI #${escapar(pedido.numeroVisible)}</h1>
+          <h1>RutaComercios · NVI #${escapar(pedido.numeroVisible)}</h1>
           <div class="sub">${escapar(datosCabecera.empresa || "")}</div>
           <pre>${escapar(texto)}</pre>
           <script>window.onload = () => window.print();<\/script>
@@ -2182,7 +2182,7 @@ export default function MonitorPedidos() {
 
     const confirmar = window.confirm(
       depositoAnteriorId
-        ? `¿Cambiar el depósito de salida de la NVI #${pedido.numeroVisible}?\n\n${anterior?.nombre || "Depósito actual"} → ${nuevo.nombre}\n\nRutaComercio devolverá el stock al depósito anterior y descontará la NVI del nuevo depósito.`
+        ? `¿Cambiar el depósito de salida de la NVI #${pedido.numeroVisible}?\n\n${anterior?.nombre || "Depósito actual"} → ${nuevo.nombre}\n\nRutaComercios devolverá el stock al depósito anterior y descontará la NVI del nuevo depósito.`
         : `⚠️ El depósito principal no pudo cubrir la NVI #${pedido.numeroVisible}.\n\n¿CONTINUAR LA VENTA y descontar el stock de ${nuevo.nombre}?\n\nSi no querés continuar, cancelá y podés ELIMINAR LA NVI.`
     );
     if (!confirmar) return;
@@ -2987,10 +2987,10 @@ export default function MonitorPedidos() {
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <img src="/logo.svg" alt="RutaComercio" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
+          <img src="/logo.svg" alt="RutaComercios" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <h1 style={{ margin: 0, fontSize: "17px", fontWeight: "800", letterSpacing: "-0.5px", color: "#0f172a" }}>RutaComercio Web</h1>
+              <h1 style={{ margin: 0, fontSize: "17px", fontWeight: "800", letterSpacing: "-0.5px", color: "#0f172a" }}>RutaComercios Web</h1>
               <span style={{ backgroundColor: "#dcfce7", color: "#15803d", fontSize: "11px", fontWeight: "700", padding: "1px 6px", borderRadius: "10px" }}>● En Vivo</span>
             </div>
             <p style={{ margin: 0, fontSize: "12px", color: "#64748b" }}>Panel de Control y Supervisión Territorial</p>
@@ -3589,7 +3589,7 @@ export default function MonitorPedidos() {
                 </div>
 
                 <div style={{ padding: "10px 12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", color: "#1e3a8a", fontSize: "11px", lineHeight: 1.5, marginBottom: "12px" }}>
-                  <strong>Importante:</strong> el stock bajo generará alertas, pero RutaComercio nunca bloqueará automáticamente un artículo. El bloqueo seguirá siendo una decisión manual del Supervisor.
+                  <strong>Importante:</strong> el stock bajo generará alertas, pero RutaComercios nunca bloqueará automáticamente un artículo. El bloqueo seguirá siendo una decisión manual del Supervisor.
                 </div>
 
                 {archivoStockNombre && (
@@ -3772,7 +3772,7 @@ export default function MonitorPedidos() {
                           <thead><tr style={{ background: "#f8fafc" }}>
                             <th style={{ textAlign: "left", padding: "8px" }}>Código Excel</th>
                             <th style={{ textAlign: "left", padding: "8px" }}>CGE</th>
-                            <th style={{ textAlign: "left", padding: "8px" }}>Producto RutaComercio</th>
+                            <th style={{ textAlign: "left", padding: "8px" }}>Producto RutaComercios</th>
                             <th style={{ textAlign: "right", padding: "8px" }}>Stock informado</th>
                           </tr></thead>
                           <tbody>
@@ -3817,7 +3817,7 @@ export default function MonitorPedidos() {
                             Revisión antes de incorporar productos nuevos
                           </div>
                           <div style={{ fontSize: "10px", color: "#92400e", lineHeight: 1.5, marginBottom: "9px" }}>
-                            Estos artículos no existen actualmente en el catálogo de esta empresa. RutaComercio puede prepararlos como productos nuevos, pero todavía no crea nada, no genera CGE y no modifica stock.
+                            Estos artículos no existen actualmente en el catálogo de esta empresa. RutaComercios puede prepararlos como productos nuevos, pero todavía no crea nada, no genera CGE y no modifica stock.
                           </div>
 
                           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -4213,7 +4213,7 @@ export default function MonitorPedidos() {
                   <div>
                     <div style={{ fontSize: "15px", fontWeight: "900", color: "#0f172a" }}>📦 Stock relativo</div>
                     <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
-                      Seguimiento relativo según los pedidos registrados en RutaComercio. No representa stock físico ni cantidad disponible en depósito.
+                      Seguimiento relativo según los pedidos registrados en RutaComercios. No representa stock físico ni cantidad disponible en depósito.
                     </div>
                   </div>
                   <input
@@ -4225,7 +4225,7 @@ export default function MonitorPedidos() {
                 </div>
 
                 <div style={{ marginBottom: "10px", padding: "9px 10px", borderRadius: "8px", background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e3a8a", fontSize: "11px", lineHeight: 1.45 }}>
-                  <strong>¿Qué significa Stock relativo?</strong> RutaComercio muestra cuánto se pidió de cada artículo durante la jornada y permite al Supervisor comunicar su situación comercial como Disponible, Crítico o Bloqueado. No calcula existencias físicas.
+                  <strong>¿Qué significa Stock relativo?</strong> RutaComercios muestra cuánto se pidió de cada artículo durante la jornada y permite al Supervisor comunicar su situación comercial como Disponible, Crítico o Bloqueado. No calcula existencias físicas.
                 </div>
 
                 {resumenArticulosFiltrado.length === 0 ? (
@@ -4379,7 +4379,7 @@ export default function MonitorPedidos() {
                       <div style={{ marginTop: "5px", fontSize: "10px", color: "#475569" }}>
                         {guardandoDepositoNvi === String(pedidoActivo.id)
                           ? "⏳ Moviendo la aplicación de stock..."
-                          : "Stock aplicado. Podés cambiar el depósito; RutaComercio devolverá y descontará automáticamente."}
+                          : "Stock aplicado. Podés cambiar el depósito; RutaComercios devolverá y descontará automáticamente."}
                       </div>
                     </>
                   ) : (

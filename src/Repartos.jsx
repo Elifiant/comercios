@@ -2339,7 +2339,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
       <div style={{ minHeight: "100vh", background: "#f1f5f9", color: "#0f172a", fontFamily: "Arial, sans-serif" }}>
         <header style={{ background: "#0f172a", color: "white", padding: 16 }}>
           <div style={{ maxWidth: 1000, margin: "auto", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <div><div style={{ fontSize: 20, fontWeight: 900 }}>🚚 RutaComercio · Repartos</div>
+            <div><div style={{ fontSize: 20, fontWeight: 900 }}>🚚 RutaComercios · Repartos</div>
               <div style={{ color: "#94a3b8", fontSize: 12 }}>{empresaNombre} · Repartos independiente</div></div>
             <div style={{ display: "flex", gap: 8 }}>
               {typeof onVolver === "function" && <button onClick={onVolver}>← VOLVER</button>}
@@ -2907,7 +2907,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
       <header style={{ background: "#0f172a", color: "#fff", padding: "12px 14px" }}>
         <div style={{ maxWidth: "1000px", margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
           <div>
-            <div style={{ fontSize: "20px", fontWeight: "950" }}>📦 RutaComercio · Depósito y Repartos</div>
+            <div style={{ fontSize: "20px", fontWeight: "950" }}>📦 RutaComercios · Depósito y Repartos</div>
             <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "2px" }}>
               {empresaNombre || "Empresa"} · Preparación de entregas
             </div>

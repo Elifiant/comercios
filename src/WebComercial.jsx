@@ -12,7 +12,7 @@ export default function WebComercial() {
   };
 
   const whatsapp =
-    "https://wa.me/5491166646806?text=Hola,%20quiero%20conocer%20RutaComercio";
+    "https://wa.me/5491166646806?text=Hola,%20quiero%20conocer%20RutaComercios";
 
   const funciones = [
     {
@@ -55,7 +55,7 @@ export default function WebComercial() {
   icono: "📈",
   titulo: "Crece junto con tu equipo",
   texto:
-    "RutaComercio está pensado para acompañar operaciones de distintos tamaños: desde pequeños equipos comerciales hasta organizaciones con cientos de vendedores y preventistas.",
+    "RutaComercios está pensado para acompañar operaciones de distintos tamaños: desde pequeños equipos comerciales hasta organizaciones con cientos de vendedores y preventistas.",
 },
   ];
 
@@ -84,14 +84,14 @@ export default function WebComercial() {
 
   const faqs = [
     {
-      q: "¿RutaComercio se usa desde el celular?",
+      q: "¿RutaComercios se usa desde el celular?",
       a:
         "Sí. El preventista trabaja desde su teléfono y el supervisor accede a su panel para seguir la operación.",
     },
     {
       q: "¿Puedo trabajar con varios preventistas?",
       a:
-        "Sí. RutaComercio está pensado para empresas que necesitan organizar y supervisar equipos de venta en calle.",
+        "Sí. RutaComercios está pensado para empresas que necesitan organizar y supervisar equipos de venta en calle.",
     },
     {
       q: "¿Los pedidos quedan vinculados al comercio?",
@@ -99,7 +99,7 @@ export default function WebComercial() {
         "Sí. La toma de pedidos forma parte del trabajo asociado a cada comercio y a la operación del preventista.",
     },
     {
-      q: "¿Puedo conocer RutaComercio antes de contratar?",
+      q: "¿Puedo conocer RutaComercios antes de contratar?",
       a:
         "Sí. Contactanos por WhatsApp y coordinamos una demostración para que puedas ver cómo funciona.",
     },
@@ -147,7 +147,7 @@ export default function WebComercial() {
           <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
             <img
               src="/logo.svg"
-              alt="RutaComercio"
+              alt="RutaComercios"
               style={{ height: "34px", width: "auto", display: "block" }}
               onError={(e) => {
                 e.currentTarget.style.display = "none";
@@ -160,7 +160,7 @@ export default function WebComercial() {
                 letterSpacing: "-0.6px",
               }}
             >
-              RutaComercio
+              RutaComercios
             </span>
           </div>
 
@@ -662,7 +662,7 @@ export default function WebComercial() {
                   WebkitTextFillColor: "white",
                 }}
               >
-                Así funciona RutaComercio
+                Así funciona RutaComercios
               </h2>
               <p style={{ color: "#e2e8f0", lineHeight: "1.6", margin: 0 }}>
                 Un flujo simple para que la información acompañe el trabajo real
@@ -742,7 +742,7 @@ export default function WebComercial() {
                 La calle y la supervisión, conectadas
               </h2>
               <p style={{ color: "#64748b", lineHeight: "1.6", margin: 0 }}>
-                RutaComercio concentra la información operativa que tu equipo
+                RutaComercios concentra la información operativa que tu equipo
                 necesita para trabajar y supervisar.
               </p>
             </div>
@@ -837,7 +837,7 @@ export default function WebComercial() {
       }}
     >
       <strong style={{ color: "#0f172a" }}>
-        RutaComercio sigue creciendo.
+        RutaComercios sigue creciendo.
       </strong>{" "}
       Estamos desarrollando nuevas herramientas para ampliar la gestión de tu
       operación, incluyendo un módulo de <strong>Entregas y Repartos</strong>,
@@ -911,7 +911,7 @@ export default function WebComercial() {
               }}
             >
               Contanos cuántos preventistas tenés y cómo trabajan hoy. Te
-              mostramos RutaComercio y evaluamos juntos la configuración que
+              mostramos RutaComercios y evaluamos juntos la configuración que
               mejor se adapte a tu operación.
             </p>
 
@@ -1070,7 +1070,7 @@ export default function WebComercial() {
                 fontSize: "18px",
               }}
             >
-              RutaComercio
+              RutaComercios
             </div>
             <div style={{ fontSize: "12px", marginTop: "5px" }}>
               Gestión para equipos de venta en calle.
@@ -1078,7 +1078,7 @@ export default function WebComercial() {
           </div>
 
           <div style={{ fontSize: "11px", textAlign: "right" }}>
-            © 2026 RutaComercio · Todos los derechos reservados.
+            © 2026 RutaComercios · Todos los derechos reservados.
           </div>
         </div>
       </footer>
@@ -1088,7 +1088,7 @@ export default function WebComercial() {
         href={whatsapp}
         target="_blank"
         rel="noreferrer"
-        aria-label="Consultar RutaComercio por WhatsApp"
+        aria-label="Consultar RutaComercios por WhatsApp"
         style={{
           position: "fixed",
           right: "16px",

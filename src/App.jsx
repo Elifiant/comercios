@@ -261,12 +261,12 @@ console.log("🚗 APP SE ESTÁ RENDERIZANDO");
 
       if (pareceFallaConexion) {
         alert(
-          '⚠️ No se pudo sincronizar con RutaComercio.\n\n' +
+          '⚠️ No se pudo sincronizar con RutaComercios.\n\n' +
           'Tus datos siguen en pantalla. Revisá la conexión e intentá “💾 Guardar Cambios” nuevamente.'
         );
       } else {
         alert(
-          '❌ No se pudo guardar en RutaComercio.\n\n' +
+          '❌ No se pudo guardar en RutaComercios.\n\n' +
           (err?.message || 'Revisá la conexión e intentá nuevamente.')
         );
       }
@@ -1363,7 +1363,7 @@ const solicitarNoVisitar = async (comercio) => {
           ...prev.filter(c => c !== nuevo)
         ]);
 
-        // RutaComercio usa un único precio base de la empresa.
+        // RutaComercios usa un único precio base de la empresa.
         // Un comercio nuevo no necesita ninguna asignación de lista.
 
         // En Modo Manejo no mostramos ventanas que obliguen al preventista a tocar la pantalla.
@@ -3552,7 +3552,7 @@ onChange={(e) =>
                     color: "#94a3b8",
                   }}
                 >
-                  Después tocá “💾 Guardar Cambios” para dejarla guardada en RutaComercio.
+                  Después tocá “💾 Guardar Cambios” para dejarla guardada en RutaComercios.
                 </div>
               </div>
             )}
@@ -3646,9 +3646,9 @@ onChange={(e) =>
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
         <header style={{ padding: "9px 14px", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #334155" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <img src="/logo.svg" alt="RutaComercio" style={{ width: "30px", height: "30px", objectFit: "contain" }} />
+            <img src="/logo.svg" alt="RutaComercios" style={{ width: "30px", height: "30px", objectFit: "contain" }} />
             <div>
-              <div style={{ fontSize: "13px", fontWeight: "800", color: "#ffffff", letterSpacing: "-0.3px" }}>RutaComercio</div>
+              <div style={{ fontSize: "13px", fontWeight: "800", color: "#ffffff", letterSpacing: "-0.3px" }}>RutaComercios</div>
               <div style={{ fontSize: "10px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
                 <span>👤 {perfil?.nombre || "Preventista"}</span>
                 <span>·</span>
