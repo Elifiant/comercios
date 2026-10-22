@@ -1764,53 +1764,61 @@ useEffect(() => {
   cargarSolicitudesNoVisitar();
 }, [perfilSupervisor]);
 
-  // 💳 Cargar vigencia real del abono de la empresa
+  // 💳 Vigencia del contrato activo: misma fuente que Portal de Pagos.
+  const [hoyAbono, setHoyAbono] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
   useEffect(() => {
     if (!perfilSupervisor?.empresa_id) return;
-
+    let vigente = true;
     const cargarDatosAbono = async () => {
       try {
         const { data, error } = await supabase
-          .from("empresas")
-          .select("nombre, abonado_hasta")
-          .eq("id", perfilSupervisor.empresa_id)
+          .from("empresa_abonos")
+          .select("id,proximo_vencimiento,fecha_inicio,activo")
+          .eq("empresa_id", perfilSupervisor.empresa_id)
+          .eq("activo", true)
+          .order("created_at", { ascending: false })
+          .limit(1)
           .maybeSingle();
-
         if (error) throw error;
-        setDatosAbono(data || null);
+        if (vigente) setDatosAbono(data || null);
       } catch (error) {
-        console.error("Error cargando vigencia del abono:", error);
-        setDatosAbono(null);
+        console.error("Error cargando vigencia del contrato:", error);
+        if (vigente) setDatosAbono(null);
       }
     };
-
-    cargarDatosAbono();
+    const actualizar = () => {
+      setHoyAbono(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+      cargarDatosAbono();
+    };
+    actualizar();
+    // Refresca la fecha y los datos sin necesitar recargar la pantalla.
+    const intervalo = setInterval(actualizar, 60000);
+    const alVolver = () => { if (document.visibilityState === "visible") actualizar(); };
+    document.addEventListener("visibilitychange", alVolver);
+    return () => { vigente = false; clearInterval(intervalo); document.removeEventListener("visibilitychange", alVolver); };
   }, [perfilSupervisor?.empresa_id]);
 
   const estadoAbono = (() => {
-    const nombreEmpresa = String(datosAbono?.nombre || perfilSupervisor?.empresa || "").trim().toUpperCase();
-
+    const nombreEmpresa = String(perfilSupervisor?.empresa || "").trim().toUpperCase();
     if (nombreEmpresa === "DEMO S.A." || nombreEmpresa === "DEMO SA") {
       return { texto: "Cuenta DEMO", color: "#2563eb", icono: "🧪" };
     }
-
-    if (!datosAbono?.abonado_hasta) {
+    const fecha = datosAbono?.proximo_vencimiento;
+    if (!fecha || !/^\d{4}-\d{2}-\d{2}/.test(String(fecha))) {
       return { texto: "Vencimiento no informado", color: "#64748b", icono: "🗓️" };
     }
-
-    const partes = String(datosAbono.abonado_hasta).split("-").map(Number);
-    const vencimiento = new Date(partes[0], partes[1] - 1, partes[2]);
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    vencimiento.setHours(0, 0, 0, 0);
-
-    const dias = Math.ceil((vencimiento - hoy) / 86400000);
-
-    if (dias < 0) return { texto: "Abono vencido", color: "#dc2626", icono: "🔴" };
-    if (dias === 0) return { texto: "Vence hoy", color: "#dc2626", icono: "🔴" };
-    if (dias <= 5) return { texto: `${dias} día${dias === 1 ? "" : "s"} restante${dias === 1 ? "" : "s"}`, color: "#d97706", icono: "⚠️" };
-
-    return { texto: `${dias} días restantes`, color: "#16a34a", icono: "🗓️" };
+    const iso = String(fecha).slice(0, 10);
+    const [anio, mes, dia] = iso.split("-").map(Number);
+    const [hAnio, hMes, hDia] = hoyAbono.split("-").map(Number);
+    const dias = Math.round((Date.UTC(anio, mes - 1, dia) - Date.UTC(hAnio, hMes - 1, hDia)) / 86400000);
+    const fechaVisible = `${String(dia).padStart(2,"0")}/${String(mes).padStart(2,"0")}/${anio}`;
+    if (dias < 0) return { texto: `Venció el ${fechaVisible} · ${Math.abs(dias)} día${dias === -1 ? "" : "s"} de atraso`, color: "#dc2626", icono: "🔴" };
+    if (dias === 0) return { texto: `Vence hoy ${fechaVisible}`, color: "#dc2626", icono: "🔴" };
+    return {
+      texto: `Vence ${fechaVisible} · ${dias} día${dias === 1 ? "" : "s"} restante${dias === 1 ? "" : "s"}`,
+      color: dias <= 5 ? "#d97706" : "#16a34a",
+      icono: dias <= 5 ? "⚠️" : "🗓️"
+    };
   })();
 
   // Empresa del supervisor logueado

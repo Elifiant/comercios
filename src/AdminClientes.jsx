@@ -523,7 +523,7 @@ export default function AdminClientes() {
         tarifa_pactada: Number(precioAcordado) || 0,
         modelo_cobro: "plana",
         abonado_hasta: vencimientoAbono,
-        dia_corte: Number(diaCorteAbono)
+        dia_cobro: Number(diaCorteAbono)
       }).eq("id", empresaDB.id);
       if (empresaError) throw empresaError;
 
