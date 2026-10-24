@@ -308,6 +308,23 @@ export default function WebComercial() {
                 >
                   SOLICITAR DEMO
                 </a>
+                <a
+                  href="https://ventafacil.rutacomercios.com"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    backgroundColor: "#16a34a",
+                    color: "#ffffff",
+                    textDecoration: "none",
+                    padding: "14px 20px",
+                    borderRadius: "11px",
+                    fontWeight: "900",
+                    fontSize: "14px",
+                    boxShadow: "0 8px 22px rgba(22,163,74,0.2)",
+                  }}
+                >
+                  📱 INSTALAR VENTAFÁCIL GRATIS
+                </a>
                 <button
                   type="button"
                   onClick={irAlLogin}
@@ -551,6 +568,49 @@ export default function WebComercial() {
                 </div>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* VENTAFÁCIL GRATIS */}
+        <section
+          id="ventafacil"
+          style={{ padding: "54px 18px", backgroundColor: "#f0fdf4", boxSizing: "border-box" }}
+        >
+          <div
+            style={{
+              maxWidth: "900px", margin: "0 auto", textAlign: "center",
+              backgroundColor: "#ffffff", border: "1px solid #bbf7d0",
+              borderRadius: "22px", padding: "clamp(26px, 5vw, 48px) 20px",
+              boxShadow: "0 12px 32px rgba(22,163,74,0.08)",
+            }}
+          >
+            <div style={{ color: "#15803d", fontWeight: "900", fontSize: "12px", letterSpacing: "1px" }}>
+              🎁 UNA HERRAMIENTA GRATUITA DE RUTACOMERCIOS
+            </div>
+            <h2 style={{ fontSize: "clamp(28px, 5vw, 42px)", margin: "12px 0", color: "#0f172a" }}>
+              VentaFácil: tus ventas en el celular
+            </h2>
+            <p style={{ maxWidth: "660px", margin: "0 auto 22px", color: "#475569", lineHeight: "1.7", fontSize: "15px" }}>
+              Registrá clientes, artículos y ventas, compartí por WhatsApp y trabajá incluso sin internet.
+              Gratis, sin registro y sin cuotas mensuales.
+            </p>
+            <a
+              href="https://ventafacil.rutacomercios.com"
+              style={{
+                display: "inline-block", backgroundColor: "#16a34a", color: "#ffffff",
+                textDecoration: "none", padding: "16px 24px", borderRadius: "12px",
+                fontWeight: "900", fontSize: "15px", boxShadow: "0 8px 20px rgba(22,163,74,0.2)",
+              }}
+            >
+              📱 INSTALAR VENTAFÁCIL GRATIS
+            </a>
+            <p style={{ margin: "18px auto 0", maxWidth: "650px", color: "#64748b", fontSize: "12px", lineHeight: "1.7" }}>
+              En iPhone: abrí el enlace en Safari y elegí Compartir → Agregar a pantalla de inicio.
+              En Android: abrilo en Chrome y elegí Instalar aplicación o Agregar a pantalla principal.
+            </p>
+            <p style={{ margin: "10px auto 0", maxWidth: "650px", color: "#64748b", fontSize: "11px", lineHeight: "1.6" }}>
+              Los datos se guardan en tu dispositivo. Hacé copias de seguridad periódicas.
+            </p>
           </div>
         </section>
 
