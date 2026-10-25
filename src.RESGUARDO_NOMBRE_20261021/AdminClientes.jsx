@@ -1,0 +1,1771 @@
+import React, { useState, useEffect, useRef } from "react";
+import { supabase, supabaseRegistro } from "./supabase";
+import PlanesAbonos from "./PlanesAbonos";
+
+const tipoContrato = (nombre = "") => nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas";
+
+export default function AdminClientes() {
+  const [empresas, setEmpresas] = useState([]);
+  const [empresasRegistros, setEmpresasRegistros] = useState([]);
+  const [mensajeExitoAsignacion, setMensajeExitoAsignacion] = useState("");
+  const [tituloAsignacion, setTituloAsignacion] = useState("➕ Asignar Nuevo Preventista");
+  const [preventistas, setPreventistas] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [mostrarModalEmpresa, setMostrarModalEmpresa] = useState(false);
+  const [mostrarPlanesAbonos, setMostrarPlanesAbonos] = useState(false);
+  
+  const [modalResetClave, setModalResetClave] = useState(null); // { usuario, nuevoPass: "" }
+  const [modalCambiarEmail, setModalCambiarEmail] = useState(null); // { usuario, nuevoEmail: "" }
+  const [nuevoRolEmpleado, setNuevoRolEmpleado] = useState("preventista");
+  const [nuevoTipoSupervisor, setNuevoTipoSupervisor] = useState("supervisorv");
+    const [empresaEditando, setEmpresaEditando] = useState(null);
+  const [paisEmpresa, setPaisEmpresa] = useState("Argentina");
+  const [monedaEmpresa, setMonedaEmpresa] = useState("ARS");
+  const [tipoTarifa, setTipoTarifa] = useState("preventista");
+  const [tarifaValor, setTarifaValor] = useState("10000");
+  const [cupoLimite, setCupoLimite] = useState("5");
+  const [notasCobro, setNotasCobro] = useState("");
+  const [razonSocialEmpresa, setRazonSocialEmpresa] = useState("");
+  const [cuitEmpresa, setCuitEmpresa] = useState("");
+  const [provinciaEmpresa, setProvinciaEmpresa] = useState("");
+  const [localidadEmpresa, setLocalidadEmpresa] = useState("");
+  const [domicilioEmpresa, setDomicilioEmpresa] = useState("");
+  const [telefonoEmpresa, setTelefonoEmpresa] = useState("");
+  const [whatsappEmpresa, setWhatsappEmpresa] = useState("");
+  const [emailEmpresa, setEmailEmpresa] = useState("");
+  const [contactoEmpresa, setContactoEmpresa] = useState("");
+  const [partnerEmpresa, setPartnerEmpresa] = useState("");
+  const [notasEmpresa, setNotasEmpresa] = useState("");
+  const [notasAbono, setNotasAbono] = useState("");
+  const [partnersDisponibles, setPartnersDisponibles] = useState([]);
+  const [comisionTipo, setComisionTipo] = useState("sin_comision");
+  const [comisionValor, setComisionValor] = useState("");
+  const [comisionDuracion, setComisionDuracion] = useState("sin_limite");
+  const [comisionMeses, setComisionMeses] = useState("");
+  const [comisionHasta, setComisionHasta] = useState("");
+  const [comisionNotas, setComisionNotas] = useState("");
+  const [tarifasMap, setTarifasMap] = useState(() => {
+    try {
+      const guardado = localStorage.getItem("tarifas_empresas");
+      return guardado ? JSON.parse(guardado) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+  const [diasCorteMap, setDiasCorteMap] = useState({
+    "Distribuidora Quilmes B2B S.A.": { dia: "05", estado: "Al Día", color: "#10b981", cupo: 10 },
+    "Elifiant": { dia: "01", estado: "Al Día", color: "#10b981", cupo: 5 },
+    "Mayorista San Martín Golosinas": { dia: "10", estado: "Por Vencer", color: "#f59e0b", cupo: 3 }
+  });
+  const [mostrarModalPago, setMostrarModalPago] = useState(false);
+  const [planesCatalogo, setPlanesCatalogo] = useState([]);
+  const [variantesCatalogo, setVariantesCatalogo] = useState([]);
+  const [abonoEmpresaActual, setAbonoEmpresaActual] = useState(null);
+  const [contratosActivosEmpresa, setContratosActivosEmpresa] = useState([]);
+  const [contratosTabla, setContratosTabla] = useState({});
+  const [planSeleccionadoId, setPlanSeleccionadoId] = useState("");
+  const [productoAbono, setProductoAbono] = useState("Ventas");
+  const [varianteSeleccionadaId, setVarianteSeleccionadaId] = useState("");
+  const [precioAcordado, setPrecioAcordado] = useState("");
+  const [monedaAcordada, setMonedaAcordada] = useState("ARS");
+  const [inicioAbono, setInicioAbono] = useState("");
+  const [vencimientoAbono, setVencimientoAbono] = useState("");
+  const [cupoAbono, setCupoAbono] = useState("");
+  const [cupoRepartidoresAbono, setCupoRepartidoresAbono] = useState("");
+  const [diaCorteAbono, setDiaCorteAbono] = useState("");
+  const [notasContratoAbono, setNotasContratoAbono] = useState("");
+  const [editandoContratoAbono, setEditandoContratoAbono] = useState(false);
+  const [guardandoContratoAbono, setGuardandoContratoAbono] = useState(false);
+  const [guardandoPago, setGuardandoPago] = useState(false);
+  const guardandoPagoRef = useRef(false);
+  const [empresaPago, setEmpresaPago] = useState("");
+  const [montoPago, setMontoPago] = useState("");
+  const [monedaPago, setMonedaPago] = useState("ARS");
+  const [comprobantePago, setComprobantePago] = useState("");
+  const [metodoPago, setMetodoPago] = useState("Transferencia CBU");
+  const [tipoMovimientoPago, setTipoMovimientoPago] = useState("renovacion");
+  const [conceptoPago, setConceptoPago] = useState("");
+  const [bonificadoPago, setBonificadoPago] = useState(false);
+  const [periodoDesdePago, setPeriodoDesdePago] = useState("");
+  const [periodoHastaPago, setPeriodoHastaPago] = useState("");
+  const [cambioPreventistasPago, setCambioPreventistasPago] = useState("");
+  const [cambioTemporalPago, setCambioTemporalPago] = useState(false);
+  const [historialPagos, setHistorialPagos] = useState([]);
+  const [empresaDetalleModal, setEmpresaDetalleModal] = useState(null);
+  const [mostrarModalEditar, setMostrarModalEditar] = useState(false);
+  const [empresaAEditar, setEmpresaAEditar] = useState(null);
+  const [diaCobroModal, setDiaCobroModal] = useState("05");
+  const [estadoCobroModal, setEstadoCobroModal] = useState("Al Día");
+  const [tarifaEditada, setTarifaEditada] = useState("10000");
+  const [cupoEditado, setCupoEditado] = useState("5");
+  const [monedaEditada, setMonedaEditada] = useState("ARS");
+  const [tipoTarifaEditada, setTipoTarifaEditada] = useState("preventista");
+  const [paisEditado, setPaisEditado] = useState("Argentina");
+  const [mostrarModalPreventista, setMostrarModalPreventista] = useState(false);
+  const [nombreEmpresa, setNombreEmpresa] = useState("");
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [nuevoEmail, setNuevoEmail] = useState("");
+  const [nuevoPassword, setNuevoPassword] = useState("");
+  const [empresaSeleccionada, setEmpresaSeleccionada] = useState("Elifiant");
+  const [tipoNuevoPreventista, setTipoNuevoPreventista] = useState("permanente");
+  const [temporalDesdeNuevo, setTemporalDesdeNuevo] = useState("");
+  const [temporalHastaNuevo, setTemporalHastaNuevo] = useState("");
+
+  useEffect(() => {
+    cargarDatos();
+    const cargarPartners = () => {
+      try {
+        const guardados = JSON.parse(localStorage.getItem("rutacomercio_partners_v1") || "[]");
+        setPartnersDisponibles(Array.isArray(guardados) ? guardados.filter(p => p && p.activo !== false) : []);
+      } catch (e) {
+        setPartnersDisponibles([]);
+      }
+    };
+    cargarPartners();
+    window.addEventListener("focus", cargarPartners);
+    window.addEventListener("storage", cargarPartners);
+    return () => {
+      window.removeEventListener("focus", cargarPartners);
+      window.removeEventListener("storage", cargarPartners);
+    };
+  }, []);
+
+  const cargarDatos = async () => {
+    setCargando(true);
+    try {
+      const [perfilesResp, empresasResp, pagosResp, planesResp, variantesResp, contratosResp] = await Promise.all([
+        supabase.from("perfiles").select("*"),
+        supabase.from("empresas").select("*").order("nombre"),
+        supabase.from("pagos_empresas").select("*").order("fecha", { ascending: false }),
+        supabase.from("planes_abono").select("*").eq("activo", true).order("nombre"),
+        supabase.from("planes_abono_variantes").select("*").eq("activo", true).order("meses"),
+        supabase.from("empresa_abonos").select("*").eq("activo", true).order("created_at", { ascending: false })
+      ]);
+
+      if (perfilesResp.error) throw perfilesResp.error;
+      if (empresasResp.error) throw empresasResp.error;
+      if (pagosResp.error) console.warn("No se pudo cargar pagos:", pagosResp.error.message);
+      if (planesResp.error) console.warn("No se pudo cargar catálogo de planes:", planesResp.error.message);
+      if (variantesResp.error) console.warn("No se pudo cargar catálogo de modalidades:", variantesResp.error.message);
+      if (contratosResp.error) console.warn("No se pudieron cargar contratos para la tabla:", contratosResp.error.message);
+      const contratosPorEmpresa = {};
+      for (const contrato of (contratosResp.data || [])) {
+        if (!contratosPorEmpresa[contrato.empresa_id]) contratosPorEmpresa[contrato.empresa_id] = [];
+        contratosPorEmpresa[contrato.empresa_id].push(contrato);
+      }
+      setContratosTabla(contratosPorEmpresa);
+      setPlanesCatalogo(planesResp.data || []);
+      setVariantesCatalogo(variantesResp.data || []);
+
+      const perfiles = perfilesResp.data || [];
+      const empresasDB = empresasResp.data || [];
+      setPreventistas(perfiles);
+      setEmpresasRegistros(empresasDB);
+      setEmpresas(empresasDB.map(e => e.nombre).filter(Boolean));
+
+      const mapa = {};
+      const dias = {};
+      empresasDB.forEach(e => {
+        mapa[e.nombre] = {
+          id: e.id,
+          pais: e.pais || "Argentina",
+          moneda: e.moneda || "ARS",
+          tipo: e.modelo_cobro || "preventista",
+          tipo_tarifa: e.modelo_cobro || "preventista",
+          valor: e.tarifa_pactada ?? 0,
+          tarifa: e.tarifa_pactada ?? 0,
+          cupo: e.cupo_preventistas ?? 5,
+          diaCobro: String(e.dia_cobro ?? 5).padStart(2, "0"),
+          dia_cobro: String(e.dia_cobro ?? 5).padStart(2, "0"),
+          metodo_pago: e.metodo_pago || "",
+          activo: e.activo !== false,
+          abonado_hasta: e.abonado_hasta || null
+        };
+        dias[e.nombre] = {
+          dia: String(e.dia_cobro ?? 5).padStart(2, "0"),
+          estado: "Al Día",
+          color: "#10b981",
+          cupo: e.cupo_preventistas ?? 5
+        };
+      });
+      setTarifasMap(mapa);
+      setDiasCorteMap(dias);
+
+      setHistorialPagos((pagosResp.data || []).map(p => ({
+        ...p,
+        fecha: p.fecha ? new Date(p.fecha).toLocaleString("es-AR") : "",
+        ref: p.comprobante || "—",
+        estado: "Confirmado"
+      })));
+
+      if (empresasDB.length > 0 && !empresasDB.some(e => e.nombre === empresaSeleccionada)) {
+        setEmpresaSeleccionada(empresasDB[0].nombre);
+      }
+    } catch(err) {
+      console.error(err);
+      alert("No se pudieron cargar los datos del SuperAdmin: " + (err.message || "Error desconocido"));
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const eliminarEmpresa = async (emp) => {
+    if (emp === "Elifiant") {
+      alert("No se recomienda eliminar la empresa principal Elifiant.");
+      return;
+    }
+    const prevsAsociados = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase());
+    const mensaje = prevsAsociados.length > 0 
+      ? `¿Estás seguro de eliminar la empresa "${emp}"?\n\n⚠ ATENCIÓN: También se darán de baja automáticamente sus ${prevsAsociados.length} preventistas en Supabase.`
+      : `¿Estás seguro de eliminar la empresa "${emp}"?`;
+      
+    const confirma = window.confirm(mensaje);
+    if (!confirma) return;
+
+    try {
+      // 1. Borrado en Supabase de todos los preventistas de esta empresa
+      const { error } = await supabase.from("perfiles").delete().eq("empresa", emp);
+      if (error) console.warn("Aviso al borrar en perfiles:", error.message);
+
+      // 2. Limpieza del estado de preventistas en memoria
+      setPreventistas(prev => prev.filter(p => (p.empresa || "").toLowerCase() !== emp.toLowerCase()));
+
+      // 3. Limpieza de la empresa en memoria y localStorage
+      setEmpresas(prev => prev.filter(e => e !== emp));
+      const nuevoMapa = { ...tarifasMap };
+      delete nuevoMapa[emp];
+      setTarifasMap(nuevoMapa);
+      try { localStorage.setItem("tarifas_empresas", JSON.stringify(nuevoMapa)); } catch(e){}
+
+      setDiasCorteMap(prev => {
+        const nuevoDias = { ...prev };
+        delete nuevoDias[emp];
+        return nuevoDias;
+      });
+
+      alert(`Empresa "${emp}" y sus preventistas eliminados definitivamente.`);
+    } catch (err) {
+      alert("Error al eliminar: " + (err.message || "Error desconocido"));
+    }
+  };
+
+  const eliminarPreventistaDirecto = async (prevObj) => {
+    const nombrePrev = prevObj.nombre || prevObj.email || "este preventista";
+    const confirma = window.confirm(`¿Seguro que deseas eliminar al preventista "${nombrePrev}"?`);
+    if (!confirma) return;
+    try {
+      if (prevObj.id) {
+        const { error } = await supabase.from("perfiles").delete().eq("id", prevObj.id);
+        if (error) throw error;
+      } else if (prevObj.email) {
+        const { error } = await supabase.from("perfiles").delete().eq("email", prevObj.email);
+        if (error) throw error;
+      }
+      setPreventistas(prev => prev.filter(p => (p.id ? p.id !== prevObj.id : p.email !== prevObj.email)));
+      alert(`Preventista "${nombrePrev}" eliminado con éxito.`);
+    } catch (err) {
+      alert("Error al eliminar preventista: " + (err.message || "Error desconocido"));
+    }
+  };
+
+  const abrirEditarEmpresa = (emp) => {
+    const e = empresasRegistros.find(x => x.nombre === emp);
+    if (!e) return alert("No encontré la empresa en Supabase");
+    setEmpresaAEditar(emp);
+    setNombreEmpresa(e.nombre || "");
+    setRazonSocialEmpresa(e.razon_social || "");
+    setCuitEmpresa(e.cuit || "");
+    setPaisEmpresa(e.pais || "Argentina");
+    setProvinciaEmpresa(e.provincia || "");
+    setLocalidadEmpresa(e.localidad || "");
+    setDomicilioEmpresa(e.domicilio || "");
+    setTelefonoEmpresa(e.telefono || "");
+    setWhatsappEmpresa(e.whatsapp || "");
+    setEmailEmpresa(e.email || "");
+    setContactoEmpresa(e.contacto || "");
+    setPartnerEmpresa(e.partner || "");
+    setComisionTipo(e.comision_tipo || "sin_comision");
+    setComisionValor(e.comision_valor == null ? "" : String(e.comision_valor));
+    setComisionDuracion(e.comision_duracion || "sin_limite");
+    setComisionMeses(e.comision_meses == null ? "" : String(e.comision_meses));
+    setComisionHasta(e.comision_hasta || "");
+    setComisionNotas(e.comision_notas || "");
+    setNotasEmpresa(e.notas || "");
+    setMostrarModalEditar(true);
+  };
+
+  const guardarEdicionEmpresa = async () => {
+    if (!empresaAEditar) return;
+    try {
+      const empresaDB = empresasRegistros.find(e => e.nombre === empresaAEditar);
+      if (!empresaDB?.id) throw new Error("No encontré la empresa en Supabase");
+      const nombre = nombreEmpresa.trim();
+      if (!nombre) throw new Error("El nombre comercial es obligatorio");
+      const cambios = {
+        nombre,
+        razon_social: razonSocialEmpresa.trim() || null,
+        cuit: cuitEmpresa.trim() || null,
+        pais: paisEmpresa,
+        provincia: provinciaEmpresa.trim() || null,
+        localidad: localidadEmpresa.trim() || null,
+        domicilio: domicilioEmpresa.trim() || null,
+        telefono: telefonoEmpresa.trim() || null,
+        whatsapp: whatsappEmpresa.trim() || null,
+        email: emailEmpresa.trim() || null,
+        contacto: contactoEmpresa.trim() || null,
+        partner: partnerEmpresa || null,
+        comision_tipo: partnerEmpresa ? comisionTipo : "sin_comision",
+        comision_valor: partnerEmpresa && comisionTipo !== "sin_comision" ? (Number(comisionValor) || 0) : 0,
+        comision_duracion: partnerEmpresa && comisionTipo !== "sin_comision" ? comisionDuracion : "sin_limite",
+        comision_meses: partnerEmpresa && comisionDuracion === "meses" ? (Number(comisionMeses) || null) : null,
+        comision_hasta: partnerEmpresa && comisionDuracion === "hasta_fecha" ? (comisionHasta || null) : null,
+        comision_notas: partnerEmpresa ? (comisionNotas.trim() || null) : null,
+        notas: notasEmpresa.trim() || null
+      };
+      const { error } = await supabase.from("empresas").update(cambios).eq("id", empresaDB.id);
+      if (error) throw error;
+      await cargarDatos();
+      setMostrarModalEditar(false);
+      alert("✅ Datos de la empresa actualizados.");
+    } catch (err) {
+      alert("Error al guardar empresa: " + (err.message || "Error desconocido"));
+    }
+  };
+
+  const abrirRegistrarPago = async (emp) => {
+    setEmpresaPago(emp);
+    const t = tarifasMap[emp] || {};
+    const empresaDB = empresasRegistros.find(e => e.nombre === emp);
+    setMonedaPago(t.moneda || "ARS");
+    const cupoContratado = Number(t.cupo || 0);
+    const val = Number(t.valor ?? t.tarifa ?? 0);
+    setMontoPago(t.tipo === "plana" ? String(val) : String(cupoContratado * val));
+    const tieneAbonosPrevios = historialPagos.some(p =>
+      p.empresa_id === t.id && ["alta", "primer_abono", "renovacion"].includes(p.tipo_movimiento)
+    );
+    setTipoMovimientoPago(tieneAbonosPrevios ? "renovacion" : "primer_abono");
+    setConceptoPago(tieneAbonosPrevios ? "Renovación de abono" : "Alta / Primer abono");
+    setBonificadoPago(false);
+    setPeriodoDesdePago("");
+    setPeriodoHastaPago("");
+    setCambioPreventistasPago("");
+    setCambioTemporalPago(false);
+    setComprobantePago("");
+    setNotasAbono("");
+
+    let contrato = null;
+    let contratos = [];
+    if (empresaDB?.id) {
+      const { data, error } = await supabase
+        .from("empresa_abonos")
+        .select("*")
+        .eq("empresa_id", empresaDB.id)
+        .eq("activo", true)
+        .order("created_at", { ascending: false });
+      if (!error) {
+        contratos = data || [];
+        contrato = contratos[0] || null;
+      } else console.warn("No se pudieron cargar los abonos contratados:", error.message);
+    }
+    // La contratación activa prevalece sobre los valores históricos de empresas.
+    if (contrato) {
+      setMontoPago(String(Number(contrato.precio_acordado ?? 0)));
+      setMonedaPago(contrato.moneda || "ARS");
+    }
+    setContratosActivosEmpresa(contratos);
+    setAbonoEmpresaActual(contrato);
+    setEditandoContratoAbono(!contrato);
+    setPlanSeleccionadoId(contrato?.plan_id || "");
+    setProductoAbono(contrato?.plan_nombre?.startsWith("Repartos · ") ? "Repartos" : contrato?.plan_nombre === "Simplex" ? "Simplex" : "Ventas");
+    setVarianteSeleccionadaId(contrato?.variante_id || "");
+    setPrecioAcordado(contrato?.precio_acordado == null ? "" : String(contrato.precio_acordado));
+    setMonedaAcordada(contrato?.moneda || t.moneda || "ARS");
+    setInicioAbono(contrato?.fecha_inicio || "");
+    setVencimientoAbono(contrato?.proximo_vencimiento || "");
+    setCupoAbono(contrato?.cupo_preventistas == null ? String(cupoContratado || "") : String(contrato.cupo_preventistas));
+    setCupoRepartidoresAbono(String(contrato?.cupo_repartidores ?? 0));
+    setDiaCorteAbono(contrato?.dia_corte == null ? String(t.diaCorte || "") : String(contrato.dia_corte));
+    setNotasContratoAbono(contrato?.notas || "");
+    setMostrarModalPago(true);
+  };
+
+  const seleccionarContratoActivo = (contrato) => {
+    setAbonoEmpresaActual(contrato);
+    setMontoPago(String(Number(contrato?.precio_acordado ?? 0)));
+    setMonedaPago(contrato?.moneda || "ARS");
+    const nombre = contrato?.plan_nombre || "";
+    setProductoAbono(nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas");
+    setPlanSeleccionadoId(contrato?.plan_id || "");
+    setVarianteSeleccionadaId(contrato?.variante_id || "");
+    setPrecioAcordado(contrato?.precio_acordado == null ? "" : String(contrato.precio_acordado));
+    setMonedaAcordada(contrato?.moneda || "ARS");
+    setInicioAbono(contrato?.fecha_inicio || "");
+    setVencimientoAbono(contrato?.proximo_vencimiento || "");
+    setCupoAbono(String(contrato?.cupo_preventistas ?? 0));
+    setCupoRepartidoresAbono(String(contrato?.cupo_repartidores ?? 0));
+    setDiaCorteAbono(String(contrato?.dia_corte || ""));
+    setNotasContratoAbono(contrato?.notas || "");
+  };
+
+  const guardarContratoAbono = async () => {
+    const empresaDB = empresasRegistros.find(e => e.nombre === empresaPago);
+    if (!empresaDB?.id) return alert("No encontré la empresa en Supabase.");
+    if (!planSeleccionadoId || !varianteSeleccionadaId) return alert("Elegí el plan y la modalidad.");
+    if (!inicioAbono || !vencimientoAbono) return alert("Completá inicio y próximo vencimiento.");
+    if (!diaCorteAbono || Number(diaCorteAbono) < 1 || Number(diaCorteAbono) > 28) return alert("Elegí un día de corte entre 1 y 28.");
+    if (vencimientoAbono < inicioAbono) return alert("El vencimiento no puede ser anterior al inicio.");
+
+    const plan = planesCatalogo.find(p => p.id === planSeleccionadoId);
+    const variante = variantesCatalogo.find(v => v.id === varianteSeleccionadaId);
+    if (!plan || !variante) return alert("No pude encontrar el plan o la modalidad seleccionada.");
+    if (variante.plan_id !== plan.id) return alert("La modalidad no corresponde al plan seleccionado.");
+    const nombreProducto = plan.nombre === "Simplex" ? "Simplex" : plan.nombre.startsWith("Repartos · ") ? "Repartos" : plan.nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : "Ventas";
+    if (nombreProducto !== productoAbono) return alert("El plan elegido no corresponde al producto seleccionado.");
+    // Simplex es un producto independiente: nunca se combina con otros contratos.
+    const tipoContrato = (nombre = "") => nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas";
+    if (contratosActivosEmpresa.some(c =>
+      (productoAbono === "Simplex" && tipoContrato(c.plan_nombre) !== "Simplex") ||
+      (productoAbono !== "Simplex" && tipoContrato(c.plan_nombre) === "Simplex")
+    )) return alert("Simplex no se puede combinar con Ventas ni Repartos. Revisá primero los contratos activos de esta empresa.");
+    if (contratosActivosEmpresa.some(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos") && productoAbono !== "Ventas + Repartos") return alert("Esta empresa ya tiene un contrato integrado. No se puede modificar un servicio por separado sin revisar ese contrato.");
+    if (productoAbono === "Ventas + Repartos") return alert("El plan integrado requiere cupos independientes para ambos servicios. Todavía no está habilitado el guardado.");
+    if (productoAbono === "Repartos") {
+      const cupo = Number(cupoRepartidoresAbono);
+      const rangos = { "Básico": [1, 3], "Intermedio": [4, 8], "PyME": [9, 20], "Full": [21, Infinity] };
+      const nivel = plan.nombre.split(" · ")[1];
+      const [min, max] = rangos[nivel] || [1, Infinity];
+      if (!Number.isInteger(cupo) || cupo < min || cupo > max) return alert(`El abono ${nivel} requiere entre ${min} y ${max === Infinity ? "más" : max} repartidores.`);
+      if (contratosActivosEmpresa.some(c => tipoContrato(c.plan_nombre) === "Repartos")) {
+        return alert("Esta empresa ya tiene un contrato de Repartos. La renovación se habilitará por separado para proteger el contrato actual.");
+      }
+      if (!window.confirm(`¿Registrar Repartos para ${empresaPago} con ${cupo} repartidores? No se cambiará el cupo de preventistas ni se habilitará el acceso a la app todavía.`)) return;
+      setGuardandoContratoAbono(true);
+      try {
+        // Crear el contrato sin alterar ningún contrato de Ventas vigente.
+        const payloadRepartos = {
+          empresa_id: empresaDB.id, plan_id: plan.id, variante_id: variante.id,
+          plan_nombre: plan.nombre, modalidad: variante.modalidad,
+          meses: Number(variante.meses) || 1,
+          precio_catalogo: Number(variante.precio) || 0,
+          precio_acordado: Number(precioAcordado) || 0,
+          moneda: monedaAcordada, fecha_inicio: inicioAbono,
+          proximo_vencimiento: vencimientoAbono,
+          cupo_preventistas: 0, cupo_repartidores: cupo,
+          dia_corte: Number(diaCorteAbono),
+          notas: notasContratoAbono.trim() || null, activo: true
+        };
+        const { data, error } = await supabase.from("empresa_abonos").insert([payloadRepartos]).select().single();
+        if (error) throw error;
+        const { error: empresaError } = await supabase.from("empresas")
+          .update({ cupo_repartidores: cupo }).eq("id", empresaDB.id);
+        if (empresaError) {
+          const { error: rollbackError } = await supabase.from("empresa_abonos").delete().eq("id", data.id);
+          throw new Error("No se pudo actualizar el cupo de la empresa. " + empresaError.message + (rollbackError ? " El contrato quedó creado: revisalo antes de reintentar." : " El contrato recién creado se revirtió."));
+        }
+        setContratosActivosEmpresa(prev => [data, ...prev]);
+        setAbonoEmpresaActual(data);
+        setEditandoContratoAbono(false);
+        await cargarDatos();
+        alert("✅ Contrato de Repartos registrado y cupo de repartidores guardado. El acceso y los permisos de la app todavía requieren integración.");
+      } catch (err) {
+        alert("Error al guardar Repartos: " + (err.message || "Error desconocido"));
+      } finally {
+        setGuardandoContratoAbono(false);
+      }
+      return;
+    }
+    if (productoAbono === "Ventas" && plan.nombre.startsWith("Ventas · ")) {
+      const rangos = { "Básico": [1, 3], "Intermedio": [4, 8], "PyME": [9, 20], "Full": [21, Infinity] };
+      const nivel = plan.nombre.split(" · ")[1];
+      const [min, max] = rangos[nivel] || [0, Infinity];
+      if (Number(cupoAbono) < min || Number(cupoAbono) > max) return alert(`El nivel ${nivel} permite de ${min} a ${max === Infinity ? "más" : max} preventistas.`);
+    }
+
+    setGuardandoContratoAbono(true);
+    try {
+      // Nunca cerrar un contrato de otro producto al registrar uno de Ventas.
+      const contratoAnterior = contratosActivosEmpresa.find(c => {
+        const n = c.plan_nombre || "";
+        const tipo = n === "Simplex" ? "Simplex" : n.startsWith("Repartos · ") ? "Repartos" : n.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : "Ventas";
+        return tipo === productoAbono;
+      });
+      if (contratoAnterior?.id) {
+        const { error: cerrarError } = await supabase
+          .from("empresa_abonos")
+          .update({ activo: false, finalizado_at: new Date().toISOString() })
+          .eq("id", contratoAnterior.id);
+        if (cerrarError) throw cerrarError;
+      }
+
+      const payload = {
+        empresa_id: empresaDB.id,
+        plan_id: plan.id,
+        variante_id: variante.id,
+        plan_nombre: plan.nombre,
+        modalidad: variante.modalidad,
+        meses: Number(variante.meses) || 1,
+        precio_catalogo: Number(variante.precio) || 0,
+        precio_acordado: Number(precioAcordado) || 0,
+        moneda: monedaAcordada,
+        fecha_inicio: inicioAbono,
+        proximo_vencimiento: vencimientoAbono,
+        cupo_preventistas: Number(cupoAbono) || 0,
+        dia_corte: Number(diaCorteAbono),
+        notas: notasContratoAbono.trim() || null,
+        activo: true
+      };
+      const { data, error } = await supabase.from("empresa_abonos").insert([payload]).select().single();
+      if (error) throw error;
+
+      const { error: empresaError } = await supabase.from("empresas").update({
+        cupo_preventistas: Number(cupoAbono) || 0,
+        moneda: monedaAcordada,
+        tarifa_pactada: Number(precioAcordado) || 0,
+        modelo_cobro: "plana",
+        abonado_hasta: vencimientoAbono,
+        dia_corte: Number(diaCorteAbono)
+      }).eq("id", empresaDB.id);
+      if (empresaError) throw empresaError;
+
+      setAbonoEmpresaActual(data);
+      setContratosActivosEmpresa(prev => [data, ...prev.filter(c => c.id !== contratoAnterior?.id && c.id !== data.id)]);
+      setEditandoContratoAbono(false);
+      setMontoPago(String(Number(precioAcordado) || 0));
+      setMonedaPago(monedaAcordada);
+      await cargarDatos();
+      alert("✅ Abono contratado guardado. El precio acordado quedó congelado para esta empresa.");
+    } catch (err) {
+      alert("Error al guardar el abono: " + (err.message || "Error desconocido"));
+    } finally {
+      setGuardandoContratoAbono(false);
+    }
+  };
+
+  
+  const handleResetClaveDirecto = async (e) => {
+    e.preventDefault();
+    if (!modalResetClave || !modalResetClave.usuario || !modalResetClave.nuevoPass) return;
+    try {
+      // Intenta actualizar via Supabase RPC o directo
+      alert("⚠️ El cambio de contraseña todavía no está habilitado de forma segura. No se realizó ningún cambio.");
+      setModalResetClave(null);
+    } catch(err) {
+      alert("Error al actualizar contraseña: " + err.message);
+    }
+  };
+
+  const handleCambiarEmailDirecto = async (e) => {
+    e.preventDefault();
+    if (!modalCambiarEmail || !modalCambiarEmail.usuario || !modalCambiarEmail.nuevoEmail) return;
+    try {
+      const { error } = await supabase.from("perfiles").update({ email: modalCambiarEmail.nuevoEmail }).eq("id", modalCambiarEmail.usuario.id);
+      if (error) throw error;
+      alert("Email actualizado con éxito a: " + modalCambiarEmail.nuevoEmail);
+      setModalCambiarEmail(null);
+      if (typeof cargarPreventistas === "function") cargarPreventistas();
+    } catch(err) {
+      alert("Error al actualizar email: " + err.message);
+    }
+  };
+  
+  const guardarPago = async (e) => {
+    e.preventDefault();
+    if (guardandoPagoRef.current) return;
+    guardandoPagoRef.current = true;
+    setGuardandoPago(true);
+    try {
+      const empresaDB = empresasRegistros.find(e => e.nombre === empresaPago);
+      if (!empresaDB?.id) throw new Error("No encontré la empresa en Supabase");
+
+      const cupoActual = Number(empresaDB.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0);
+      const cambioIngresado = Math.abs(Number(cambioPreventistasPago) || 0);
+      const esAmpliacion = tipoMovimientoPago === "ampliacion";
+      const esReduccion = tipoMovimientoPago === "reduccion";
+      const cambioFirmado = esAmpliacion ? cambioIngresado : esReduccion ? -cambioIngresado : null;
+      const cupoResultante = cambioFirmado === null ? null : Math.max(0, cupoActual + cambioFirmado);
+      const esBonificado = tipoMovimientoPago === "bonificacion" || bonificadoPago;
+
+      if ((tipoMovimientoPago === "primer_abono" || tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (!periodoDesdePago || !periodoHastaPago)) {
+        throw new Error("Completá las fechas Desde y Hasta.");
+      }
+      if (periodoDesdePago && periodoHastaPago && periodoHastaPago < periodoDesdePago) {
+        throw new Error("La fecha Hasta no puede ser anterior a la fecha Desde.");
+      }
+      if ((esAmpliacion || esReduccion) && cambioIngresado < 1) {
+        throw new Error("Indicá cuántos preventistas querés agregar o reducir.");
+      }
+      if (esReduccion) {
+        const preventistasAsignados = preventistas.filter(p =>
+          (p.empresa || "").toLowerCase() === (empresaPago || "").toLowerCase() &&
+          p.rol === "preventista"
+        ).length;
+        if (cupoResultante < preventistasAsignados) {
+          throw new Error(`No es posible reducir el cupo a ${cupoResultante}. Actualmente hay ${preventistasAsignados} preventistas asignados.`);
+        }
+      }
+
+      const conceptoFinal = conceptoPago || (tipoMovimientoPago === "primer_abono" ? "Alta / Primer abono" : tipoMovimientoPago === "renovacion" ? "Renovación de abono" : tipoMovimientoPago === "bonificacion" ? "Abono excepcional / bonificación" : tipoMovimientoPago === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
+      const cambioPermanente = (esAmpliacion || esReduccion) && !cambioTemporalPago;
+
+      if (cambioPermanente) {
+        const { error } = await supabase.rpc("registrar_cambio_cupo", {
+          p_empresa_id: empresaDB.id,
+          p_empresa: empresaPago,
+          p_tipo_movimiento: tipoMovimientoPago,
+          p_concepto: conceptoFinal,
+          p_cambio_preventistas: cambioFirmado,
+          p_nuevo_cupo: cupoResultante,
+          p_monto: Number(montoPago) || 0,
+          p_moneda: monedaPago,
+          p_metodo: metodoPago,
+          p_comprobante: comprobantePago || null,
+          p_cambio_temporal: false,
+          p_periodo_desde: periodoDesdePago || null,
+          p_periodo_hasta: periodoHastaPago || null
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("pagos_empresas").insert([{
+          empresa: empresaPago,
+          empresa_id: empresaDB.id,
+          monto: esBonificado ? 0 : (Number(montoPago) || 0),
+          moneda: monedaPago,
+          metodo: esBonificado ? "Bonificado" : metodoPago,
+          comprobante: comprobantePago || null,
+          fecha: new Date().toISOString(),
+          tipo_movimiento: tipoMovimientoPago,
+          concepto: conceptoFinal,
+          bonificado: esBonificado,
+          periodo_desde: periodoDesdePago || null,
+          periodo_hasta: periodoHastaPago || null,
+          cambio_preventistas: cambioFirmado,
+          cupo_resultante: cupoResultante,
+          cambio_temporal: (esAmpliacion || esReduccion) ? cambioTemporalPago : false,
+          notas: notasAbono.trim() || null
+        }]);
+        if (error) throw error;
+      }
+
+      // Si esta empresa tiene Partner y acuerdo vigente, el cobro real genera una comisión histórica.
+      if (!esBonificado && Number(montoPago) > 0 && empresaDB.partner && empresaDB.comision_tipo && empresaDB.comision_tipo !== "sin_comision") {
+        const partnersGuardados = (() => { try { return JSON.parse(localStorage.getItem("rutacomercio_partners_v1") || "[]"); } catch { return []; } })();
+        const partner = partnersGuardados.find(p => p?.nombre === empresaDB.partner);
+        let acuerdoVigente = true;
+        if (empresaDB.comision_duracion === "hasta_fecha" && empresaDB.comision_hasta) {
+          acuerdoVigente = new Date().toISOString().slice(0,10) <= empresaDB.comision_hasta;
+        }
+        if (acuerdoVigente && empresaDB.comision_duracion === "meses" && Number(empresaDB.comision_meses) > 0) {
+          const { count } = await supabase.from("partner_comisiones").select("id", { count: "exact", head: true }).eq("empresa_id", empresaDB.id).eq("partner_nombre", empresaDB.partner);
+          acuerdoVigente = Number(count || 0) < Number(empresaDB.comision_meses);
+        }
+        if (acuerdoVigente) {
+          const base = Number(montoPago) || 0;
+          const valorAcuerdo = Number(empresaDB.comision_valor) || 0;
+          const importeComision = empresaDB.comision_tipo === "porcentaje" ? base * valorAcuerdo / 100 : valorAcuerdo;
+          if (importeComision > 0) {
+            const { error: errorComision } = await supabase.from("partner_comisiones").insert([{
+              partner_id: partner?.id || null, partner_nombre: empresaDB.partner, empresa_id: empresaDB.id, empresa: empresaPago,
+              fecha_generada: new Date().toISOString(), moneda: monedaPago, cobro_empresa: base,
+              tipo_comision: empresaDB.comision_tipo, valor_acuerdo: valorAcuerdo, importe_comision: importeComision,
+              estado: "pendiente", notas_acuerdo: empresaDB.comision_notas || null
+            }]);
+            if (errorComision) throw errorComision;
+          }
+        }
+      }
+
+      await cargarDatos();
+      setMostrarModalPago(false);
+      setComprobantePago("");
+      alert(cambioPermanente
+        ? `✅ Movimiento registrado y cupo actualizado a ${cupoResultante} preventistas.`
+        : "✅ Movimiento registrado en Supabase. Los cambios temporales todavía no modifican automáticamente el cupo de la empresa.");
+    } catch (err) {
+      alert("Error al registrar movimiento: " + (err.message || "Error desconocido"));
+    } finally {
+      guardandoPagoRef.current = false;
+      setGuardandoPago(false);
+    }
+  };
+
+  const crearNuevoPreventista = async (e) => {
+    e.preventDefault();
+    try {
+      if (!nuevoEmail || !nuevoPassword) {
+        alert("Por favor completá email y contraseña");
+        return;
+      }
+
+      const esRepartidor = nuevoRolEmpleado === "repartidor";
+      const empresaAlta = empresasRegistros.find(emp => emp.nombre === empresaSeleccionada);
+      if (!empresaAlta?.id) throw new Error("No encontré la empresa seleccionada.");
+      if (esRepartidor) {
+        const contratosRep = (contratosTabla[empresaAlta.id] || []).filter(c =>
+          c.activo && ["Repartos", "Ventas + Repartos"].includes(tipoContrato(c.plan_nombre))
+        );
+        const cupoRep = contratosRep.reduce((total, c) => total + Number(c.cupo_repartidores || 0), 0);
+        const activosRep = preventistas.filter(p => p.empresa_id === empresaAlta.id && p.rol === "repartidor" && p.activo !== false).length;
+        if (cupoRep <= 0) throw new Error("Esta empresa no tiene cupos de Repartos en un abono activo.");
+        if (activosRep >= cupoRep) throw new Error(`Cupo completo: ${activosRep} repartidores activos de ${cupoRep} contratados.`);
+      }
+      const esPreventista = (nuevoRolEmpleado || "preventista") === "preventista";
+      const esTemporal = esPreventista && tipoNuevoPreventista === "temporal";
+      if (esTemporal && (!temporalDesdeNuevo || !temporalHastaNuevo)) {
+        alert("Completá las fechas Desde y Hasta del preventista temporal.");
+        return;
+      }
+      if (esTemporal && temporalHastaNuevo < temporalDesdeNuevo) {
+        alert("La fecha Hasta no puede ser anterior a la fecha Desde.");
+        return;
+      }
+
+      if (esPreventista) {
+        const empresaDB = empresasRegistros.find(e => e.nombre === empresaSeleccionada);
+        const cupo = Number(empresaDB?.cupo_preventistas ?? tarifasMap[empresaSeleccionada]?.cupo ?? 0);
+        const asignados = preventistas.filter(p =>
+          (p.empresa || "").toLowerCase() === (empresaSeleccionada || "").toLowerCase() &&
+          p.rol === "preventista" && p.activo !== false
+        ).length;
+        if (asignados >= cupo) {
+          alert(`No hay cupo disponible. ${empresaSeleccionada} tiene ${asignados} preventistas activos sobre un cupo de ${cupo}.`);
+          return;
+        }
+      }
+
+      const rolAlta = nuevoRolEmpleado === "supervisor" ? (nuevoTipoSupervisor === "ambos" ? "supervisorv" : nuevoTipoSupervisor) : nuevoRolEmpleado;
+
+      // 1. Creamos la cuenta real de login en Supabase Authentication
+      const { data: authData, error: authErr } = await supabaseRegistro.auth.signUp({
+        email: (nuevoEmail || '').trim().toLowerCase(),
+        password: nuevoPassword,
+        options: {
+          data: {
+            nombre: nuevoNombre,
+            empresa: empresaSeleccionada,
+            rol: rolAlta
+          }
+        }
+      });
+      if (authErr && !authErr.message.toLowerCase().includes("already registered")) {
+        throw authErr;
+      }
+
+      const uid = authData?.user?.id;
+      if (!uid) {
+        throw new Error("Authentication no devolvió el ID del nuevo usuario.");
+      }
+
+      // 2. Guardamos o vinculamos en la tabla perfiles
+      const nuevo = {
+        id: uid,
+        nombre: nuevoNombre,
+        email: (nuevoEmail || '').trim().toLowerCase(),
+        empresa: empresaSeleccionada,
+        empresa_id: empresaAlta.id,
+        rol: rolAlta,
+        tipo_preventista: (nuevoRolEmpleado || "preventista") === "preventista" ? tipoNuevoPreventista : "permanente",
+        temporal_desde: (nuevoRolEmpleado || "preventista") === "preventista" && tipoNuevoPreventista === "temporal" ? temporalDesdeNuevo : null,
+        temporal_hasta: (nuevoRolEmpleado || "preventista") === "preventista" && tipoNuevoPreventista === "temporal" ? temporalHastaNuevo : null,
+        activo: true
+      };
+
+      const { error: perfilErr } = await supabase.from("perfiles").upsert([nuevo]);
+      if (perfilErr) throw new Error("La cuenta se creó en Authentication, pero falló el perfil: " + perfilErr.message);
+
+      // Repartos consulta perfiles_roles: el rol principal por sí solo no habilita la asignación.
+      if (esRepartidor) {
+        const { error: rolRepartidorErr } = await supabase.from("perfiles_roles").insert([{
+          perfil_id: uid, empresa_id: empresaAlta.id, rol: "repartidor", activo: true
+        }]);
+        if (rolRepartidorErr) throw new Error("La cuenta y el perfil del repartidor se crearon, pero falta habilitar su rol para asignaciones: " + rolRepartidorErr.message + ". No vuelvas a crear la cuenta; revisemos el permiso.");
+      }
+
+      // Para doble función, la segunda autorización queda en perfiles_roles.
+      // No se modifica ningún rol anterior ni ninguna función de bajas.
+      if (nuevoRolEmpleado === "supervisor" && nuevoTipoSupervisor === "ambos") {
+        const { error: rolExtraErr } = await supabase.from("perfiles_roles").insert([{
+          perfil_id: uid, empresa_id: nuevo.empresa_id, rol: "supervisorr", activo: true
+        }]);
+        if (rolExtraErr) throw new Error("El supervisor se creó con acceso a Ventas, pero NO se pudo habilitar Repartos: " + rolExtraErr.message);
+      }
+
+      setPreventistas(prev => [...prev.filter(p => p.email !== nuevo.email), nuevo]);
+      setNuevoTipoSupervisor("supervisorv");
+      setNuevoNombre("");
+      setNuevoEmail("");
+      setNuevoPassword("");
+      setTipoNuevoPreventista("permanente");
+      setTemporalDesdeNuevo("");
+      setTemporalHastaNuevo("");
+      setMostrarModalPreventista(false);
+      alert(nuevoRolEmpleado === "supervisor" ? "🎉 Supervisor creado con éxito." : esRepartidor ? "🚚 Repartidor creado y habilitado para recibir entregas." : "🎉 Preventista creado con éxito. Ya puede ingresar desde la app móvil.");
+    } catch (err) {
+      alert("Error al dar de alta: " + (err.message || "Verificá los datos"));
+    }
+  };
+
+  const cobradoUSD = historialPagos.filter(h => h.moneda === "USD" && h.estado === "Confirmado").reduce((acc, h) => acc + Number(h.monto || 0), 0);
+  const cobradoARS = historialPagos.filter(h => h.moneda === "ARS" && (h.estado === "Confirmado" || h.estado === "Acreditado")).reduce((acc, h) => acc + Number(h.monto || 0), 0);
+  const cobradoUSDT = historialPagos.filter(h => h.moneda === "USDT" && h.estado === "Confirmado").reduce((acc, h) => acc + Number(h.monto || 0), 0);
+
+    const diaHoy = new Date().getDate();
+  const diaManana = diaHoy + 1;
+  let empresasHoy = [];
+  let empresasManana = [];
+  let empresas15Dias = [];
+
+  empresas.forEach(emp => {
+    const t = tarifasMap[emp] || {};
+    const cInfo = diasCorteMap[emp] || {};
+    const diaCorte = Number(t.diaCobro || t.dia_cobro || cInfo.dia || 5);
+    const cupoContratado = Number(t.cupo || cInfo.cupo || 0);
+    const valor = Number(t.valor || t.tarifa || (t.moneda === "ARS" ? 10000 : 50));
+    const moneda = t.moneda || "ARS";
+    const total = (t.tipo === "plana" ? valor : (cupoContratado * valor));
+    const item = { empresa: emp, total, moneda, dia: diaCorte };
+
+    if (diaCorte === diaHoy) {
+      empresasHoy.push(item);
+    } else if (diaCorte === diaManana) {
+      empresasManana.push(item);
+    } else if (diaCorte > diaHoy && diaCorte <= diaHoy + 15) {
+      empresas15Dias.push(item);
+    }
+  });
+
+  return (
+    <main style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif", padding: "24px" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", flexWrap: "wrap", gap: "16px" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "24px" }}>👑</span>
+            <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "800", letterSpacing: "-0.5px", color: "#f8fafc" }}>RutaComercio · SuperAdmin</h1>
+          </div>
+          <p style={{ margin: "4px 0 0 0", color: "#94a3b8", fontSize: "13px" }}>Control financiero, gestión completa de empresas y bajas de preventistas</p>
+        </div>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setMostrarPlanesAbonos(true)} style={{ backgroundColor: "#7c3aed", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px", boxShadow: "0 4px 12px rgba(124,58,237,0.25)" }}>
+            📋 Planes y Abonos
+          </button>
+          <button type="button" onClick={() => { window.location.href = "/promotores"; }} style={{ backgroundColor: "#b45309", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px", boxShadow: "0 4px 12px rgba(180,83,9,0.25)" }}>
+            🤝 Promotores
+          </button>
+          <button type="button" onClick={() => { setEmpresaEditando(null); setNombreEmpresa(""); setMostrarModalEmpresa(true); }} style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px", boxShadow: "0 4px 12px rgba(37,99,235,0.3)" }}>
+            + Nueva Empresa
+          </button>
+          <button type="button" onClick={async () => {
+            const confirmar = window.confirm("¿Cerrar sesión de SuperAdmin?");
+            if (!confirmar) return;
+            const { error } = await supabase.auth.signOut();
+            if (error) {
+              alert("No se pudo cerrar la sesión: " + error.message);
+              return;
+            }
+            window.location.replace("/");
+          }} style={{ backgroundColor: "#334155", color: "#fff", border: "1px solid #64748b", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px" }}>
+            🚪 Salir
+          </button>
+        </div>
+      </header>
+
+      {/* 4 TARJETAS CLAVE */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginBottom: "20px" }}>
+        <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "18px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase" }}>EMPRESAS CLIENTES</span>
+            <span style={{ fontSize: "18px" }}>🏢</span>
+          </div>
+          <h2 style={{ margin: "10px 0 4px 0", fontSize: "28px", color: "#38bdf8", fontWeight: "800" }}>{empresas.length}</h2>
+          <div style={{ fontSize: "12px", color: "#10b981" }}>● {empresas.length} activas</div>
+        </div>
+            {mensajeExitoAsignacion && (
+              <div style={{ backgroundColor: "rgba(16, 185, 129, 0.2)", border: "1px solid #10b981", color: "#10b981", padding: "10px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: "bold", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>✓</span> {mensajeExitoAsignacion}
+              </div>
+            )}
+
+        <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "18px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase" }}>PREVENTISTAS EN CALLE</span>
+            <span style={{ fontSize: "18px" }}>👔</span>
+          </div>
+          <h2 style={{ margin: "10px 0 4px 0", fontSize: "28px", color: "#4ade80", fontWeight: "800" }}>{preventistas.length}</h2>
+          <div style={{ fontSize: "12px", color: "#94a3b8" }}>100% activos en campo</div>
+        </div>
+
+        <div style={{ backgroundColor: "#1e293b", border: "1px solid #059669", borderRadius: "12px", padding: "18px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#34d399", fontSize: "12px", fontWeight: "700", textTransform: "uppercase" }}>COBRADO EN EL MES (REAL)</span>
+            <span style={{ fontSize: "11px", backgroundColor: "#065f46", color: "#34d399", padding: "2px 8px", borderRadius: "10px", fontWeight: "700" }}>✓ Acreditado</span>
+          </div>
+          <h2 style={{ margin: "10px 0 4px 0", fontSize: "24px", color: "#10b981", fontWeight: "800" }}>
+            ${Number(cobradoUSD || 0).toLocaleString()} <span style={{ fontSize: "13px", color: "#94a3b8" }}>USD</span>
+          </h2>
+          <div style={{ fontSize: "12px", color: "#cbd5e1", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <span>ARS: <strong>${Number(cobradoARS || 0).toLocaleString()}</strong></span>
+            <span>USDT: <strong>₮ {cobradoUSDT || 0}</strong></span>
+          </div>
+        </div>
+
+        <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "18px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700", textTransform: "uppercase" }}>COBROS POR VENCER</span>
+            <span style={{ fontSize: "18px" }}>🗓️</span>
+          </div>
+          <h2 style={{ margin: "10px 0 4px 0", fontSize: "28px", color: "#fbbf24", fontWeight: "800" }}>
+            {empresasHoy.length + empresasManana.length + empresas15Dias.length || 3} <span style={{ fontSize: "13px", color: "#94a3b8" }}>empresas</span>
+          </h2>
+          <div style={{ fontSize: "12px", color: "#f59e0b" }}>Previsión próximos 15 días activa</div>
+        </div>
+      </div>
+
+            {/* SEMAFORO HOY, MAÑANA, 15 DIAS */}
+      <div style={{ backgroundColor: "#1e293b", borderRadius: "12px", border: "1px solid #334155", padding: "18px", marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "18px" }}>⏱️</span>
+            <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "700", color: "#f8fafc" }}>Semáforo y Flujo de Cobros: Hoy, Mañana y 15 Días</h3>
+          </div>
+          <span style={{ fontSize: "12px", color: "#94a3b8" }}>Sincronizado en tiempo real con tus clientes activos</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
+          {/* HOY */}
+          <div style={{ backgroundColor: "#0f172a", border: empresasHoy.length > 0 ? "1px solid #ef4444" : "1px solid #334155", borderRadius: "10px", padding: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <span style={{ color: empresasHoy.length > 0 ? "#ef4444" : "#94a3b8", fontWeight: "700", fontSize: "12px" }}>● HOY VENCE</span>
+              <span style={{ fontSize: "11px", backgroundColor: empresasHoy.length > 0 ? "rgba(239, 68, 68, 0.2)" : "rgba(148, 163, 184, 0.1)", color: empresasHoy.length > 0 ? "#f87171" : "#94a3b8", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
+                {empresasHoy.length} {empresasHoy.length === 1 ? "Empresa" : "Empresas"}
+              </span>
+            </div>
+            {empresasHoy.length > 0 ? (
+              empresasHoy.map(item => (
+                <div key={item.empresa} style={{ marginBottom: "6px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{item.empresa}</div>
+                  <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800" }}>{item.moneda} ${Number(item.total).toLocaleString()}</div>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: "13px", color: "#64748b", fontStyle: "italic", marginTop: "4px" }}>🟢 Sin cobros que venzan hoy</div>
+            )}
+          </div>
+
+          {/* MAÑANA */}
+          <div style={{ backgroundColor: "#0f172a", border: empresasManana.length > 0 ? "1px solid #f59e0b" : "1px solid #334155", borderRadius: "10px", padding: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <span style={{ color: empresasManana.length > 0 ? "#f59e0b" : "#94a3b8", fontWeight: "700", fontSize: "12px" }}>● MAÑANA</span>
+              <span style={{ fontSize: "11px", backgroundColor: empresasManana.length > 0 ? "rgba(245, 158, 11, 0.2)" : "rgba(148, 163, 184, 0.1)", color: empresasManana.length > 0 ? "#fbbf24" : "#94a3b8", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
+                {empresasManana.length} {empresasManana.length === 1 ? "Empresa" : "Empresas"}
+              </span>
+            </div>
+            {empresasManana.length > 0 ? (
+              empresasManana.map(item => (
+                <div key={item.empresa} style={{ marginBottom: "6px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{item.empresa}</div>
+                  <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800" }}>{item.moneda} ${Number(item.total).toLocaleString()}</div>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: "13px", color: "#64748b", fontStyle: "italic", marginTop: "4px" }}>🟢 Sin cobros para mañana</div>
+            )}
+          </div>
+
+          {/* PROXIMOS 15 DIAS */}
+          <div style={{ backgroundColor: "#0f172a", border: empresas15Dias.length > 0 ? "1px solid #3b82f6" : "1px solid #334155", borderRadius: "10px", padding: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <span style={{ color: empresas15Dias.length > 0 ? "#60a5fa" : "#94a3b8", fontWeight: "700", fontSize: "12px" }}>● PRÓXIMOS 15 DÍAS</span>
+              <span style={{ fontSize: "11px", backgroundColor: empresas15Dias.length > 0 ? "rgba(59, 130, 246, 0.2)" : "rgba(148, 163, 184, 0.1)", color: empresas15Dias.length > 0 ? "#93c5fd" : "#94a3b8", padding: "2px 6px", borderRadius: "6px", fontWeight: "bold" }}>
+                {empresas15Dias.length} {empresas15Dias.length === 1 ? "Empresa" : "Empresas"}
+              </span>
+            </div>
+            {empresas15Dias.length > 0 ? (
+              empresas15Dias.slice(0, 3).map(item => (
+                <div key={item.empresa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px", fontSize: "12px" }}>
+                  <span style={{ color: "#f8fafc", fontWeight: "600" }}>{item.empresa} (Día {item.dia})</span>
+                  <span style={{ color: "#38bdf8", fontWeight: "700" }}>{item.moneda} ${Number(item.total).toLocaleString()}</span>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: "13px", color: "#64748b", fontStyle: "italic", marginTop: "4px" }}>🟢 Sin cobros en los próximos 15 días</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* TABLA PRINCIPAL CON BOTÓN ELIMINAR EMPRESA */}
+      <div style={{ backgroundColor: "#1e293b", borderRadius: "12px", border: "1px solid #334155", padding: "20px", marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "700", color: "#f8fafc" }}>🏢 Empresas Clientes & Ficha Integral 360°</h3>
+            <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#94a3b8" }}>Control unificado de preventistas, cupos, cobros y bajas directas.</p>
+          </div>
+          <span style={{ padding: "4px 12px", backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "20px", fontSize: "12px", color: "#38bdf8", fontWeight: "600" }}>
+            {empresas.length} Empresas Registradas
+          </span>
+        </div>
+
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #334155", color: "#94a3b8" }}>
+                <th style={{ padding: "12px 8px" }}>EMPRESA & PAÍS</th>
+                <th style={{ padding: "12px 8px" }}>CUPOS PREVENTISTAS</th>
+                <th style={{ padding: "12px 8px" }}>MODELO & TARIFA</th>
+                <th style={{ padding: "12px 8px" }}>DÍA DE CORTE</th>
+                <th style={{ padding: "12px 8px" }}>ESTADO COBRO</th>
+                <th style={{ padding: "12px 8px", textAlign: "right" }}>ACCIONES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {empresas.map((emp) => {
+                const t = tarifasMap[emp] || {};
+                const cInfoRaw = diasCorteMap[emp] || {};
+                const estadoTexto = t.estado_pago || cInfoRaw.estado || "Al Día";
+                const esAlDia = (estadoTexto === "Al Día");
+                const esPorVencer = (estadoTexto === "Por Vencer");
+                const colorBadge = esAlDia ? "#10b981" : esPorVencer ? "#f59e0b" : "#ef4444";
+                const bgBadge = esAlDia ? "rgba(16, 185, 129, 0.15)" : esPorVencer ? "rgba(245, 158, 11, 0.15)" : "rgba(239, 68, 68, 0.15)";
+                
+                const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase() && p.rol === "preventista").length;
+                const empresaDB = empresasRegistros.find(e => e.nombre === emp);
+                const contratosVigentes = contratosTabla[empresaDB?.id] || [];
+                const reparto = contratosVigentes.find(c => tipoContrato(c.plan_nombre) === "Repartos");
+                const ventas = contratosVigentes.find(c => tipoContrato(c.plan_nombre) === "Ventas");
+                const integrado = contratosVigentes.find(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos");
+                const contratoPrincipal = contratosVigentes[0] || null;
+                const soloRepartos = Boolean(reparto && !ventas && !integrado);
+                const cupoMax = soloRepartos ? 0 : Number(ventas?.cupo_preventistas ?? integrado?.cupo_preventistas ?? t.cupo ?? cInfoRaw.cupo ?? 0);
+                const cupoRepartidores = Number(reparto?.cupo_repartidores ?? integrado?.cupo_repartidores ?? empresaDB?.cupo_repartidores ?? 0);
+                const moneda = contratoPrincipal?.moneda || t.moneda || "ARS";
+                const valor = Number(t.valor ?? t.tarifa ?? 0);
+                const tipo = t.tipo || t.tipo_tarifa || "preventista";
+                const totalEst = contratoPrincipal ? contratosVigentes.reduce((sum, c) => sum + Number(c.precio_acordado ?? 0), 0) : (tipo === "preventista" ? cupoMax * valor : valor);
+                const bandera = (t.pais === "México") ? "🇲🇽" : (t.pais === "Colombia") ? "🇨🇴" : (t.pais === "Brasil") ? "🇧🇷" : (t.pais === "Internacional") ? "🌐" : "🇦🇷";
+                const diaCorte = contratoPrincipal?.dia_corte ?? t.diaCobro ?? t.dia_cobro ?? cInfoRaw.dia ?? "05";
+
+                return (
+                  <tr key={emp} style={{ borderBottom: "1px solid #334155" }}>
+                    <td style={{ padding: "12px 8px" }}>
+                      <div style={{ fontWeight: "700", color: "#f8fafc", fontSize: "14px" }}>{bandera} {emp}</div>
+                      <div style={{ fontSize: "11px", color: "#64748b" }}>{t.pais || "Argentina"} · {t.notas || "CBU / Directo"}</div>
+                    </td>
+                    <td style={{ padding: "12px 8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontWeight: "700", color: prevsCount > cupoMax ? "#ef4444" : "#4ade80", fontSize: "13px" }}>
+                          {prevsCount} / {cupoMax} prev{cupoRepartidores > 0 ? ` · ${cupoRepartidores} repartidores` : ""}
+                        </span>
+                        {prevsCount > cupoMax && <span style={{ fontSize: "10px", padding: "1px 6px", backgroundColor: "#7f1d1d", color: "#fca5a5", borderRadius: "10px", fontWeight: "bold" }}>Excedido</span>}
+                      </div>
+                      <div style={{ width: "90px", height: "5px", backgroundColor: "#334155", borderRadius: "3px", marginTop: "4px", overflow: "hidden" }}>
+                        <div style={{ width: Math.min(100, (cupoMax > 0 ? (prevsCount / cupoMax) * 100 : 0)) + "%", height: "100%", backgroundColor: prevsCount > cupoMax ? "#ef4444" : "#10b981" }}></div>
+                      </div>
+                    </td>
+                    <td style={{ padding: "12px 8px" }}>
+                      <div style={{ fontWeight: "700", color: "#38bdf8" }}>{moneda} ${Number(totalEst).toLocaleString("es-AR")} / {contratoPrincipal?.modalidad || "mes"}</div>
+                      <div style={{ fontSize: "11px", color: "#94a3b8" }}>{contratoPrincipal ? contratosVigentes.map(c => c.plan_nombre).join(" + ") : (tipo === "preventista" ? `$${valor} x prev` : "Tarifa Plana")}</div>
+                    </td>
+                    <td style={{ padding: "12px 8px" }}>
+                      <span style={{ padding: "4px 8px", backgroundColor: "#0f172a", borderRadius: "6px", fontSize: "12px", color: "#cbd5e1" }}>
+                        📅 Día {diaCorte} c/mes
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 8px" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "4px 10px", borderRadius: "20px", fontSize: "12px", fontWeight: "700", backgroundColor: bgBadge, color: colorBadge, border: "1px solid " + colorBadge }}>
+                        ● {estadoTexto}
+                      </span>
+                    </td>
+                    <td style={{ padding: "12px 8px", textAlign: "right" }}>
+                      <button type="button" onClick={() => setEmpresaDetalleModal(emp)} style={{ backgroundColor: "#0284c7", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
+                        👁️ Ficha 360°
+                      </button>
+                      <button type="button" onClick={() => abrirRegistrarPago(emp)} style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
+                        💳 Abonos
+                      </button>
+                      <button type="button" onClick={() => abrirEditarEmpresa(emp)} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "600", marginRight: "6px" }}>
+                        ✏️ Editar
+                      </button>
+                      <button type="button" onClick={() => eliminarEmpresa(emp)} title="Eliminar Empresa" style={{ backgroundColor: "#7f1d1d", color: "#fca5a5", border: "1px solid #991b1b", padding: "6px 10px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700" }}>
+                        🗑️
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* MODAL FICHA 360 CON GESTIÓN DE SUPERVISORES Y PREVENTISTAS */}
+      {empresaDetalleModal && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15,23,42,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "16px" }}>
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "16px", maxWidth: "880px", width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)" }}>
+            
+            {/* Header Ficha 360 */}
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "12px", backgroundColor: "#2563eb", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "900", fontSize: "18px" }}>
+                  {empresaDetalleModal.slice(0,2).toUpperCase()}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a" }}>{empresaDetalleModal}</h3>
+                  <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "700" }}>● Cuenta Activa · Multi-Tenant Aislado</span>
+                </div>
+              </div>
+              <button onClick={() => setEmpresaDetalleModal(null)} style={{ background: "#f1f5f9", border: "none", width: "36px", height: "36px", borderRadius: "50%", cursor: "pointer", fontSize: "18px", color: "#64748b", fontWeight: "bold" }}>✕</button>
+            </div>
+
+            <div style={{ padding: "24px" }}>
+              
+              {/* 1. SECCIÓN SUPERVISORES */}
+              <div style={{ backgroundColor: "#f8fafc", borderRadius: "12px", padding: "16px", marginBottom: "20px", border: "1px solid #e2e8f0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                    👔 SUPERVISOR RESPONSABLE
+                  </h4>
+                  <button onClick={() => { setEmpresaSeleccionada(empresaDetalleModal); setNuevoRolEmpleado("supervisor"); setNuevoTipoSupervisor("supervisorv"); setNuevoNombre(""); setNuevoEmail(""); setNuevoPassword(""); setMostrarModalPreventista(true); }} style={{ backgroundColor: "#0284c7", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
+                    + Nuevo Supervisor
+                  </button>
+                </div>
+
+                {preventistas.filter(p => p.empresa === empresaDetalleModal && ["supervisor", "supervisorv", "supervisorr"].includes(p.rol)).length === 0 ? (
+                  <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px", backgroundColor: "#fff", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
+                    Sin supervisor registrado para esta empresa. Podés crearlo con el botón superior.
+                  </div>
+                ) : (
+                  preventistas.filter(p => p.empresa === empresaDetalleModal && ["supervisor", "supervisorv", "supervisorr"].includes(p.rol)).map(sup => (
+                    <div key={sup.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "12px 16px", borderRadius: "8px", border: "1px solid #cbd5e1" }}>
+                      <div>
+                        <div style={{ fontWeight: "800", color: "#0f172a", fontSize: "14px" }}>👤 {sup.nombre}</div>
+                        <div style={{ fontSize: "12px", color: "#64748b" }}>✉️ {sup.email} · Rol: {sup.rol === "supervisorr" ? "Depósito y Repartos" : sup.rol === "supervisorv" ? "Ventas" : "Supervisor anterior"}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button onClick={() => setModalResetClave({ usuario: sup, nuevoPass: "" })} style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "none", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🔑 Reset Clave</button>
+                        <button onClick={() => setModalCambiarEmail({ usuario: sup, nuevoEmail: sup.email || "" })} style={{ backgroundColor: "#f1f5f9", color: "#475569", border: "none", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>✉️ Email</button>
+                        <button onClick={() => eliminarPreventista(sup.id)} style={{ backgroundColor: "#fee2e2", color: "#dc2626", border: "none", padding: "6px 10px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🗑️ Borrar</button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* 2. SECCIÓN PREVENTISTAS EN CALLE */}
+              <div style={{ backgroundColor: "#f8fafc", borderRadius: "12px", padding: "16px", border: "1px solid #e2e8f0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                      🚶 PREVENTISTAS EN CALLE
+                    </h4>
+                    <span style={{ fontSize: "12px", color: "#64748b" }}>
+                      {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "preventista").length} activos en zona
+                    </span>
+                  </div>
+                  <button onClick={() => { setEmpresaSeleccionada(empresaDetalleModal); setNuevoRolEmpleado("preventista"); setNuevoNombre(""); setNuevoEmail(""); setNuevoPassword(""); setMostrarModalPreventista(true); }} style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
+                    + Nuevo Preventista
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "preventista").length === 0 ? (
+                    <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px", backgroundColor: "#fff", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
+                      No hay preventistas registrados en esta empresa.
+                    </div>
+                  ) : (
+                    preventistas.filter(p => p.empresa === empresaDetalleModal && p.rol === "preventista").map(prev => (
+                      <div key={prev.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: "10px 14px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <div style={{ fontWeight: "700", color: "#0f172a", fontSize: "13px" }}>👤 {prev.nombre}</div>
+                            {prev.tipo_preventista === "temporal" ? (() => {
+                              const hoy = new Date();
+                              hoy.setHours(0, 0, 0, 0);
+                              const hasta = prev.temporal_hasta ? new Date(prev.temporal_hasta + "T00:00:00") : null;
+                              const vencido = hasta && hasta < hoy;
+                              return (
+                                <span style={{
+                                  backgroundColor: vencido ? "#fee2e2" : "#fef3c7",
+                                  color: vencido ? "#991b1b" : "#92400e",
+                                  border: `1px solid ${vencido ? "#ef4444" : "#f59e0b"}`,
+                                  borderRadius: "999px",
+                                  padding: "2px 8px",
+                                  fontSize: "10px",
+                                  fontWeight: "800"
+                                }}>
+                                  {(() => {
+                                    if (!hasta) return "⏱️ TEMPORAL";
+                                    if (vencido) return `🔴 TEMPORAL VENCIDO · ${hasta.toLocaleDateString("es-AR")}`;
+                                    const diasRestantes = Math.round((hasta - hoy) / 86400000);
+                                    if (diasRestantes === 0) return `⚠️ TEMPORAL · vence hoy · ${hasta.toLocaleDateString("es-AR")}`;
+                                    if (diasRestantes === 1) return `⚠️ TEMPORAL · vence mañana · ${hasta.toLocaleDateString("es-AR")}`;
+                                    return `⏱️ TEMPORAL · quedan ${diasRestantes} días · hasta ${hasta.toLocaleDateString("es-AR")}`;
+                                  })()}
+                                </span>
+                              );
+                            })() : (
+                              <span style={{ backgroundColor: "#dcfce7", color: "#166534", border: "1px solid #86efac", borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: "800" }}>
+                                👤 PERMANENTE
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>✉️ {prev.email}</div>
+                          <div style={{
+                            fontSize: "11px",
+                            fontWeight: "800",
+                            marginTop: "4px",
+                            color: prev.activo === false ? "#64748b" : "#16a34a"
+                          }}>
+                            {prev.activo === false ? "⚫ INACTIVO" : "🟢 ACTIVO"}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: "6px" }}>
+                          <button onClick={() => setModalResetClave({ usuario: prev, nuevoPass: "" })} style={{ backgroundColor: "#e0f2fe", color: "#0369a1", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🔑 Clave</button>
+                          <button onClick={() => setModalCambiarEmail({ usuario: prev, nuevoEmail: prev.email || "" })} style={{ backgroundColor: "#f1f5f9", color: "#475569", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>✉️ Email</button>
+                          <button onClick={() => eliminarPreventista(prev.id)} style={{ backgroundColor: "#fee2e2", color: "#dc2626", border: "none", padding: "4px 8px", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>🗑️ Borrar</button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* 3. REPARTIDORES: alta y consulta, sin alterar funciones de bajas existentes. */}
+              {(() => {
+                const emp = empresasRegistros.find(e => e.nombre === empresaDetalleModal);
+                const contratosRep = (contratosTabla[emp?.id] || []).filter(c =>
+                  c.activo && ["Repartos", "Ventas + Repartos"].includes(tipoContrato(c.plan_nombre))
+                );
+                const cupo = contratosRep.reduce((n, c) => n + Number(c.cupo_repartidores || 0), 0);
+                const choferes = preventistas.filter(p => p.empresa_id === emp?.id && p.rol === "repartidor");
+                const activos = choferes.filter(p => p.activo !== false).length;
+                return (
+                  <div style={{ backgroundColor: "#f8fafc", borderRadius: "12px", padding: "16px", marginTop: "20px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
+                      <div>
+                        <h4 style={{ margin: 0, color: "#0f172a", fontSize: "14px", fontWeight: "800" }}>🚚 REPARTIDORES</h4>
+                        <span style={{ fontSize: "12px", color: "#64748b" }}>{activos} / {cupo} repartidores activos</span>
+                      </div>
+                      <button type="button" disabled={cupo === 0 || activos >= cupo} onClick={() => {
+                        setEmpresaSeleccionada(empresaDetalleModal);
+                        setNuevoRolEmpleado("repartidor");
+                        setNuevoNombre(""); setNuevoEmail(""); setNuevoPassword("");
+                        setMostrarModalPreventista(true);
+                      }} style={{ backgroundColor: cupo === 0 || activos >= cupo ? "#94a3b8" : "#059669", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "700", cursor: cupo === 0 || activos >= cupo ? "not-allowed" : "pointer" }}>
+                        + Nuevo Repartidor
+                      </button>
+                    </div>
+                    {choferes.length === 0 ? (
+                      <div style={{ padding: "12px", textAlign: "center", color: "#94a3b8", fontSize: "13px", backgroundColor: "#fff", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>No hay repartidores registrados en esta empresa.</div>
+                    ) : choferes.map(chofer => (
+                      <div key={chofer.id} style={{ backgroundColor: "#fff", border: "1px solid #cbd5e1", borderRadius: "8px", padding: "12px", marginBottom: "6px", display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: "800" }}>🚚 {chofer.nombre || "Repartidor"}</div>
+                          <div style={{ fontSize: "12px", color: "#64748b" }}>{chofer.email} · {chofer.activo === false ? "Inactivo" : "Activo"}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Botón Cerrar Ficha */}
+              <div style={{ marginTop: "24px", display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={() => setEmpresaDetalleModal(null)} style={{ backgroundColor: "#0f172a", color: "#fff", border: "none", padding: "10px 20px", borderRadius: "8px", fontWeight: "700", cursor: "pointer" }}>
+                  Listo / Cerrar Ficha 360°
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR EMPRESA - DATOS PROPIOS, NO ABONO */}
+      {mostrarModalEditar && (
+        <div style={{ position:"fixed", inset:0, backgroundColor:"rgba(0,0,0,0.75)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:20000, padding:"16px" }}>
+          <div style={{ backgroundColor:"#1e293b", border:"1px solid #334155", borderRadius:"12px", padding:"24px", width:"100%", maxWidth:"720px", maxHeight:"92vh", overflowY:"auto", boxSizing:"border-box" }}>
+            <h3 style={{ margin:"0 0 6px 0", fontSize:"18px", color:"#f8fafc" }}>✏️ Editar Empresa — {empresaAEditar}</h3>
+            <div style={{ color:"#94a3b8", fontSize:"12px", marginBottom:"18px" }}>Modificá los datos propios de la empresa o cambiala de Partner. El abono se administra por separado.</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(240px, 1fr))", gap:"12px" }}>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Nombre comercial *<input value={nombreEmpresa} onChange={e=>setNombreEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Razón social<input value={razonSocialEmpresa} onChange={e=>setRazonSocialEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>CUIT / Identificación fiscal<input value={cuitEmpresa} onChange={e=>setCuitEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>País<select value={paisEmpresa} onChange={e=>setPaisEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff"}}><option>Argentina</option><option>México</option><option>Colombia</option><option>Brasil</option><option>Internacional</option></select></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Provincia / Estado<input value={provinciaEmpresa} onChange={e=>setProvinciaEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Localidad<input value={localidadEmpresa} onChange={e=>setLocalidadEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px",gridColumn:"1 / -1"}}>Domicilio<input value={domicilioEmpresa} onChange={e=>setDomicilioEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Teléfono<input value={telefonoEmpresa} onChange={e=>setTelefonoEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>WhatsApp<input value={whatsappEmpresa} onChange={e=>setWhatsappEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Email<input type="email" value={emailEmpresa} onChange={e=>setEmailEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#94a3b8",fontSize:"12px"}}>Responsable / Contacto<input value={contactoEmpresa} onChange={e=>setContactoEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}} /></label>
+              <label style={{color:"#fbbf24",fontSize:"12px",fontWeight:"800",gridColumn:"1 / -1"}}>🤝 Partner<select value={partnerEmpresa} onChange={e=>setPartnerEmpresa(e.target.value)} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #b45309",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box"}}><option value="">Directo / Sin Partner</option>{partnersDisponibles.map(p=><option key={p.id || p.email || p.nombre} value={p.nombre}>{p.nombre}</option>)}</select></label>
+              {partnerEmpresa && (<div style={{gridColumn:"1 / -1",backgroundColor:"#111827",border:"1px solid #b45309",borderRadius:"10px",padding:"12px"}}><div style={{color:"#fbbf24",fontSize:"12px",fontWeight:"900",marginBottom:"10px"}}>💰 Acuerdo de comisión con este Partner</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:"10px"}}><label style={{color:"#94a3b8",fontSize:"12px"}}>Tipo<select value={comisionTipo} onChange={e=>setComisionTipo(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569"}}><option value="sin_comision">Sin comisión</option><option value="porcentaje">Porcentaje</option><option value="fijo">Monto fijo</option></select></label>{comisionTipo!=="sin_comision" && <label style={{color:"#94a3b8",fontSize:"12px"}}>{comisionTipo==="porcentaje"?"Porcentaje (%)":"Monto fijo"}<input type="number" min="0" step="0.01" value={comisionValor} onChange={e=>setComisionValor(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}{comisionTipo!=="sin_comision" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Duración<select value={comisionDuracion} onChange={e=>setComisionDuracion(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569"}}><option value="sin_limite">Sin límite</option><option value="meses">Cantidad de meses/cobros</option><option value="hasta_fecha">Hasta una fecha</option></select></label>}{comisionTipo!=="sin_comision" && comisionDuracion==="meses" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Meses / cobros<input type="number" min="1" value={comisionMeses} onChange={e=>setComisionMeses(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}{comisionTipo!=="sin_comision" && comisionDuracion==="hasta_fecha" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Hasta<input type="date" value={comisionHasta} onChange={e=>setComisionHasta(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}</div><label style={{display:"block",color:"#94a3b8",fontSize:"12px",marginTop:"10px"}}>Notas del acuerdo<textarea rows={2} value={comisionNotas} onChange={e=>setComisionNotas(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label></div>)}
+              <label style={{color:"#94a3b8",fontSize:"12px",gridColumn:"1 / -1"}}>Notas de la empresa<textarea value={notasEmpresa} onChange={e=>setNotasEmpresa(e.target.value)} rows={3} style={{width:"100%",padding:"10px",marginTop:"4px",borderRadius:"8px",border:"1px solid #475569",backgroundColor:"#0f172a",color:"#fff",boxSizing:"border-box",resize:"vertical"}} /></label>
+            </div>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:"8px",marginTop:"20px"}}><button type="button" onClick={()=>setMostrarModalEditar(false)} style={{backgroundColor:"#475569",color:"#fff",border:"none",padding:"10px 18px",borderRadius:"6px",cursor:"pointer"}}>Cancelar</button><button type="button" onClick={guardarEdicionEmpresa} style={{backgroundColor:"#2563eb",color:"#fff",border:"none",padding:"10px 18px",borderRadius:"6px",cursor:"pointer",fontWeight:"bold"}}>Guardar cambios</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: ALTA EMPRESA - SOLO DATOS DE LA EMPRESA */}
+      {mostrarModalEmpresa && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20000, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "720px", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box" }}>
+            <h3 style={{ margin: "0 0 6px 0", fontSize: "18px", color: "#f8fafc" }}>🏢 Dar de Alta Nueva Empresa</h3>
+            <div style={{ color: "#94a3b8", fontSize: "12px", marginBottom: "18px" }}>Acá se cargan solamente los datos de la empresa. El plan, cupo y valor se configuran después desde 💳 Abonos.</div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                const nombre = nombreEmpresa.trim();
+                if (!nombre) return;
+                const { error } = await supabase.from("empresas").insert([{
+                  nombre,
+                  razon_social: razonSocialEmpresa.trim() || null,
+                  cuit: cuitEmpresa.trim() || null,
+                  pais: paisEmpresa,
+                  provincia: provinciaEmpresa.trim() || null,
+                  localidad: localidadEmpresa.trim() || null,
+                  domicilio: domicilioEmpresa.trim() || null,
+                  telefono: telefonoEmpresa.trim() || null,
+                  whatsapp: whatsappEmpresa.trim() || null,
+                  email: emailEmpresa.trim() || null,
+                  contacto: contactoEmpresa.trim() || null,
+                  partner: partnerEmpresa.trim() || null,
+                  comision_tipo: partnerEmpresa ? comisionTipo : "sin_comision",
+                  comision_valor: partnerEmpresa && comisionTipo !== "sin_comision" ? (Number(comisionValor) || 0) : 0,
+                  comision_duracion: partnerEmpresa && comisionTipo !== "sin_comision" ? comisionDuracion : "sin_limite",
+                  comision_meses: partnerEmpresa && comisionDuracion === "meses" ? (Number(comisionMeses) || null) : null,
+                  comision_hasta: partnerEmpresa && comisionDuracion === "hasta_fecha" ? (comisionHasta || null) : null,
+                  comision_notas: partnerEmpresa ? (comisionNotas.trim() || null) : null,
+                  notas: notasEmpresa.trim() || null,
+                  activo: true
+                }]);
+                if (error) throw error;
+                setNombreEmpresa(""); setRazonSocialEmpresa(""); setCuitEmpresa("");
+                setProvinciaEmpresa(""); setLocalidadEmpresa(""); setDomicilioEmpresa("");
+                setTelefonoEmpresa(""); setWhatsappEmpresa(""); setEmailEmpresa("");
+                setContactoEmpresa(""); setPartnerEmpresa(""); setNotasEmpresa("");
+                setComisionTipo("sin_comision"); setComisionValor(""); setComisionDuracion("sin_limite"); setComisionMeses(""); setComisionHasta(""); setComisionNotas("");
+                setMostrarModalEmpresa(false);
+                await cargarDatos();
+                alert("✅ Empresa creada. Ahora podés configurar su abono desde el botón 💳 Abonos.");
+              } catch (err) {
+                alert("Error al crear empresa: " + (err.message || "Error desconocido"));
+              }
+            }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px" }}>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Nombre comercial *<input type="text" value={nombreEmpresa} onChange={(e) => setNombreEmpresa(e.target.value)} required placeholder="Ej. WELT" style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Razón social<input type="text" value={razonSocialEmpresa} onChange={(e) => setRazonSocialEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>CUIT / Identificación fiscal<input type="text" value={cuitEmpresa} onChange={(e) => setCuitEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>País<select value={paisEmpresa} onChange={(e) => setPaisEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff" }}><option value="Argentina">🇦🇷 Argentina</option><option value="México">🇲🇽 México</option><option value="Colombia">🇨🇴 Colombia</option><option value="Brasil">🇧🇷 Brasil</option><option value="Internacional">🌐 Internacional</option></select></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Provincia / Estado<input type="text" value={provinciaEmpresa} onChange={(e) => setProvinciaEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Localidad<input type="text" value={localidadEmpresa} onChange={(e) => setLocalidadEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px", gridColumn:"1 / -1" }}>Domicilio<input type="text" value={domicilioEmpresa} onChange={(e) => setDomicilioEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Teléfono<input type="text" value={telefonoEmpresa} onChange={(e) => setTelefonoEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>WhatsApp<input type="text" value={whatsappEmpresa} onChange={(e) => setWhatsappEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Email<input type="email" value={emailEmpresa} onChange={(e) => setEmailEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#94a3b8", fontSize: "12px" }}>Responsable / Contacto<input type="text" value={contactoEmpresa} onChange={(e) => setContactoEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}/></label>
+                <label style={{ color: "#fbbf24", fontSize: "12px", fontWeight:"800", gridColumn:"1 / -1" }}>🤝 Partner<select value={partnerEmpresa} onChange={(e) => setPartnerEmpresa(e.target.value)} style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #b45309", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box" }}><option value="">Directo / Sin Partner</option>{partnersDisponibles.map(p => <option key={p.id || p.email || p.nombre} value={p.nombre}>{p.nombre}</option>)}</select></label>
+              {partnerEmpresa && (<div style={{gridColumn:"1 / -1",backgroundColor:"#111827",border:"1px solid #b45309",borderRadius:"10px",padding:"12px"}}><div style={{color:"#fbbf24",fontSize:"12px",fontWeight:"900",marginBottom:"10px"}}>💰 Acuerdo de comisión con este Partner</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:"10px"}}><label style={{color:"#94a3b8",fontSize:"12px"}}>Tipo<select value={comisionTipo} onChange={e=>setComisionTipo(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569"}}><option value="sin_comision">Sin comisión</option><option value="porcentaje">Porcentaje</option><option value="fijo">Monto fijo</option></select></label>{comisionTipo!=="sin_comision" && <label style={{color:"#94a3b8",fontSize:"12px"}}>{comisionTipo==="porcentaje"?"Porcentaje (%)":"Monto fijo"}<input type="number" min="0" step="0.01" value={comisionValor} onChange={e=>setComisionValor(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}{comisionTipo!=="sin_comision" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Duración<select value={comisionDuracion} onChange={e=>setComisionDuracion(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569"}}><option value="sin_limite">Sin límite</option><option value="meses">Cantidad de meses/cobros</option><option value="hasta_fecha">Hasta una fecha</option></select></label>}{comisionTipo!=="sin_comision" && comisionDuracion==="meses" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Meses / cobros<input type="number" min="1" value={comisionMeses} onChange={e=>setComisionMeses(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}{comisionTipo!=="sin_comision" && comisionDuracion==="hasta_fecha" && <label style={{color:"#94a3b8",fontSize:"12px"}}>Hasta<input type="date" value={comisionHasta} onChange={e=>setComisionHasta(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label>}</div><label style={{display:"block",color:"#94a3b8",fontSize:"12px",marginTop:"10px"}}>Notas del acuerdo<textarea rows={2} value={comisionNotas} onChange={e=>setComisionNotas(e.target.value)} style={{width:"100%",padding:"9px",marginTop:"4px",borderRadius:"7px",backgroundColor:"#0f172a",color:"#fff",border:"1px solid #475569",boxSizing:"border-box"}} /></label></div>)}
+                <label style={{ color: "#94a3b8", fontSize: "12px", gridColumn:"1 / -1" }}>Notas de la empresa<textarea value={notasEmpresa} onChange={(e) => setNotasEmpresa(e.target.value)} rows={3} placeholder="Observaciones administrativas o comerciales de la empresa..." style={{ width:"100%", padding:"10px", marginTop:"4px", borderRadius:"8px", border:"1px solid #475569", backgroundColor:"#0f172a", color:"#fff", boxSizing:"border-box", resize:"vertical" }}/></label>
+              </div>
+              <div style={{ display:"flex", justifyContent:"flex-end", gap:"8px", marginTop:"18px" }}><button type="button" onClick={() => setMostrarModalEmpresa(false)} style={{ backgroundColor:"#475569", color:"#fff", border:"none", padding:"10px 18px", borderRadius:"6px", cursor:"pointer" }}>Cancelar</button><button type="submit" style={{ backgroundColor:"#059669", color:"#fff", border:"none", padding:"10px 18px", borderRadius:"6px", cursor:"pointer", fontWeight:"bold" }}>Crear Empresa</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: ALTA PREVENTISTA */}
+      {mostrarModalPreventista && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20000, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "450px", boxSizing: "border-box" }}>
+            <h3 style={{ margin: "0 0 16px 0", fontSize: "18px" }}>{nuevoRolEmpleado === "supervisor" ? "👔 Dar de Alta Nuevo Supervisor" : nuevoRolEmpleado === "repartidor" ? "🚚 Dar de Alta Nuevo Repartidor" : "🚶 Dar de Alta Nuevo Preventista"}</h3>
+            <form onSubmit={crearNuevoPreventista}>
+              <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Walter)" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
+              <input type="email" value={nuevoEmail} onChange={(e) => setNuevoEmail(e.target.value)} placeholder="Email de login" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
+              <input type="password" value={nuevoPassword} onChange={(e) => setNuevoPassword(e.target.value)} placeholder="Contraseña temporal" required style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "12px", boxSizing: "border-box" }} />
+              {nuevoRolEmpleado === "supervisor" && (
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Funciones del supervisor</label>
+                  <select value={nuevoTipoSupervisor} onChange={e => setNuevoTipoSupervisor(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="supervisorv">Supervisor de Ventas</option>
+                    <option value="supervisorr">Supervisor de Depósito y Repartos</option>
+                    <option value="ambos">Ambas funciones</option>
+                  </select>
+                </div>
+              )}
+              {nuevoRolEmpleado === "preventista" && (
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Tipo de preventista</label>
+                  <select value={tipoNuevoPreventista} onChange={(e) => { setTipoNuevoPreventista(e.target.value); if (e.target.value === "permanente") { setTemporalDesdeNuevo(""); setTemporalHastaNuevo(""); } }} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }}>
+                    <option value="permanente">👤 Permanente</option>
+                    <option value="temporal">⏱️ Temporal</option>
+                  </select>
+                </div>
+              )}
+              {nuevoRolEmpleado === "preventista" && tipoNuevoPreventista === "temporal" && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px" }}>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Desde
+                    <input type="date" value={temporalDesdeNuevo} onChange={(e) => setTemporalDesdeNuevo(e.target.value)} required style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Hasta
+                    <input type="date" min={temporalDesdeNuevo || undefined} value={temporalHastaNuevo} onChange={(e) => setTemporalHastaNuevo(e.target.value)} required style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                </div>
+              )}
+              <div style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#cbd5e1", marginBottom: "20px", boxSizing: "border-box", fontSize: "13px" }}>
+                Empresa: <strong style={{ color: "#fff" }}>{empresaSeleccionada}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button type="button" onClick={() => setMostrarModalPreventista(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "6px", cursor: "pointer" }}>Cancelar</button>
+                <button type="submit" style={{ backgroundColor: "#2563eb", color: "#fff", border: "none", padding: "8px 16px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>Crear y Activar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL GESTIÓN DE ABONO */}
+      {mostrarModalPago && empresaPago && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 30000, padding: "16px" }}>
+          <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "14px", padding: "22px", width: "100%", maxWidth: "620px", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box", boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "12px" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "18px", color: "#f8fafc" }}>💳 Gestión de Abono</h3>
+                <div style={{ color: "#38bdf8", fontWeight: "800", marginTop: "3px" }}>{empresaPago}</div>
+              </div>
+              <button type="button" onClick={() => setMostrarModalPago(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}>✕</button>
+            </div>
+
+            {(() => {
+              const activos = contratosActivosEmpresa;
+              const reparto = activos.find(c => tipoContrato(c.plan_nombre) === "Repartos");
+              const ventas = activos.find(c => tipoContrato(c.plan_nombre) === "Ventas");
+              const simplex = activos.find(c => tipoContrato(c.plan_nombre) === "Simplex");
+              const integrado = activos.find(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos");
+              const vigente = abonoEmpresaActual || reparto || ventas || simplex || integrado;
+              const empresaDB = empresasRegistros.find(e => e.nombre === empresaPago);
+              const cupoRepartidores = Number(reparto?.cupo_repartidores ?? integrado?.cupo_repartidores ?? empresaDB?.cupo_repartidores ?? 0);
+              const cupoVentas = Number(ventas?.cupo_preventistas ?? integrado?.cupo_preventistas ?? (reparto && !ventas && !integrado ? 0 : empresaDB?.cupo_preventistas ?? 0));
+              return (
+                <div style={{ backgroundColor: "#0f172a", border: "1px solid #38bdf8", borderRadius: "10px", padding: "12px", marginBottom: "16px" }}>
+                  <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: "800", marginBottom: "4px" }}>RESUMEN DE SERVICIOS CONTRATADOS</div>
+                  {vigente ? <>
+                    <div style={{ color: "#e2e8f0", fontSize: "12px" }}>{activos.map(c => c.plan_nombre).join(" + ")}</div>
+                    <div style={{ color: "#cbd5e1", fontSize: "12px", marginTop: "4px" }}>{cupoVentas} preventistas · {cupoRepartidores} repartidores</div>
+                    <div style={{ marginTop: "4px", color: "#38bdf8", fontSize: "18px", fontWeight: "900" }}>
+                      Precio acordado: {vigente.moneda || "ARS"} ${Number(vigente.precio_acordado ?? 0).toLocaleString("es-AR")}
+                      <span style={{ fontSize: "11px", color: "#94a3b8" }}> / {vigente.modalidad || "período"}</span>
+                    </div>
+                  </> : <div style={{ color: "#94a3b8", fontSize: "12px" }}>Sin contrato activo registrado</div>}
+                </div>
+              );
+            })()}
+
+            <div style={{ backgroundColor: "#111827", border: "1px solid #475569", borderRadius: "12px", padding: "14px", marginBottom: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ color: "#a78bfa", fontSize: "11px", fontWeight: "900" }}>ABONO CONTRATADO</div>
+                  {abonoEmpresaActual && !editandoContratoAbono ? (
+                    <>
+                      <div style={{ color: "#fff", fontWeight: "900", marginTop: "4px" }}>
+                        {abonoEmpresaActual.plan_nombre} · <span style={{ textTransform: "capitalize" }}>{abonoEmpresaActual.modalidad}</span>
+                      </div>
+                      <div style={{ color: "#cbd5e1", fontSize: "12px", marginTop: "3px" }}>
+                        {abonoEmpresaActual.moneda} ${Number(abonoEmpresaActual.precio_acordado || 0).toLocaleString("es-AR")} · {abonoEmpresaActual.plan_nombre?.startsWith("Repartos · ") ? `${Number(abonoEmpresaActual.cupo_repartidores ?? 0)} repartidores` : `${Number(abonoEmpresaActual.cupo_preventistas ?? 0)} preventistas`}
+                      </div>
+                      <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "3px" }}>
+                        Vigente desde {abonoEmpresaActual.fecha_inicio || "—"} · Día de corte {abonoEmpresaActual.dia_corte || "—"} · próximo vencimiento {abonoEmpresaActual.proximo_vencimiento || "—"}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ color: "#94a3b8", fontSize: "12px", marginTop: "4px" }}>
+                      Elegí del catálogo qué plan contrató esta empresa. El precio acordado quedará guardado aunque después cambie el catálogo.
+                    </div>
+                  )}
+                </div>
+                {abonoEmpresaActual && !editandoContratoAbono && (
+                  <button type="button" onClick={() => setEditandoContratoAbono(true)} style={{ backgroundColor: "#7c3aed", color: "#fff", border: "none", padding: "8px 12px", borderRadius: "7px", cursor: "pointer", fontWeight: "800" }}>
+                    ✏️ Modificar abono
+                  </button>
+                )}
+              </div>
+
+              {abonoEmpresaActual && !editandoContratoAbono && (
+                <div style={{ marginTop: "10px" }}>
+                  <button type="button" onClick={() => {
+                    setAbonoEmpresaActual(null);
+                    setProductoAbono("Ventas");
+                    setPlanSeleccionadoId("");
+                    setVarianteSeleccionadaId("");
+                    setPrecioAcordado("");
+                    setCupoAbono("");
+                    setCupoRepartidoresAbono("");
+                    setInicioAbono("");
+                    setVencimientoAbono("");
+                    setNotasContratoAbono("");
+                    setEditandoContratoAbono(true);
+                  }} style={{ backgroundColor: "#334155", color: "#fff", border: "1px solid #64748b", padding: "9px 13px", borderRadius: "7px", cursor: "pointer", fontWeight: "700" }}>
+                    + Preparar contrato de otro servicio
+                  </button>
+                  <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "5px" }}>Los contratos vigentes se conservan. El plan integrado todavía no permite guardado.</div>
+                </div>
+              )}
+
+              {contratosActivosEmpresa.length > 1 && !editandoContratoAbono && (
+                <div style={{ marginTop: "12px", padding: "10px", backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}>
+                  <div style={{ fontSize: "12px", color: "#94a3b8", marginBottom: "7px" }}>Contratos activos de esta empresa (elegí cuál consultar)</div>
+                  <div style={{ display: "flex", gap: "7px", flexWrap: "wrap" }}>
+                    {contratosActivosEmpresa.map(c => (
+                      <button key={c.id} type="button" onClick={() => seleccionarContratoActivo(c)} style={{ padding: "7px 10px", borderRadius: "7px", border: c.id === abonoEmpresaActual?.id ? "1px solid #a78bfa" : "1px solid #475569", backgroundColor: c.id === abonoEmpresaActual?.id ? "#4c1d95" : "#334155", color: "#fff", cursor: "pointer", fontSize: "12px" }}>
+                        {c.plan_nombre || "Plan"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {editandoContratoAbono && (
+                <div style={{ marginTop: "14px", borderTop: "1px solid #334155", paddingTop: "14px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: "10px" }}>
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Producto
+                      <select value={productoAbono} onChange={(e) => { setProductoAbono(e.target.value); setPlanSeleccionadoId(""); setVarianteSeleccionadaId(""); setPrecioAcordado(""); setCupoAbono(e.target.value === "Repartos" ? "0" : ""); setCupoRepartidoresAbono(e.target.value === "Repartos" ? "3" : ""); }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="Ventas">Ventas</option><option value="Repartos">Repartos</option><option value="Ventas + Repartos">Ventas + Repartos</option><option value="Simplex">Simplex</option>
+                      </select>
+                    </label>
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Plan
+                      <select value={planSeleccionadoId} onChange={(e) => {
+                        setPlanSeleccionadoId(e.target.value);
+                        setVarianteSeleccionadaId("");
+                        setPrecioAcordado("");
+                      }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="">Elegir plan...</option>
+                        {planesCatalogo.filter(p => productoAbono === "Repartos" ? p.nombre.startsWith("Repartos · ") : productoAbono === "Ventas + Repartos" ? p.nombre.startsWith("Ventas + Repartos · ") : productoAbono === "Simplex" ? p.nombre === "Simplex" : p.nombre.startsWith("Ventas · ") || p.nombre === "Básico").map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                      </select>
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Modalidad
+                      <select value={varianteSeleccionadaId} disabled={!planSeleccionadoId} onChange={(e) => {
+                        const id = e.target.value;
+                        setVarianteSeleccionadaId(id);
+                        const v = variantesCatalogo.find(x => x.id === id);
+                        if (v) {
+                          setPrecioAcordado(String(v.precio ?? ""));
+                          setMonedaAcordada(v.moneda || "ARS");
+                        }
+                      }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="">Elegir modalidad...</option>
+                        {variantesCatalogo.filter(v => v.plan_id === planSeleccionadoId).map(v => (
+                          <option key={v.id} value={v.id}>
+                            {String(v.modalidad || "").toUpperCase()} · {v.moneda} ${Number(v.precio || 0).toLocaleString("es-AR")}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Precio acordado
+                      <input type="number" min="0" step="any" value={precioAcordado} onChange={(e) => setPrecioAcordado(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Moneda
+                      <select value={monedaAcordada} onChange={(e) => setMonedaAcordada(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="ARS">ARS</option><option value="USD">USD</option><option value="USDT">USDT</option><option value="BCH">BCH</option>
+                      </select>
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Fecha de inicio
+                      <input type="date" value={inicioAbono} onChange={(e) => setInicioAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Próximo vencimiento
+                      <input type="date" value={vencimientoAbono} onChange={(e) => setVencimientoAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                    </label>
+
+                    <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Día de corte
+                      <select value={diaCorteAbono} onChange={(e) => setDiaCorteAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="">Elegir día...</option>
+                        {Array.from({ length: 28 }, (_, i) => i + 1).map(d => <option key={d} value={d}>Día {d}</option>)}
+                      </select>
+                    </label>
+
+                    {productoAbono !== "Simplex" && (
+                      <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de preventistas (Ventas)
+                        <input type="number" min="0" disabled={productoAbono === "Repartos"} value={productoAbono === "Repartos" ? "0" : cupoAbono} onChange={(e) => setCupoAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                      </label>
+                    )}
+                    {(productoAbono === "Repartos" || productoAbono === "Ventas + Repartos") && (
+                      <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de repartidores (independiente)
+                        <input type="number" min="0" value={cupoRepartidoresAbono} onChange={(e) => setCupoRepartidoresAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                      </label>
+                    )}
+                    {productoAbono === "Simplex" && <div style={{ fontSize: 12, color: "#94a3b8" }}>Simplex tiene su propio acceso. No comparte cupos con Ventas ni Repartos.</div>}
+                  </div>
+
+                  <label style={{ display: "block", color: "#94a3b8", fontSize: "12px", fontWeight: "700", marginTop: "10px" }}>Notas del acuerdo
+                    <textarea rows={2} value={notasContratoAbono} onChange={(e) => setNotasContratoAbono(e.target.value)} placeholder="Ej. precio especial primer año..." style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", resize: "vertical" }} />
+                  </label>
+
+                  {(productoAbono === "Repartos" || productoAbono === "Ventas + Repartos") && (
+                    <div style={{ color: "#fbbf24", fontSize: 12, marginTop: 12 }}>
+                      <strong>Vista previa, sin guardar:</strong> {productoAbono === "Repartos" ? "0 preventistas" : `${Number(cupoAbono) || 0} preventistas`} y {Number(cupoRepartidoresAbono) || 0} repartidores.
+                      {" "}El cupo de Repartos se puede registrar en el contrato y en la empresa. Esto NO habilita todavía usuarios, pantallas ni permisos de Repartos.
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "10px", flexWrap: "wrap" }}>
+                    {abonoEmpresaActual && <button type="button" onClick={() => setEditandoContratoAbono(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: "pointer" }}>Cancelar</button>}
+                    <button type="button" disabled={guardandoContratoAbono || productoAbono === "Ventas + Repartos"} onClick={guardarContratoAbono} style={{ backgroundColor: guardandoContratoAbono || productoAbono === "Ventas + Repartos" ? "#475569" : "#7c3aed", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: guardandoContratoAbono ? "not-allowed" : "pointer", fontWeight: "900" }}>
+                      {guardandoContratoAbono ? "Guardando..." : "💾 Guardar abono contratado"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ margin: "18px 0 10px", color: "#34d399", fontSize: "12px", fontWeight: "900" }}>💰 REGISTRAR COBRO / MOVIMIENTO</div>
+
+            <form onSubmit={guardarPago}>
+              <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Tipo de operación</label>
+              <select value={tipoMovimientoPago} onChange={(e) => {
+                const v = e.target.value;
+                setTipoMovimientoPago(v);
+                setBonificadoPago(v === "bonificacion");
+                setConceptoPago(v === "primer_abono" ? "Alta / Primer abono" : v === "renovacion" ? "Renovación de abono" : v === "bonificacion" ? "Abono excepcional / bonificación" : v === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
+                if (v === "bonificacion") {
+                  setMontoPago("0");
+                } else if (v === "primer_abono" || v === "renovacion") {
+                  // No recuperar tarifas históricas: el importe real es el pactado en el contrato.
+                  setMontoPago(String(Number(abonoEmpresaActual?.precio_acordado ?? 0)));
+                  setMonedaPago(abonoEmpresaActual?.moneda || "ARS");
+                }
+              }} style={{ width: "100%", padding: "11px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", marginBottom: "14px", boxSizing: "border-box" }}>
+                <option value="primer_abono">🆕 Alta / Primer abono</option>
+                <option value="renovacion">🔄 Renovar abono</option>
+                <option value="bonificacion">🎁 Abono excepcional / Bonificación</option>
+                <option value="ampliacion">➕ Ampliar preventistas</option>
+                <option value="reduccion">➖ Reducir preventistas</option>
+              </select>
+
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Concepto / detalle</label>
+                <input type="text" value={conceptoPago} onChange={(e) => setConceptoPago(e.target.value)} placeholder="Ej. Renovación semestral / acuerdo especial" style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Notas del abono</label>
+                <textarea value={notasAbono} onChange={(e) => setNotasAbono(e.target.value)} rows={3} placeholder="Ej. primer mes bonificado, acuerdo especial, observaciones del abono..." style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", resize: "vertical" }} />
+              </div>
+
+              {(tipoMovimientoPago === "primer_abono" || tipoMovimientoPago === "renovacion" || tipoMovimientoPago === "bonificacion" || cambioTemporalPago) && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "14px" }}>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Desde
+                    <input type="date" value={periodoDesdePago} onChange={(e) => setPeriodoDesdePago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>📅 Hasta
+                    <input type="date" value={periodoHastaPago} onChange={(e) => setPeriodoHastaPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                </div>
+              )}
+
+              {(tipoMovimientoPago === "ampliacion" || tipoMovimientoPago === "reduccion") && (
+                <div style={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: "10px", padding: "13px", marginBottom: "14px" }}>
+                  <div style={{ color: "#cbd5e1", fontSize: "12px", marginBottom: "8px" }}>
+                    Cupo actual: <strong style={{ color: "#fff" }}>{Number(empresasRegistros.find(e => e.nombre === empresaPago)?.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0)} preventistas</strong>
+                  </div>
+                  <label style={{ display: "block", color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>
+                    {tipoMovimientoPago === "ampliacion" ? "Cantidad a agregar" : "Cantidad a reducir"}
+                    <input type="number" min="1" onWheel={(e) => e.currentTarget.blur()} value={cambioPreventistasPago} onChange={(e) => setCambioPreventistasPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#111827", color: "#fff", boxSizing: "border-box" }} />
+                  </label>
+                  {(() => {
+                    const actual = Number(empresasRegistros.find(e => e.nombre === empresaPago)?.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0);
+                    const cantidad = Math.abs(Number(cambioPreventistasPago) || 0);
+                    const nuevo = tipoMovimientoPago === "ampliacion" ? actual + cantidad : Math.max(0, actual - cantidad);
+                    const asignados = preventistas.filter(p =>
+                      (p.empresa || "").toLowerCase() === (empresaPago || "").toLowerCase() &&
+                      p.rol === "preventista"
+                    ).length;
+                    const reduccionInvalida = tipoMovimientoPago === "reduccion" && nuevo < asignados;
+                    return (
+                      <>
+                        <div style={{ marginTop: "10px", padding: "9px 11px", borderRadius: "8px", backgroundColor: reduccionInvalida ? "rgba(239,68,68,0.12)" : "rgba(56,189,248,0.10)", border: reduccionInvalida ? "1px solid #ef4444" : "1px solid #0ea5e9", color: reduccionInvalida ? "#fecaca" : "#bae6fd", fontSize: "12px" }}>
+                          Nuevo cupo: <strong style={{ color: "#fff", fontSize: "14px" }}>{nuevo} preventistas</strong>
+                        </div>
+                        {reduccionInvalida && (
+                          <div style={{ marginTop: "8px", color: "#fca5a5", fontSize: "12px", fontWeight: "800" }}>
+                            ⚠️ No es posible: actualmente hay {asignados} preventistas asignados.
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                  <label style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", color: "#cbd5e1", fontSize: "12px", cursor: "pointer" }}>
+                    <input type="checkbox" checked={cambioTemporalPago} onChange={(e) => setCambioTemporalPago(e.target.checked)} />
+                    Cambio temporal (si lo marcás, indicá las fechas de vigencia arriba)
+                  </label>
+                </div>
+              )}
+
+              {tipoMovimientoPago === "bonificacion" && (
+                <div style={{ backgroundColor: "rgba(16,185,129,0.12)", border: "1px solid #10b981", borderRadius: "9px", padding: "10px 12px", color: "#6ee7b7", fontSize: "12px", fontWeight: "700", marginBottom: "14px" }}>
+                  🎁 Bonificado: se registrará con importe $0 y medio de pago “Bonificado”.
+                </div>
+              )}
+
+              {tipoMovimientoPago !== "bonificacion" && (
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>💰 Importe recibido
+                    <input type="number" min="0" step="any" onWheel={(e) => e.currentTarget.blur()} value={montoPago} onChange={(e) => setMontoPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", fontWeight: "800" }} />
+                  </label>
+                  <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Moneda
+                    <select value={monedaPago} onChange={(e) => setMonedaPago(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                      <option value="ARS">ARS</option><option value="USD">USD</option><option value="USDT">USDT</option><option value="BCH">BCH</option>
+                    </select>
+                  </label>
+                </div>
+              )}
+
+              {tipoMovimientoPago !== "bonificacion" && (
+                <div style={{ marginBottom: "12px" }}>
+                  <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Medio de pago</label>
+                  <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                    <option value="Transferencia CBU">🏦 Transferencia CBU</option>
+                    <option value="Transferencia CVU">📲 Transferencia CVU</option>
+                    <option value="Tarjeta de crédito">💳 Tarjeta de crédito</option>
+                    <option value="Tarjeta de débito">💳 Tarjeta de débito</option>
+                    <option value="BCH">🟢 Bitcoin Cash (BCH)</option>
+                    <option value="USDT / Crypto">🪙 USDT / Otra cripto</option>
+                    <option value="Efectivo">💵 Efectivo</option>
+                    <option value="Cheque / eCheq">📑 Cheque / eCheq</option>
+                  </select>
+                </div>
+              )}
+
+              <div style={{ marginBottom: "18px" }}>
+                <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Comprobante / Hash / Referencia (opcional)</label>
+                <input type="text" value={comprobantePago} onChange={(e) => setComprobantePago(e.target.value)} placeholder="Ej. TXID BCH / transferencia #..." style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+              </div>
+
+              <div style={{ fontSize: "11px", color: "#94a3b8", marginBottom: "14px", lineHeight: 1.45 }}>
+                🔒 En esta primera etapa el movimiento queda registrado en el historial. No cambia automáticamente el cupo ni bloquea/habilita cuentas.
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap" }}>
+                <button type="button" onClick={() => setMostrarModalPago(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer" }}>Cancelar</button>
+                {(() => {
+                  const actual = Number(empresasRegistros.find(e => e.nombre === empresaPago)?.cupo_preventistas ?? tarifasMap[empresaPago]?.cupo ?? 0);
+                  const cantidad = Math.abs(Number(cambioPreventistasPago) || 0);
+                  const nuevo = tipoMovimientoPago === "reduccion" ? Math.max(0, actual - cantidad) : actual + cantidad;
+                  const asignados = preventistas.filter(p => (p.empresa || "").toLowerCase() === (empresaPago || "").toLowerCase() && p.rol === "preventista").length;
+                  const reduccionInvalida = tipoMovimientoPago === "reduccion" && nuevo < asignados;
+                  const bloqueado = guardandoPago || reduccionInvalida;
+                  return <button type="submit" disabled={bloqueado} style={{ backgroundColor: bloqueado ? "#475569" : "#059669", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: bloqueado ? "not-allowed" : "pointer", fontWeight: "800", opacity: bloqueado ? 0.8 : 1 }}>{guardandoPago ? "⏳ Registrando..." : reduccionInvalida ? "⚠️ Cupo inválido" : "✓ Registrar movimiento"}</button>;
+                })()}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {mostrarPlanesAbonos && (
+        <PlanesAbonos onClose={() => setMostrarPlanesAbonos(false)} />
+      )}
+    </main>
+  );
+}

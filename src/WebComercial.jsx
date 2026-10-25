@@ -209,6 +209,33 @@ export default function WebComercial() {
 
       {/* HERO */}
       <main>
+        {/* SOLUCIONES: ACCESOS PRINCIPALES */}
+        <section id="soluciones" style={{ padding: "20px 18px 18px", backgroundColor: "#f8fafc", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
+            <div style={{ textAlign: "center", marginBottom: "14px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#2563eb" }}>NUESTRAS SOLUCIONES</div>
+              <h2 style={{ fontSize: "clamp(28px, 4vw, 40px)", color: "#0f172a", margin: "10px 0" }}>Elegí la herramienta para tu negocio</h2>
+              <p style={{ color: "#64748b", fontSize: "15px", lineHeight: 1.6, margin: 0 }}>Cinco propuestas para distintas formas de trabajar.</p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "12px" }}>
+              {[
+                { icono: "🛒", titulo: "RutaComercios Ventas", texto: "Preventistas, pedidos, visitas y supervisión comercial.", accion: "CONOCER VENTAS", enlace: "#ventas", color: "#2563eb" },
+                { icono: "🚚", titulo: "RutaComercios Repartos", texto: "Organizá entregas, asigná repartidores y seguí los recorridos.", accion: "CONOCER REPARTOS", enlace: "#repartos", color: "#0f766e" },
+                { icono: "📱", titulo: "VentaFácil", texto: "Registrá ventas, clientes y artículos. Gratis y sin registro.", accion: "USAR GRATIS", enlace: "https://ventafacil.rutacomercios.com/", color: "#16a34a" },
+                { icono: "👥", titulo: "VentaFácil Equipo", texto: "Una opción para equipos que necesitan compartir la gestión de ventas. En evaluación.", accion: "CONSULTAR", enlace: "#contacto", color: "#d97706" },
+                { icono: "🏪", titulo: "Simplex", texto: "Una opción simple para la actividad comercial.", accion: "CONSULTAR SIMPLEX", enlace: "#contacto", color: "#7c3aed" },
+              ].map((app) => (
+                <article key={app.titulo} style={{ display: "flex", flexDirection: "column", padding: "18px", borderRadius: "18px", border: "1px solid #e2e8f0", backgroundColor: "#ffffff", boxShadow: "0 8px 24px rgba(15,23,42,0.05)" }}>
+                  <div style={{ fontSize: "30px" }}>{app.icono}</div>
+                  <h3 style={{ fontSize: "18px", margin: "9px 0 6px", color: "#0f172a" }}>{app.titulo}</h3>
+                  <p style={{ color: "#475569", lineHeight: 1.6, fontSize: "14px", flexGrow: 1, margin: "0 0 12px" }}>{app.texto}</p>
+                  <a href={app.enlace} style={{ display: "block", textAlign: "center", padding: "13px 10px", borderRadius: "10px", backgroundColor: app.color, color: "#ffffff", textDecoration: "none", fontSize: "12px", fontWeight: 900 }}>{app.accion}</a>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
         <section
           style={{
             background:
@@ -220,12 +247,12 @@ export default function WebComercial() {
             style={{
               maxWidth: "1120px",
               margin: "0 auto",
-              padding: "70px 18px 58px",
+              padding: "22px 18px 40px",
               boxSizing: "border-box",
               display: "flex",
               flexWrap: "wrap",
               alignItems: "center",
-              gap: "44px",
+              gap: "24px",
             }}
           >
             <div style={{ flex: "1 1 460px", minWidth: "0" }}>
@@ -615,7 +642,7 @@ export default function WebComercial() {
         </section>
 
         {/* DOS ROLES */}
-        <section style={{ padding: "70px 18px", boxSizing: "border-box" }}>
+        <section id="ventas" style={{ padding: "70px 18px", boxSizing: "border-box" }}>
           <div style={{ maxWidth: "1050px", margin: "0 auto" }}>
             <div style={{ textAlign: "center", maxWidth: "690px", margin: "0 auto 34px" }}>
               <div
@@ -844,79 +871,18 @@ export default function WebComercial() {
             </div>
           </div>
         </section>
-        {/* PROXIMAMENTE */}
-<section
-  style={{
-    padding: "65px 18px",
-    backgroundColor: "#f8fafc",
-    boxSizing: "border-box",
-  }}
->
-  <div
-    style={{
-      maxWidth: "900px",
-      margin: "0 auto",
-      textAlign: "center",
-    }}
-  >
-    <div
-      style={{
-        display: "inline-block",
-        backgroundColor: "#dbeafe",
-        color: "#1d4ed8",
-        padding: "7px 12px",
-        borderRadius: "999px",
-        fontSize: "11px",
-        fontWeight: "900",
-        letterSpacing: "1px",
-        marginBottom: "14px",
-      }}
-    >
-      EN DESARROLLO
-    </div>
-
-    <h2
-      style={{
-        margin: "0 0 12px",
-        fontSize: "clamp(28px, 4vw, 40px)",
-        lineHeight: "1.1",
-        letterSpacing: "-1px",
-        color: "#0f172a",
-      }}
-    >
-      🚚 Próximamente: nuevos módulos
-    </h2>
-
-    <p
-      style={{
-        maxWidth: "700px",
-        margin: "0 auto",
-        color: "#64748b",
-        fontSize: "15px",
-        lineHeight: "1.7",
-      }}
-    >
-      <strong style={{ color: "#0f172a" }}>
-        RutaComercios sigue creciendo.
-      </strong>{" "}
-      Estamos desarrollando nuevas herramientas para ampliar la gestión de tu
-      operación, incluyendo un módulo de <strong>Entregas y Repartos</strong>,
-      con asignación de entregas, seguimiento de recorridos y estados como
-      entregado, no entregado, rechazado o reprogramado.
-    </p>
-
-    <div
-      style={{
-        marginTop: "20px",
-        fontSize: "17px",
-        fontWeight: "900",
-        color: "#2563eb",
-      }}
-    >
-      Y esto es solo el comienzo.
-    </div>
-  </div>
-</section>
+        {/* REPARTOS: MODALIDAD DISPONIBLE */}
+        <section id="repartos" style={{ padding: "65px 18px", backgroundColor: "#f0fdfa", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: "900px", margin: "0 auto", textAlign: "center" }}>
+            <div style={{ color: "#0f766e", fontSize: "12px", fontWeight: 900, letterSpacing: "1px" }}>RUTACOMERCIOS REPARTOS</div>
+            <h2 style={{ fontSize: "clamp(28px, 4vw, 40px)", color: "#0f172a", margin: "12px 0" }}>🚚 Tus entregas, organizadas y bajo control</h2>
+            <p style={{ maxWidth: "740px", margin: "0 auto 22px", color: "#475569", fontSize: "15px", lineHeight: 1.7 }}>
+              Cargá entregas, prepará pedidos, asigná repartidores y seguí el avance de cada recorrido.
+              RutaComercios Repartos también puede funcionar de forma independiente, sin contratar el módulo de Ventas.
+            </p>
+            <a href="#contacto" style={{ display: "inline-block", padding: "14px 22px", backgroundColor: "#0f766e", borderRadius: "11px", textDecoration: "none", color: "white", fontWeight: 900, fontSize: "14px" }}>SOLICITAR DEMO DE REPARTOS</a>
+          </div>
+        </section>
         {/* COMERCIAL */}
         <section
           id="contacto"
@@ -946,7 +912,7 @@ export default function WebComercial() {
                 letterSpacing: "1px",
               }}
             >
-              CONOCÉ RUTACOMERCIO
+              CONOCÉ RUTACOMERCIOS
             </div>
             <h2
               style={{
@@ -970,8 +936,8 @@ export default function WebComercial() {
                 lineHeight: "1.65",
               }}
             >
-              Contanos cuántos preventistas tenés y cómo trabajan hoy. Te
-              mostramos RutaComercios y evaluamos juntos la configuración que
+              Contanos qué necesitás: Ventas, Repartos o Simplex. Te
+              mostramos las opciones y evaluamos juntos la configuración que
               mejor se adapte a tu operación.
             </p>
 

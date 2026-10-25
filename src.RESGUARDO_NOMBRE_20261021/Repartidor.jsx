@@ -1,0 +1,1865 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "./supabase";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+function AjustarMapa({ puntos }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!puntos.length) return;
+    if (puntos.length === 1) {
+      map.setView(puntos[0], 15);
+    } else {
+      map.fitBounds(puntos, { padding: [28, 28] });
+    }
+  }, [map, puntos]);
+  return null;
+}
+
+const iconoNumero = (numero) => L.divIcon({
+  className: "",
+  html: `<div style="width:32px;height:32px;border-radius:50%;background:#2563eb;color:white;border:3px solid white;box-shadow:0 2px 7px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font:900 14px Arial">${numero}</div>`,
+  iconSize: [32,32],
+  iconAnchor: [16,16],
+  popupAnchor: [0,-16],
+});
+
+
+// Aviso de RutaChat: funciona con el chat plegado, sin alterar las entregas.
+// El primer control de mensajes establece la base y no reproduce mensajes antiguos.
+function useRutaChatAviso(empresaId, usuarioId) {
+  const audioRef = React.useRef(null);
+  const vistosRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!empresaId || !usuarioId) return;
+    let vigente = true;
+    let consultando = false;
+    vistosRef.current = null;
+
+    // Los navegadores móviles requieren un gesto del usuario para habilitar audio.
+    const habilitarAudio = () => {
+      try {
+        const AudioContexto = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContexto) return;
+        if (!audioRef.current) audioRef.current = new AudioContexto();
+        if (audioRef.current.state === "suspended") audioRef.current.resume().catch(() => {});
+      } catch (e) { console.warn("RutaChat: audio no disponible", e); }
+    };
+
+    const sonar = () => {
+      const contexto = audioRef.current;
+      if (!contexto || contexto.state !== "running") return;
+      try {
+        const ahora = contexto.currentTime;
+        // Tres avisos firmes, pensados para escucharse mejor en la calle.
+        // El volumen real nunca puede superar el límite del dispositivo.
+        [0, 0.46, 0.92].forEach((desfase, indice) => {
+          const inicio = ahora + desfase;
+          const oscilador = contexto.createOscillator();
+          const volumen = contexto.createGain();
+          oscilador.type = "square";
+          oscilador.frequency.setValueAtTime(indice === 1 ? 950 : 790, inicio);
+          oscilador.frequency.setValueAtTime(indice === 1 ? 1190 : 990, inicio + 0.18);
+          volumen.gain.setValueAtTime(0.0001, inicio);
+          volumen.gain.linearRampToValueAtTime(0.65, inicio + 0.012);
+          volumen.gain.setValueAtTime(0.65, inicio + 0.32);
+          volumen.gain.linearRampToValueAtTime(0.0001, inicio + 0.38);
+          oscilador.connect(volumen);
+          volumen.connect(contexto.destination);
+          oscilador.start(inicio);
+          oscilador.stop(inicio + 0.39);
+        });
+      } catch (e) { console.warn("RutaChat: no se pudo reproducir aviso", e); }
+    };
+
+    const revisar = async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const { data, error } = await supabase.from("mensajes_operativos")
+          .select("id")
+          .eq("empresa_id", empresaId)
+          .eq("destinatario_id", usuarioId)
+          .order("creado_at", { ascending: false })
+          .limit(100);
+        if (error || !vigente) return;
+        const actuales = new Set((data || []).map(m => m.id));
+        if (vistosRef.current !== null &&
+            [...actuales].some(id => !vistosRef.current.has(id))) sonar();
+        vistosRef.current = actuales;
+      } catch (e) { console.warn("RutaChat: consulta de avisos", e); }
+      finally { consultando = false; }
+    };
+
+    window.addEventListener("pointerdown", habilitarAudio, { capture: true });
+    window.addEventListener("keydown", habilitarAudio, { capture: true });
+    revisar();
+    const intervalo = window.setInterval(revisar, 8000);
+    return () => {
+      vigente = false;
+      window.clearInterval(intervalo);
+      window.removeEventListener("pointerdown", habilitarAudio, true);
+      window.removeEventListener("keydown", habilitarAudio, true);
+      vistosRef.current = null;
+      if (audioRef.current) {
+        audioRef.current.close().catch(() => {});
+        audioRef.current = null;
+      }
+    };
+  }, [empresaId, usuarioId]);
+}
+
+export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
+  const [perfil, setPerfil] = useState(perfilProp || null);
+  // Cola local de resoluciones. Nunca se borra hasta confirmación de Supabase.
+  const [colaOffline, setColaOffline] = useState([]);
+  const [sinConexion, setSinConexion] = useState(typeof navigator !== "undefined" && !navigator.onLine);
+  const [sincronizandoOffline, setSincronizandoOffline] = useState(false);
+  const [errorOffline, setErrorOffline] = useState("");
+  const colaRef = React.useRef([]);
+  const sincronizandoRef = React.useRef(false);
+  const claveColaOffline = () => {
+    const uid = sesionProp?.user?.id || perfil?.id;
+    const emp = perfil?.empresa_id;
+    return uid && emp ? `rutacomercios:entregas-pendientes:v1:${emp}:${uid}` : null;
+  };
+  const guardarColaOffline = (items) => {
+    const clave = claveColaOffline();
+    if (!clave) throw new Error("No se identificó la empresa o el repartidor.");
+    // Si el navegador no permite almacenamiento, NO se confirma la operación.
+    localStorage.setItem(clave, JSON.stringify(items));
+    colaRef.current = items;
+    setColaOffline(items);
+  };
+  const sincronizarPendientes = async () => {
+    if (sincronizandoRef.current || !navigator.onLine || !colaRef.current.length) return;
+    sincronizandoRef.current = true;
+    setSincronizandoOffline(true);
+    setErrorOffline("");
+    try {
+      while (colaRef.current.length && navigator.onLine) {
+        const op = colaRef.current[0];
+        const { data, error: err } = await supabase.rpc("repartos_resolver_entrega_segura", {
+          p_operacion_id: op.operacionId,
+          p_entrega_id: op.entregaId,
+          p_estado: op.estado,
+          p_motivo: op.motivo || null,
+          p_fecha_cliente: op.fecha,
+        });
+        if (err) throw err;
+        if (data !== "registrado" && data !== "ya_registrado")
+          throw new Error("Supabase no confirmó la operación.");
+        guardarColaOffline(colaRef.current.slice(1));
+      }
+      await cargar();
+    } catch (e) {
+      setErrorOffline(e?.message || "No se pudo sincronizar. Se conserva pendiente.");
+    } finally {
+      sincronizandoRef.current = false;
+      setSincronizandoOffline(false);
+    }
+  };
+  const registrarResolucion = async (entrega, estado, motivo = null) => {
+    if (colaRef.current.some(x => x.entregaId === entrega.id)) {
+      alert("Esta entrega ya está pendiente de sincronizar. No la registres otra vez.");
+      return;
+    }
+    if (!entrega.reparto_orden_id || !perfil?.empresa_id) {
+      alert("No se pudo identificar el reparto numerado.");
+      return;
+    }
+    const operacionId = crypto.randomUUID();
+    const op = { operacionId, entregaId: entrega.id, estado, motivo, fecha: new Date().toISOString() };
+    try {
+      guardarColaOffline([...colaRef.current, op]);
+    } catch (e) {
+      alert("No se pudo guardar en este dispositivo. No se registró la entrega: " + e.message);
+      return;
+    }
+    setActiva(null);
+    if (!navigator.onLine) {
+      alert("📴 Guardada en este dispositivo. PENDIENTE DE SINCRONIZAR. No borres los datos del navegador ni cambies de teléfono.");
+    } else {
+      await sincronizarPendientes();
+    }
+  };
+  useEffect(() => {
+    const clave = claveColaOffline();
+    if (!clave) return;
+    try {
+      const items = JSON.parse(localStorage.getItem(clave) || "[]");
+      const validos = Array.isArray(items) ? items : [];
+      colaRef.current = validos;
+      setColaOffline(validos);
+    } catch {
+      setErrorOffline("No se pudo leer la cola local. No borres los datos del navegador.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perfil?.empresa_id, sesionProp?.user?.id, perfil?.id]);
+  useEffect(() => {
+    const conectado = () => { setSinConexion(false); sincronizarPendientes(); };
+    const desconectado = () => setSinConexion(true);
+    window.addEventListener("online", conectado);
+    window.addEventListener("offline", desconectado);
+    const intervalo = setInterval(() => { if (navigator.onLine) sincronizarPendientes(); }, 12000);
+    return () => { window.removeEventListener("online", conectado); window.removeEventListener("offline", desconectado); clearInterval(intervalo); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perfil?.empresa_id, sesionProp?.user?.id, perfil?.id]);
+
+  const [entregas, setEntregas] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState("");
+  const [activa, setActiva] = useState(null);
+  // Historial independiente de RutaChat, asociado a cada entrega.
+  const [notasEntrega, setNotasEntrega] = useState([]);
+  const [textoNotaEntrega, setTextoNotaEntrega] = useState("");
+  const [cargandoNotas, setCargandoNotas] = useState(false);
+  const [guardandoNota, setGuardandoNota] = useState(false);
+  const [errorNotas, setErrorNotas] = useState("");
+
+  const [jornadaActiva, setJornadaActiva] = useState(false);
+  const [procesandoJornada, setProcesandoJornada] = useState(false);
+  const [modalSuspension, setModalSuspension] = useState(false);
+  const [motivoSuspension, setMotivoSuspension] = useState("vehiculo");
+  const [observacionesSuspension, setObservacionesSuspension] = useState("");
+  const [gpsEstado, setGpsEstado] = useState("Sin iniciar");
+  const [ordenRuta, setOrdenRuta] = useState([]);
+  const [rutaGuardada, setRutaGuardada] = useState(false);
+  const [guardandoRuta, setGuardandoRuta] = useState(false);
+  const [organizarAsignadasAbierto, setOrganizarAsignadasAbierto] = useState(false);
+  const [organizarRecibidasAbierto, setOrganizarRecibidasAbierto] = useState(false);
+  const [arrastrandoId, setArrastrandoId] = useState(null);
+  const arrastreTactil = React.useRef(null);
+  const [resumenSalida, setResumenSalida] = useState(null);
+  const [mapaAsignadasAbierto, setMapaAsignadasAbierto] = useState(false);
+  const [historialAbierto, setHistorialAbierto] = useState(false);
+  const [chatAbierto, setChatAbierto] = useState(false);
+  const [chatContactos, setChatContactos] = useState([]);
+  const [chatDestino, setChatDestino] = useState("");
+  const [chatMensajes, setChatMensajes] = useState([]);
+  const [chatTexto, setChatTexto] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [chatEnviando, setChatEnviando] = useState(false);
+  const fondoChatRef = React.useRef(null);
+  useRutaChatAviso(perfil?.empresa_id, sesionProp?.user?.id || perfil?.id);
+
+  const claveResumenSalida = () => {
+    const uid = sesionProp?.user?.id || perfil?.id || "repartidor";
+    const emp = perfil?.empresa_id || "empresa";
+    return `rutacomercio:salida-activa:${emp}:${uid}`;
+  };
+
+  const claveOrdenRuta = () => {
+    const uid = sesionProp?.user?.id || perfil?.id || "repartidor";
+    const emp = perfil?.empresa_id || "empresa";
+    const fecha = "orden-entregas";
+    return `rutacomercio:ruta:${emp}:${uid}:${fecha}`;
+  };
+
+  const cargar = async () => {
+    setCargando(true);
+    setError("");
+    try {
+      let p = perfilProp || perfil;
+      let session = sesionProp;
+
+      if (!session) {
+        session = (await supabase.auth.getSession()).data?.session;
+      }
+      if (!session?.user?.id) throw new Error("No hay sesión activa.");
+
+      if (!p?.empresa_id) {
+        const { data, error: ep } = await supabase
+          .from("perfiles")
+          .select("id,nombre,email,rol,empresa,empresa_id")
+          .eq("id", session.user.id)
+          .maybeSingle();
+        if (ep) throw ep;
+        if (!data?.empresa_id) throw new Error("El usuario no tiene empresa asignada.");
+        p = data;
+        setPerfil(data);
+      }
+
+      const { data: rows, error: ee } = await supabase
+        .from("repartos_entregas")
+        .select("*")
+        .eq("empresa_id", p.empresa_id)
+        .eq("repartidor_id", session.user.id)
+        .in("estado", ["asignado", "recibido", "en_reparto", "reintentar", "entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"])
+        .order("fecha_programada", { ascending: true });
+
+      if (ee) throw ee;
+
+      const pedidoIds = [...new Set((rows || []).map(x => x.pedido_id).filter(Boolean))];
+      const entregaIds = (rows || []).map(x => x.id).filter(Boolean);
+
+      let pedidos = {};
+      if (pedidoIds.length) {
+        const { data: pd, error: pe } = await supabase
+          .from("pedidos")
+          .select("id,numero_pedido,comercio_id,comercio_nombre,total,notas")
+          .in("id", pedidoIds);
+        if (pe) throw pe;
+        (pd || []).forEach(x => pedidos[String(x.id)] = x);
+      }
+
+      const comercioIds = [...new Set(Object.values(pedidos).map(x => x.comercio_id).filter(Boolean))];
+      let comercios = {};
+      if (comercioIds.length) {
+        const { data: cd, error: ce } = await supabase
+          .from("comercios")
+          .select("id,direccion,localidad,provincia,telefono,whatsapp,contacto,ubicacion_exacta_latitud,ubicacion_exacta_longitud")
+          .in("id", comercioIds);
+        if (ce) throw ce;
+        (cd || []).forEach(x => comercios[String(x.id)] = x);
+      }
+
+      let items = {};
+      if (entregaIds.length) {
+        const { data: idata, error: ie } = await supabase
+          .from("repartos_entrega_items")
+          .select("entrega_id,codigo,descripcion,color,talle,cantidad")
+          .in("entrega_id", entregaIds);
+        if (ie) throw ie;
+        (idata || []).forEach(x => {
+          const k = String(x.entrega_id);
+          if (!items[k]) items[k] = [];
+          items[k].push(x);
+        });
+      }
+
+      const ordenIds = [...new Set((rows || []).map(e => e.reparto_orden_id).filter(Boolean))];
+      let numerosOrden = {};
+      if (ordenIds.length) {
+        const [ordenesRes, prefijoRes] = await Promise.all([
+          supabase.from("repartos_ordenes").select("id,numero,estado,repartidor_id").eq("empresa_id", p.empresa_id).in("id", ordenIds),
+          supabase.from("repartos_prefijos_empresa").select("codigo").eq("empresa_id", p.empresa_id).maybeSingle(),
+        ]);
+        if (ordenesRes.error) throw ordenesRes.error;
+        if (prefijoRes.error) throw prefijoRes.error;
+        (ordenesRes.data || []).forEach(o => { numerosOrden[o.id] = {
+          numero: `REP${String(prefijoRes.data?.codigo ?? "???").padStart(3, "0")}-${String(o.numero).padStart(6, "0")}`,
+          estado: o.estado, repartidor_id: o.repartidor_id
+        }; });
+      }
+
+      const consolidadas = (rows || []).map(e => {
+        const esManual = !e.pedido_id;
+        const ped = pedidos[String(e.pedido_id)] || {};
+        const com = comercios[String(ped.comercio_id)] || {};
+        const direccionManual = [e.direccion, e.localidad, e.partido, e.provincia].filter(Boolean).join(", ");
+        return {
+          ...e,
+          ordenReparto: numerosOrden[e.reparto_orden_id] || null,
+          numeroVisible: esManual ? "" : String(ped.numero_pedido || "").padStart(6, "0"),
+          cliente: esManual ? (e.destinatario || "Destinatario") : (ped.comercio_nombre || `Comercio #${ped.comercio_id || ""}`),
+          total: esManual ? null : Number(ped.total || 0),
+          direccion: esManual ? direccionManual : ([com.direccion, com.localidad, com.provincia].filter(Boolean).join(", ") || e.direccion || ""),
+          latitud: esManual ? (e.latitud == null ? null : Number(e.latitud)) : (com.ubicacion_exacta_latitud == null ? (e.latitud == null ? null : Number(e.latitud)) : Number(com.ubicacion_exacta_latitud)),
+          longitud: esManual ? (e.longitud == null ? null : Number(e.longitud)) : (com.ubicacion_exacta_longitud == null ? (e.longitud == null ? null : Number(e.longitud)) : Number(com.ubicacion_exacta_longitud)),
+          telefono: esManual ? (e.telefono || "") : (com.telefono || e.telefono || ""),
+          whatsapp: esManual ? "" : (com.whatsapp || ""),
+          contacto: esManual ? "" : (com.contacto || ""),
+          items: items[String(e.id)] || [],
+        };
+      });
+
+      setEntregas(consolidadas);
+      if (activa) {
+        setActiva(consolidadas.find(x => x.id === activa.id) || null);
+      }
+    } catch (e) {
+      console.error(e);
+      setError(e?.message || "No se pudieron cargar las entregas.");
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Destinos automáticos: Realtime avisa de cambios y una consulta cada 60 s
+  // sirve de respaldo. Solo funciona con la pantalla visible y sesión activa.
+  // La consulta sigue limitada al repartidor y empresa dentro de cargar().
+  const cargarActualRef = React.useRef(cargar);
+  cargarActualRef.current = cargar;
+  const actualizacionEnCursoRef = React.useRef(false);
+  const ultimaActualizacionRef = React.useRef(0);
+  useEffect(() => {
+    const empresaId = perfil?.empresa_id || perfilProp?.empresa_id;
+    const repartidorId = sesionProp?.user?.id || perfil?.id;
+    if (!empresaId || !repartidorId) return;
+    let vigente = true;
+    let espera = null;
+    const actualizar = async (forzar = false) => {
+      if (!vigente || document.visibilityState !== "visible" || !navigator.onLine) return;
+      if (actualizacionEnCursoRef.current) return;
+      if (!forzar && Date.now() - ultimaActualizacionRef.current < 2500) return;
+      actualizacionEnCursoRef.current = true;
+      ultimaActualizacionRef.current = Date.now();
+      try { await cargarActualRef.current(); }
+      finally { actualizacionEnCursoRef.current = false; }
+    };
+    const programar = () => {
+      if (espera) clearTimeout(espera);
+      espera = setTimeout(() => { espera = null; actualizar(); }, 500);
+    };
+    // Filtramos por empresa en el servidor y por chofer en el cliente.
+    // Para cambios de asignación, también detectamos la asignación anterior.
+    const canal = supabase.channel(`repartidor-destinos-${empresaId}-${repartidorId}`)
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "repartos_entregas",
+        filter: `empresa_id=eq.${empresaId}`
+      }, (evento) => {
+        const nuevo = evento.new || {};
+        const anterior = evento.old || {};
+        if (String(nuevo.repartidor_id || "") === String(repartidorId) ||
+            String(anterior.repartidor_id || "") === String(repartidorId)) programar();
+      })
+      .subscribe();
+    const respaldo = window.setInterval(() => actualizar(), 60000);
+    const alVolver = () => { if (document.visibilityState === "visible") actualizar(true); };
+    const alConectar = () => actualizar(true);
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("online", alConectar);
+    return () => {
+      vigente = false;
+      if (espera) clearTimeout(espera);
+      clearInterval(respaldo);
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("online", alConectar);
+      supabase.removeChannel(canal);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perfil?.empresa_id, perfilProp?.empresa_id, sesionProp?.user?.id, perfil?.id]);
+
+  // Restaurar el resumen cuando ya conocemos empresa y usuario.
+  useEffect(() => {
+    if (!perfil?.empresa_id || !(sesionProp?.user?.id || perfil?.id)) return;
+    try {
+      const raw = localStorage.getItem(claveResumenSalida());
+      setResumenSalida(raw ? JSON.parse(raw) : null);
+    } catch { setResumenSalida(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perfil?.empresa_id, sesionProp?.user?.id, perfil?.id]);
+
+  const asignadas = useMemo(() => entregas.filter(e => e.estado === "asignado"), [entregas]);
+  const recibidas = useMemo(() => entregas.filter(e => e.estado === "recibido"), [entregas]);
+  const entregadas = useMemo(() => entregas.filter(e => e.estado === "entregado"), [entregas]);
+  const enReparto = useMemo(() => entregas.filter(e => e.estado === "en_reparto"), [entregas]);
+  const paraVolver = useMemo(() => entregas.filter(e => e.estado === "reintentar"), [entregas]);
+
+  // Evitar escrituras repetidas del GPS: una actualización normal cada 30 segundos.
+  // Las acciones importantes pueden solicitar una actualización inmediata.
+  const ultimaUbicacionGuardadaRef = React.useRef(0);
+  const guardandoUbicacionRef = React.useRef(false);
+
+  const guardarUbicacion = async (position, forzar = false) => {
+    if (!position?.coords || guardandoUbicacionRef.current) return;
+    if (!forzar && Date.now() - ultimaUbicacionGuardadaRef.current < 30000) return;
+    guardandoUbicacionRef.current = true;
+    try {
+    const userId = sesionProp?.user?.id || (await supabase.auth.getSession()).data?.session?.user?.id;
+    if (!userId) return;
+
+    const { latitude, longitude } = position.coords;
+    const ahora = new Date().toISOString();
+
+    const { error } = await supabase
+      .from("perfiles")
+      .update({
+        latitud: latitude,
+        longitud: longitude,
+        ultima_posicion_at: ahora,
+        ultima_conexion: ahora,
+        activo_hoy: true,
+      })
+      .eq("id", userId);
+
+    if (error) {
+      console.error("Error actualizando GPS repartidor:", error);
+      setGpsEstado("Error GPS");
+    } else {
+      ultimaUbicacionGuardadaRef.current = Date.now();
+      setGpsEstado("GPS activo");
+    }
+    } finally {
+      guardandoUbicacionRef.current = false;
+    }
+  };
+
+  const pedirUbicacionAhora = (forzar = true) => {
+    if (!navigator.geolocation) {
+      setGpsEstado("GPS no disponible");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => guardarUbicacion(position, forzar),
+      (e) => {
+        console.warn("GPS repartidor:", e);
+        setGpsEstado("Sin permiso GPS");
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+    );
+  };
+
+  // La base de datos manda: una salida guardada en el teléfono no puede
+  // reabrir un reparto FINALIZADO o SUSPENDIDO.
+  useEffect(() => {
+    if (cargando || error) return;
+    const idsGuardados = resumenSalida?.idsSalida || [];
+    const entregasSalida = entregas.filter(e => idsGuardados.includes(e.id));
+    const ordenesSalida = [...new Set(entregasSalida.map(e => e.reparto_orden_id).filter(Boolean))];
+    const salidaCerrada = idsGuardados.length > 0 &&
+      ordenesSalida.length === 1 &&
+      entregasSalida.some(e => ["finalizado", "suspendido"].includes(e.ordenReparto?.estado));
+    if (salidaCerrada) {
+      // No borrar nunca las operaciones offline aún no sincronizadas.
+      if (colaRef.current.length > 0) {
+        setErrorOffline("Hay operaciones locales pendientes de revisar. No borres los datos del navegador.");
+      }
+      setResumenSalida(null);
+      try { localStorage.removeItem(claveResumenSalida()); } catch {}
+      setJornadaActiva(false);
+      setModalSuspension(false);
+      return;
+    }
+    const hayEnReparto = entregas.some(e =>
+      e.ordenReparto?.estado === "en_reparto" &&
+      ["en_reparto", "reintentar"].includes(e.estado));
+    const salidaVigente = entregasSalida.some(e => e.ordenReparto?.estado === "en_reparto");
+    setJornadaActiva(hayEnReparto || salidaVigente);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entregas, resumenSalida, cargando, error]);
+
+  useEffect(() => {
+    const idsRecibidas = entregas.filter(e => ["asignado", "recibido", "en_reparto", "reintentar"].includes(e.estado)).map(e => e.id);
+    if (!idsRecibidas.length) {
+      setOrdenRuta([]);
+      return;
+    }
+
+    let guardado = [];
+    try {
+      guardado = JSON.parse(localStorage.getItem(claveOrdenRuta()) || "[]");
+      if (!Array.isArray(guardado)) guardado = [];
+    } catch {
+      guardado = [];
+    }
+
+    setOrdenRuta(prev => {
+      const base = prev.length ? prev : guardado;
+      const conservadas = base.filter(id => idsRecibidas.includes(id));
+      const nuevas = idsRecibidas.filter(id => !conservadas.includes(id));
+      return [...conservadas, ...nuevas];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entregas]);
+
+  const guardarOrdenRuta = async () => {
+    if (guardandoRuta) return;
+    setGuardandoRuta(true);
+    setRutaGuardada(false);
+    try {
+      const session = sesionProp || (await supabase.auth.getSession()).data?.session;
+      const usuarioId = session?.user?.id;
+      const empresaId = perfil?.empresa_id;
+      if (!usuarioId || !empresaId) throw new Error("No se pudo identificar al repartidor y su empresa.");
+
+      // Si hay entregas recibidas, informar la ruta que efectivamente podrá salir.
+      // Antes de recibirlas, informar la planificación de las asignadas.
+      const destinos = recibidas.length > 0 ? recibidas : asignadas;
+      const idsValidos = new Set(destinos.map(e => e.id));
+      const idsRuta = ordenRuta.filter(id => idsValidos.has(id));
+      if (!idsRuta.length) throw new Error("No hay entregas para guardar en esta ruta.");
+
+      const { error: errorRuta } = await supabase
+        .from("repartos_rutas_planificadas")
+        .upsert({
+          empresa_id: empresaId,
+          repartidor_id: usuarioId,
+          entrega_ids: idsRuta,
+          actualizado_at: new Date().toISOString(),
+        }, { onConflict: "empresa_id,repartidor_id" });
+      if (errorRuta) throw errorRuta;
+
+      try { localStorage.setItem(claveOrdenRuta(), JSON.stringify(ordenRuta)); }
+      catch (e) { console.warn("Ruta enviada, pero no se pudo guardar copia local:", e); }
+      setRutaGuardada(true);
+      setOrganizarAsignadasAbierto(false);
+      setOrganizarRecibidasAbierto(false);
+      alert("✅ Ruta guardada y enviada. El Supervisor podrá consultarla cuando se habilite su pantalla de rutas.");
+    } catch (e) {
+      console.error("Error al enviar ruta:", e);
+      alert("❌ No se pudo enviar la ruta al Supervisor. " + (e?.message || "Revisá la conexión e intentá de nuevo."));
+    } finally {
+      setGuardandoRuta(false);
+    }
+  };
+
+  const moverEnRuta = (origenId, destinoId) => {
+    setRutaGuardada(false);
+    if (!origenId || !destinoId || origenId === destinoId) return;
+    setOrdenRuta(prev => {
+      const nuevo = [...prev];
+      const desde = nuevo.indexOf(origenId);
+      const hasta = nuevo.indexOf(destinoId);
+      if (desde < 0 || hasta < 0) return prev;
+      const [movido] = nuevo.splice(desde, 1);
+      nuevo.splice(hasta, 0, movido);
+      return nuevo;
+    });
+  };
+
+  // Arrastre táctil desde el símbolo ☰; el arrastre de mouse sigue siendo nativo.
+  const iniciarArrastreTactil = (ev, id) => {
+    if (ev.pointerType === "mouse") return;
+    ev.preventDefault();
+    arrastreTactil.current = { id, pointerId: ev.pointerId };
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    setArrastrandoId(id);
+  };
+
+  const terminarArrastreTactil = (ev) => {
+    const origen = arrastreTactil.current;
+    if (!origen || origen.pointerId !== ev.pointerId) return;
+    const debajo = document.elementFromPoint(ev.clientX, ev.clientY);
+    const destino = debajo?.closest('[data-ruta-entrega]')?.getAttribute('data-ruta-entrega');
+    if (destino) moverEnRuta(origen.id, destino);
+    arrastreTactil.current = null;
+    setArrastrandoId(null);
+  };
+
+  const cancelarArrastreTactil = () => {
+    arrastreTactil.current = null;
+    setArrastrandoId(null);
+  };
+
+  const recibidasOrdenadas = ordenRuta
+    .map(id => recibidas.find(e => e.id === id))
+    .filter(Boolean);
+  const asignadasOrdenadas = ordenRuta
+    .map(id => asignadas.find(e => e.id === id))
+    .filter(Boolean);
+
+  const paradasConCoordenadas = recibidasOrdenadas
+    .map((e, idx) => ({ ...e, numeroParada: idx + 1 }))
+    .filter(e => Number.isFinite(e.latitud) && Number.isFinite(e.longitud));
+
+  const puntosRuta = paradasConCoordenadas.map(e => [e.latitud, e.longitud]);
+
+  const pendientesRuta = ordenRuta
+    .map(id => entregas.find(e => e.id === id))
+    .filter(e => e && ["en_reparto", "reintentar"].includes(e.estado));
+
+  const proximoDestino =
+    pendientesRuta.find(e => e.estado === "en_reparto") ||
+    pendientesRuta.find(e => e.estado === "reintentar") ||
+    null;
+
+  const pendientesOrdenadas = ordenRuta
+    .map(id => entregas.find(e => e.id === id))
+    .filter(e => e && ["en_reparto", "reintentar"].includes(e.estado));
+
+  const otrasPendientes = entregas.filter(
+    e => ["en_reparto", "reintentar"].includes(e.estado) && !ordenRuta.includes(e.id)
+  );
+
+  // Vista previa: solo destinos asignados; no cambia estados ni organiza automáticamente la ruta.
+  const destinosAsignados = asignadasOrdenadas
+    .map((e, idx) => ({ ...e, numeroParada: idx + 1 }))
+    .filter(e => Number.isFinite(e.latitud) && Number.isFinite(e.longitud));
+  const puntosAsignados = destinosAsignados.map(e => [e.latitud, e.longitud]);
+
+  const asignadasRecibidas = entregas.filter(e => ["asignado", "recibido"].includes(e.estado));
+
+  const finalizadas = entregas
+    .filter(e => ["entregado", "no_entregado"].includes(e.estado))
+    .sort((a, b) => {
+      const ta = new Date(a.entregado_at || a.actualizado_at || 0).getTime();
+      const tb = new Date(b.entregado_at || b.actualizado_at || 0).getTime();
+      return ta - tb;
+    });
+
+  // Reparto actual: agrupa las entregas de la orden numerada que está en curso.
+  // El historial queda separado, incluso cuando una entrega antigua comparte domicilio.
+  // Una orden cerrada no es "actual" aunque conserve el estado en_reparto
+  // en una base de datos anterior. Al finalizar la jornada, las entregas
+  // completadas pasan al historial sin perder su número ni su fecha.
+  const ordenActualId = (() => {
+    const abiertas = entregas.filter(e => e.reparto_orden_id &&
+      !["finalizado", "suspendido"].includes(e.ordenReparto?.estado) &&
+      ["asignado", "recibido", "en_reparto", "reintentar"].includes(e.estado));
+    const enCamino = abiertas.find(e => e.ordenReparto?.estado === "en_reparto" &&
+      ["en_reparto", "reintentar"].includes(e.estado));
+    if (enCamino) return enCamino.reparto_orden_id;
+    // Mientras la salida sigue abierta, sus entregas ya realizadas también
+    // pertenecen al reparto actual, incluso si no quedan paradas pendientes.
+    if (jornadaActiva) {
+      const deSalida = entregas.find(e => e.reparto_orden_id &&
+        !["finalizado", "suspendido"].includes(e.ordenReparto?.estado) &&
+        (resumenSalida?.idsSalida || []).includes(e.id));
+      if (deSalida) return deSalida.reparto_orden_id;
+    }
+    return abiertas[0]?.reparto_orden_id || null;
+  })();
+  const esEntregaActual = e => ordenActualId
+    ? e.reparto_orden_id === ordenActualId &&
+      !["finalizado", "suspendido"].includes(e.ordenReparto?.estado)
+    : !e.reparto_orden_id && !["entregado", "no_entregado", "devolucion_informada"].includes(e.estado);
+  const entregasActualesPantalla = [...pendientesOrdenadas, ...otrasPendientes,
+    ...asignadasRecibidas, ...finalizadas].filter(esEntregaActual).sort((a, b) => {
+      // Durante la carga, lo todavía ASIGNADO va primero y lo RECIBIDO al final.
+      if (jornadaActiva) return 0;
+      const prioridad = e => e.estado === "asignado" ? 0 : e.estado === "recibido" ? 2 : 1;
+      return prioridad(a) - prioridad(b);
+    });
+  const entregasAnterioresPantalla = entregas.filter(e =>
+    !esEntregaActual(e) && ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado)
+  ).sort((a,b) => new Date(b.entregado_at || b.actualizado_at || b.creado_at || 0).getTime() -
+                  new Date(a.entregado_at || a.actualizado_at || a.creado_at || 0).getTime());
+  // Aviso visible aun cuando el recorrido ya termino. Solo entregas
+  // no entregadas que todavia no fueron informadas al deposito.
+  const devolucionesPorInformar = entregas.filter(e => e.estado === "no_entregado")
+    .sort((a,b) => new Date(b.actualizado_at || 0).getTime() - new Date(a.actualizado_at || 0).getTime());
+  const fechaEntregaHistorial = e => {
+    const valor = e.entregado_at || e.actualizado_at || e.creado_at;
+    if (!valor) return "Fecha no registrada";
+    const fecha = new Date(valor);
+    return Number.isNaN(fecha.getTime()) ? "Fecha no registrada" : fecha.toLocaleDateString("es-AR", {day:"2-digit",month:"2-digit",year:"numeric"});
+  };
+
+  const mapaDuranteRuta = [...pendientesOrdenadas, ...otrasPendientes]
+    .map((e, idx) => ({ ...e, numeroParada: idx + 1 }))
+    .filter(e => Number.isFinite(e.latitud) && Number.isFinite(e.longitud));
+
+  const puntosDuranteRuta = mapaDuranteRuta.map(e => [e.latitud, e.longitud]);
+
+  useEffect(() => {
+    if (!jornadaActiva || !navigator.geolocation) return;
+
+    setGpsEstado("Activando GPS...");
+    pedirUbicacionAhora();
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => guardarUbicacion(position, false),
+      (e) => {
+        console.warn("GPS continuo repartidor:", e);
+        setGpsEstado("Sin señal GPS");
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+    );
+
+    const refuerzo = setInterval(() => {
+      if (document.visibilityState === "visible") pedirUbicacionAhora(false);
+    }, 30000);
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      clearInterval(refuerzo);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jornadaActiva]);
+
+  const comenzarJornada = async () => {
+    if (procesandoJornada) return;
+    if (recibidas.length === 0) {
+      alert("⚠️ Primero tenés que marcar como RECIBIDA al menos una entrega cargada en el vehículo.");
+      return;
+    }
+
+    const ok = window.confirm(
+      `¿Comenzar el reparto?\n\nEntrarán en la ruta ${recibidas.length} entrega/s RECIBIDA/S.` +
+      (asignadas.length ? `\n\n⚠️ Quedarán ${asignadas.length} entrega/s todavía ASIGNADA/S fuera de esta salida.` : "")
+    );
+    if (!ok) return;
+
+    setProcesandoJornada(true);
+    try {
+      const ids = recibidasOrdenadas.map(e => e.id);
+      if (!ids.length) throw new Error("No hay entregas recibidas para iniciar.");
+      const { data: actuales, error: errorActuales } = await supabase.from("repartos_entregas")
+        .select("id,reparto_orden_id,estado,repartidor_id,salida_at")
+        .eq("empresa_id", perfil.empresa_id).in("id", ids);
+      if (errorActuales) throw errorActuales;
+      const usuarioId = sesionProp?.user?.id || perfil?.id;
+      if (actuales?.length !== ids.length || actuales.some(e => e.estado !== "recibido" ||
+          !e.reparto_orden_id || String(e.repartidor_id) !== String(usuarioId) || e.salida_at))
+        throw new Error("Hay entregas sin reparto numerado, sin recibir o que cambiaron de asignación. Actualizá la pantalla.");
+      const ordenesIds = [...new Set(actuales.map(e => e.reparto_orden_id))];
+      if (ordenesIds.length !== 1) throw new Error("Cada salida debe corresponder a un solo número de reparto.");
+      const { data: orden, error: errorOrden } = await supabase.from("repartos_ordenes")
+        .select("id,estado,repartidor_id,salida_at")
+        .eq("empresa_id", perfil.empresa_id).eq("id", ordenesIds[0]).maybeSingle();
+      if (errorOrden) throw errorOrden;
+      if (!orden || String(orden.repartidor_id) !== String(usuarioId) || orden.estado !== "preparado" || orden.salida_at)
+        throw new Error("El reparto no está autorizado para esta salida.");
+      pedirUbicacionAhora();
+      const ahora = new Date().toISOString();
+
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({
+          estado: "en_reparto",
+          salida_at: ahora,
+          actualizado_at: ahora,
+        })
+        .in("id", ids)
+        .eq("empresa_id", perfil.empresa_id)
+        .eq("reparto_orden_id", ordenesIds[0])
+        .eq("repartidor_id", usuarioId)
+        .eq("estado", "recibido");
+
+      if (error) throw error;
+
+      const resumen = {
+        asignadasTotal: asignadas.length + recibidas.length,
+        recibidasTotal: recibidas.length,
+        idsSalida: ids,
+        iniciadaAt: ahora,
+      };
+      setResumenSalida(resumen);
+      try { localStorage.setItem(claveResumenSalida(), JSON.stringify(resumen)); } catch {}
+
+      setJornadaActiva(true);
+      await cargar();
+    } catch (e) {
+      alert("❌ No se pudo comenzar el reparto: " + (e?.message || "error desconocido"));
+    } finally {
+      setProcesandoJornada(false);
+    }
+  };
+
+  // El cierre normal lo realiza Supabase al registrar la ultima entrega.
+  // La unica accion manual es suspender una salida que no pudo completarse.
+  const suspenderJornada = async () => {
+    if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
+    if (procesandoJornada || !observacionesSuspension.trim() || observacionesSuspension.trim().length < 3) return;
+    setProcesandoJornada(true);
+    try {
+      const ids = resumenSalida?.idsSalida || [];
+      const ordenes = [...new Set(entregas.filter(e => ids.includes(e.id)).map(e => e.reparto_orden_id).filter(Boolean))];
+      if (ordenes.length !== 1) throw new Error("No se pudo identificar un unico reparto. Actualiza la pantalla.");
+      const { data, error: err } = await supabase.rpc("repartos_suspender", {
+        p_orden_id: ordenes[0], p_motivo: motivoSuspension,
+        p_observaciones: observacionesSuspension.trim()
+      });
+      if (err) throw err;
+      if (data === "ya_finalizado") alert("Este reparto ya finalizo automaticamente.");
+      else alert(data === "ya_suspendido" ? "Este reparto ya estaba suspendido." : "Reparto suspendido. El Supervisor recibira el aviso.");
+      setModalSuspension(false);
+      setResumenSalida(null);
+      try { localStorage.removeItem(claveResumenSalida()); } catch {}
+      setJornadaActiva(false);
+      setActiva(null);
+      await cargar();
+    } catch (e) { alert("No se pudo suspender: " + (e?.message || "Error desconocido")); }
+    finally { setProcesandoJornada(false); }
+  };
+
+  // Releer el estado real: el trigger puede cerrar el reparto en la ultima entrega.
+  useEffect(() => {
+    if (!jornadaActiva || !perfil?.empresa_id || !resumenSalida?.idsSalida?.length) return;
+    let vigente = true;
+    const verificar = async () => {
+      const ids = resumenSalida.idsSalida;
+      const ordenId = entregas.find(e => ids.includes(e.id) && e.reparto_orden_id)?.reparto_orden_id;
+      if (!ordenId) return;
+      const { data, error: err } = await supabase.from("repartos_ordenes")
+        .select("estado,finalizado_at").eq("empresa_id",perfil.empresa_id).eq("id",ordenId).maybeSingle();
+      if (err || !vigente || !["finalizado","suspendido"].includes(data?.estado)) return;
+      setResumenSalida(null);
+      try { localStorage.removeItem(claveResumenSalida()); } catch {}
+      setJornadaActiva(false);
+      setModalSuspension(false);
+      setGpsEstado(data.estado === "finalizado" ? "Reparto completado" : "Reparto suspendido");
+      await cargar();
+      if (data.estado === "finalizado") alert("Recorrido completado. El reparto se cerro automaticamente y se aviso al Supervisor.");
+    };
+    verificar();
+    const intervalo = window.setInterval(verificar, 8000);
+    return () => { vigente = false; window.clearInterval(intervalo); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jornadaActiva, perfil?.empresa_id, resumenSalida?.idsSalida?.join("|")]);
+
+  const marcarRecibida = async (entrega) => {
+    if (!entrega.reparto_orden_id || !entrega.ordenReparto) {
+      alert("⚠️ El Supervisor todavía no incorporó esta entrega a un reparto numerado."); return;
+    }
+    if (jornadaActiva) {
+      alert("⚠️ El reparto ya comenzó. La carga se confirma antes de salir.");
+      return;
+    }
+    const ok = window.confirm(
+      `¿Confirmar que recibiste/cargaste ${tituloEntrega(entrega)}?\n\n${entrega.cliente}`
+    );
+    if (!ok) return;
+
+    try {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({ estado: "recibido", actualizado_at: ahora })
+        .eq("id", entrega.id).eq("empresa_id", perfil.empresa_id).eq("reparto_orden_id", entrega.reparto_orden_id);
+      if (error) throw error;
+      setActiva(null);
+      await cargar();
+    } catch (e) {
+      alert("❌ No se pudo confirmar la recepción: " + (e?.message || "error desconocido"));
+    }
+  };
+
+  const devolverAAsignada = async (entrega) => {
+    if (jornadaActiva) {
+      alert("⚠️ El reparto ya comenzó. Ya no se puede devolver la carga a ASIGNADA.");
+      return;
+    }
+    const ok = window.confirm(
+      `¿Quitar esta entrega de RECIBIDAS y devolverla a ASIGNADAS?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}`
+    );
+    if (!ok) return;
+
+    try {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({ estado: "asignado", actualizado_at: ahora })
+        .eq("id", entrega.id);
+      if (error) throw error;
+      setActiva(null);
+      await cargar();
+    } catch (e) {
+      alert("❌ No se pudo devolver a ASIGNADAS: " + (e?.message || "error desconocido"));
+    }
+  };
+
+  const navegarEntrega = (entrega) => {
+    pedirUbicacionAhora();
+    const destino =
+      Number.isFinite(entrega.latitud) && Number.isFinite(entrega.longitud)
+        ? `${entrega.latitud},${entrega.longitud}`
+        : entrega.direccion;
+
+    if (!destino) {
+      alert("⚠️ Esta entrega no tiene ubicación ni dirección disponible.");
+      return;
+    }
+
+    window.open(
+      `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destino)}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  };
+
+  const marcarEntregada = async (entrega) => {
+    if (colaRef.current.some(x => x.entregaId === entrega.id)) {
+      alert("Esta entrega está PENDIENTE DE SINCRONIZAR."); return;
+    }
+    const ok = window.confirm(`¿Confirmar ENTREGA REALIZADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s`);
+    if (!ok) return;
+    pedirUbicacionAhora();
+    await registrarResolucion(entrega, "entregado");
+  };
+
+  const marcarNoEntregada = async (entrega) => {
+    if (colaRef.current.some(x => x.entregaId === entrega.id)) {
+      alert("Esta entrega está PENDIENTE DE SINCRONIZAR."); return;
+    }
+    const opciones = "Motivo de NO ENTREGA:\n\n1 - Comercio cerrado\n2 - Cliente rechazó la mercadería\n3 - Dirección incorrecta / no encontrada\n4 - Problema con documentación\n5 - Otro\n\nEscribí 1, 2, 3, 4 o 5.";
+    const eleccion = window.prompt(opciones);
+    if (eleccion === null) return;
+    const motivos = { "1":"Comercio cerrado", "2":"Cliente rechazó la mercadería", "3":"Dirección incorrecta / no encontrada", "4":"Problema con documentación" };
+    let motivo = motivos[String(eleccion).trim()] || "";
+    if (String(eleccion).trim() === "5") {
+      const otro = window.prompt("Escribí el motivo de la no entrega:");
+      if (otro === null) return;
+      motivo = otro.trim();
+    }
+    if (!motivo) { alert("⚠️ Elegí un motivo válido."); return; }
+    const ok = window.confirm(`¿Marcar como NO ENTREGADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\nMotivo: ${motivo}`);
+    if (!ok) return;
+    pedirUbicacionAhora();
+    await registrarResolucion(entrega, "no_entregado", motivo);
+  };
+
+  const informarDevolucion = async (entrega) => {
+    if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
+    const ok = window.confirm(
+      `¿Confirmar que devolvés al depósito la mercadería NO ENTREGADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s\n\nDepósito deberá confirmar luego la recepción física.`
+    );
+    if (!ok) return;
+
+    try {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({
+          estado: "devolucion_informada",
+          actualizado_at: ahora,
+        })
+        .eq("id", entrega.id);
+
+      if (error) throw error;
+      setActiva(null);
+      await cargar();
+      alert("📦 Devolución informada. Queda pendiente de recepción por Depósito.");
+    } catch (e) {
+      alert("❌ No se pudo informar la devolución: " + (e?.message || "error desconocido"));
+    }
+  };
+
+  const pasarMasTarde = async (entrega) => {
+    if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
+    const nota = window.prompt(
+      "🔄 ¿Querés dejar una indicación para reintentar la entrega?\n\nEj.: volver después de las 16, pasar al regreso, dueño vuelve en una hora.\n\nPodés dejarlo vacío."
+    );
+    if (nota === null) return;
+
+    try {
+      pedirUbicacionAhora();
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({
+          estado: "reintentar",
+          observaciones: nota.trim() || entrega.observaciones || null,
+          actualizado_at: ahora,
+        })
+        .eq("id", entrega.id);
+
+      if (error) throw error;
+      setActiva(null);
+      await cargar();
+    } catch (e) {
+      alert("❌ No se pudo marcar para volver más tarde: " + (e?.message || "error desconocido"));
+    }
+  };
+
+  const irAlProximoDestino = () => {
+    // Volver al tablero principal de la ruta.
+    // La navegación GPS se inicia desde "NAVEGAR AL PRÓXIMO DESTINO".
+    setActiva(null);
+  };
+
+  const retomarEntrega = async (entrega) => {
+    if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
+    const ok = window.confirm(`¿Retomar ahora la entrega de ${entrega.cliente}?`);
+    if (!ok) return;
+
+    try {
+      pedirUbicacionAhora();
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({ estado: "en_reparto", actualizado_at: ahora })
+        .eq("id", entrega.id);
+
+      if (error) throw error;
+      await cargar();
+      setActiva(prev => prev ? { ...prev, estado: "en_reparto" } : prev);
+    } catch (e) {
+      alert("❌ No se pudo retomar la entrega: " + (e?.message || "error desconocido"));
+    }
+  };
+
+  const salir = async () => {
+    await supabase.auth.signOut();
+    window.location.replace("/");
+  };
+
+  // Si la página se recargó en medio de una salida, recuperar las cifras
+  // de las entregas que siguen teniendo salida_at (sin cambiar estados).
+  const entregasConSalida = entregas.filter(e => e.salida_at);
+  const salidasEnCurso = entregasConSalida.filter(e =>
+    ["en_reparto", "reintentar"].includes(e.estado));
+  const inicioSalidaActual = salidasEnCurso.length
+    ? salidasEnCurso.map(e => new Date(e.salida_at).getTime()).filter(Number.isFinite).sort((a,b)=>b-a)[0]
+    : null;
+  const idsSalidaActiva = jornadaActiva && resumenSalida?.idsSalida?.length
+    ? resumenSalida.idsSalida
+    : inicioSalidaActual == null ? [] : entregasConSalida
+      .filter(e => new Date(e.salida_at).getTime() === inicioSalidaActual)
+      .map(e => e.id);
+  const entregadasEstaSalida = entregas.filter(
+    e => idsSalidaActiva.includes(e.id) && e.estado === "entregado"
+  ).length;
+  const totalSalidaMostrado = jornadaActiva
+    ? (resumenSalida?.recibidasTotal ?? idsSalidaActiva.length)
+    : 0;
+  const asignadasMostradas = jornadaActiva
+    ? (resumenSalida?.asignadasTotal ?? idsSalidaActiva.length + asignadas.length)
+    : asignadas.length + recibidas.length;
+  const recibidasMostradas = jornadaActiva
+    ? totalSalidaMostrado
+    : recibidas.length;
+
+  const tituloEntrega = e => e.pedido_id ? `NVI #${e.numeroVisible}` : "Entrega";
+
+  const miIdChat = sesionProp?.user?.id || perfil?.id;
+  const cargarChat = async () => {
+    if (!perfil?.empresa_id || !miIdChat) return;
+    const {data,error:err} = await supabase.from("mensajes_operativos")
+      .select("id,empresa_id,remitente_id,destinatario_id,contenido,creado_at,leido_at")
+      .eq("empresa_id",perfil.empresa_id)
+      .or(`remitente_id.eq.${miIdChat},destinatario_id.eq.${miIdChat}`)
+      .order("creado_at",{ascending:true}).limit(300);
+    if (err) setChatError(err.message);
+    else {setChatError("");setChatMensajes(data || []);}
+  };
+  useEffect(()=>{
+    if (!chatAbierto || !perfil?.empresa_id) return;
+    let vivo=true;
+    supabase.from("perfiles").select("id,nombre,rol").eq("empresa_id",perfil.empresa_id)
+      .then(({data,error:err})=>{
+        if (!vivo) return;
+        if (err) {setChatError(err.message);return;}
+        const contactos=(data||[]).filter(x=>x.id!==miIdChat &&
+          String(x.rol||"").toLowerCase() === "supervisorr");
+        setChatContactos(contactos);
+        setChatDestino(actual=>actual || contactos[0]?.id || "");
+      });
+    cargarChat();
+    const intervalo=setInterval(cargarChat,10000);
+    return ()=>{vivo=false;clearInterval(intervalo);};
+  },[chatAbierto,perfil?.empresa_id,miIdChat]);
+  const enviarChat = async () => {
+    if (!chatDestino || !chatTexto.trim() || chatEnviando) return;
+    setChatEnviando(true);
+    try {
+      const {error:err}=await supabase.rpc("enviar_mensaje_operativo",{
+        p_destinatario:chatDestino,p_contenido:chatTexto.trim()
+      });
+      if(err) throw err;
+      setChatTexto("");
+      await cargarChat();
+    } catch(e){setChatError(e.message||"No se pudo enviar el mensaje.");}
+    finally {setChatEnviando(false);}
+  };
+  const conversacionChat=chatMensajes.filter(m=>
+    (m.remitente_id===miIdChat && m.destinatario_id===chatDestino) ||
+    (m.remitente_id===chatDestino && m.destinatario_id===miIdChat));
+
+  // Mantener a la vista el último mensaje sin mover la pantalla de entregas.
+  useEffect(() => {
+    if (chatAbierto && fondoChatRef.current) {
+      fondoChatRef.current.scrollTop = fondoChatRef.current.scrollHeight;
+    }
+  }, [chatAbierto, chatDestino, conversacionChat.length, conversacionChat[conversacionChat.length - 1]?.id]);
+
+  const cargarNotasEntrega = async (entregaId) => {
+    if (!entregaId || !perfil?.empresa_id) return;
+    setCargandoNotas(true);
+    try {
+      const { data, error: err } = await supabase
+        .from("repartos_entrega_notas")
+        .select("id,autor_id,contenido,creado_at")
+        .eq("empresa_id", perfil.empresa_id)
+        .eq("entrega_id", entregaId)
+        .order("creado_at", { ascending: true });
+      if (err) throw err;
+      setNotasEntrega(data || []);
+      setErrorNotas("");
+    } catch (e) {
+      setErrorNotas(e?.message || "No se pudieron cargar las notas.");
+    } finally {
+      setCargandoNotas(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!activa?.id || !perfil?.empresa_id) {
+      setNotasEntrega([]);
+      setTextoNotaEntrega("");
+      setErrorNotas("");
+      return;
+    }
+    setNotasEntrega([]);
+    setTextoNotaEntrega("");
+    cargarNotasEntrega(activa.id);
+    const intervalo = setInterval(() => cargarNotasEntrega(activa.id), 15000);
+    return () => clearInterval(intervalo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activa?.id, perfil?.empresa_id]);
+
+  const guardarNotaEntrega = async () => {
+    const contenido = textoNotaEntrega.trim();
+    if (!activa?.id || !contenido || guardandoNota) return;
+    if (contenido.length > 2000) {
+      setErrorNotas("La nota no puede superar los 2000 caracteres.");
+      return;
+    }
+    setGuardandoNota(true);
+    setErrorNotas("");
+    try {
+      const sesion = sesionProp || (await supabase.auth.getSession()).data?.session;
+      if (!sesion?.user?.id || !perfil?.empresa_id) throw new Error("No hay sesión activa.");
+      const { error: err } = await supabase.from("repartos_entrega_notas").insert({
+        empresa_id: perfil.empresa_id,
+        entrega_id: activa.id,
+        autor_id: sesion.user.id,
+        contenido
+      });
+      if (err) throw err;
+      setTextoNotaEntrega("");
+      await cargarNotasEntrega(activa.id);
+    } catch (e) {
+      setErrorNotas(e?.message || "No se pudo guardar la nota.");
+    } finally {
+      setGuardandoNota(false);
+    }
+  };
+
+  const boton = {
+    border: "none", borderRadius: "9px", minHeight: "46px", padding: "9px 12px",
+    fontWeight: "900", cursor: "pointer"
+  };
+
+  if (activa) {
+    return (
+      <div style={{minHeight:"100vh",background:"#f1f5f9",fontFamily:"Arial,sans-serif",color:"#0f172a"}}>
+        <header style={{background:"#0f172a",color:"#fff",padding:"12px 14px"}}>
+          <div style={{maxWidth:"760px",margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:"15px",color:"#93c5fd",fontWeight:"900"}}>🚚 REPARTO</div>
+              <div style={{fontSize:"19px",fontWeight:"900"}}>{tituloEntrega(activa)}</div>
+            </div>
+            <button onClick={()=>setActiva(null)} style={{...boton,background:"#1e293b",color:"#fff",border:"1px solid #64748b"}}>← VOLVER</button>
+          </div>
+        </header>
+        <main style={{maxWidth:"760px",margin:"0 auto",padding:"14px"}}>
+          {(sinConexion || colaOffline.length > 0 || errorOffline) && (
+            <div style={{padding:12,marginBottom:10,background:"#fff7ed",border:"2px solid #f97316",borderRadius:10,fontWeight:800,color:"#7c2d12"}}>
+              {sinConexion ? "📴 SIN CONEXIÓN · " : ""}{colaOffline.length} entrega/s PENDIENTE/S DE SINCRONIZAR
+              <div style={{fontSize:14,fontWeight:500,marginTop:5}}>Todavía no están confirmadas por Supabase. Mantené este teléfono y no borres los datos del navegador.</div>
+              {errorOffline && <div style={{fontSize:14,marginTop:5}}>⚠️ {errorOffline}</div>}
+              {colaOffline.length > 0 && <button type="button" disabled={sinConexion || sincronizandoOffline} onClick={sincronizarPendientes} style={{padding:10,marginTop:8,width:"100%",border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900}}>{sincronizandoOffline ? "⏳ SINCRONIZANDO..." : "🔄 SINCRONIZAR AHORA"}</button>}
+            </div>
+          )}
+
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
+            <div style={{fontSize:"21px",fontWeight:"950"}}>{activa.cliente}</div>
+            <div style={{marginTop:"6px",color:"#475569"}}>📍 {activa.direccion || "Sin dirección cargada"}</div>
+            {activa.contacto && <div style={{marginTop:"5px",fontSize:"16px"}}>👤 {activa.contacto}</div>}
+            {activa.telefono && <div style={{marginTop:"5px",fontSize:"16px"}}>☎️ {activa.telefono}</div>}
+            <div style={{marginTop:"8px",fontSize:"16px",color:"#475569"}}>
+              🚚 {activa.ordenReparto?.numero || "Sin reparto numerado"} · 📦 {activa.bultos ?? "—"} bulto/s
+              {activa.numero_remito ? ` · Remito ${activa.numero_remito}` : ""}
+              {activa.numero_factura ? ` · Factura ${activa.numero_factura}` : ""}
+            </div>
+          </div>
+
+          {(activa.items || []).length > 0 && (
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
+            <div style={{fontSize:"16px",fontWeight:"950",marginBottom:"9px"}}>📦 DETALLE DE MERCADERÍA</div>
+            {(activa.items || []).map((it,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",gap:"10px",padding:"8px 0",borderBottom:"1px solid #e2e8f0"}}>
+                <div>
+                  <div style={{fontWeight:"800"}}>{it.descripcion}</div>
+                  <div style={{fontSize:"15px",color:"#334155"}}>
+                    {[it.codigo,it.color && `Color ${it.color}`,it.talle && `Talle ${it.talle}`].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+                <strong>x {Number(it.cantidad || 0)}</strong>
+              </div>
+            ))}
+          </div>
+          )}
+
+          <section style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"12px",padding:"14px",marginBottom:"10px"}}>
+            <div style={{fontWeight:"900",fontSize:"15px",marginBottom:"9px"}}>📝 NOTAS DE ESTA ENTREGA</div>
+            <div style={{fontSize:"16px",color:"#334155",marginBottom:"10px"}}>
+              Historial compartido con el Supervisor de Repartos. No es RutaChat.
+            </div>
+            {cargandoNotas && notasEntrega.length === 0 && (
+              <div style={{fontSize:"16px",color:"#334155",marginBottom:"8px"}}>Cargando notas...</div>
+            )}
+            {!cargandoNotas && notasEntrega.length === 0 && (
+              <div style={{fontSize:"16px",color:"#334155",marginBottom:"8px"}}>Todavía no hay notas en esta entrega.</div>
+            )}
+            <div style={{display:"grid",gap:"8px",maxHeight:"250px",overflowY:"auto",marginBottom:"10px"}}>
+              {notasEntrega.map(n => {
+                const mia = n.autor_id === (sesionProp?.user?.id || perfil?.id);
+                return (
+                  <div key={n.id} style={{background:mia?"#dcfce7":"#eff6ff",borderRadius:"9px",padding:"10px",overflowWrap:"anywhere"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:"8px",fontSize:"15px",fontWeight:"900"}}>
+                      <span>{mia ? "🚚 Repartidor (vos)" : "👔 Supervisor"}</span>
+                      <span style={{color:"#334155",fontWeight:"500"}}>
+                        {new Date(n.creado_at).toLocaleString("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                      </span>
+                    </div>
+                    <div style={{marginTop:"5px",fontSize:"16px",whiteSpace:"pre-wrap"}}>{n.contenido}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <textarea value={textoNotaEntrega} onChange={e=>setTextoNotaEntrega(e.target.value)}
+              maxLength={2000} rows={3} placeholder="Escribí una nota sobre esta entrega..."
+              style={{width:"100%",boxSizing:"border-box",padding:"10px",border:"1px solid #cbd5e1",borderRadius:"9px",fontFamily:"inherit",fontSize:"16px"}} />
+            {errorNotas && <div style={{color:"#b91c1c",fontSize:"16px",marginTop:"6px"}}>⚠️ {errorNotas}</div>}
+            <button type="button" onClick={guardarNotaEntrega}
+              disabled={!textoNotaEntrega.trim() || guardandoNota}
+              style={{...boton,width:"100%",marginTop:"8px",background:"#0f766e",color:"#fff",opacity:(!textoNotaEntrega.trim()||guardandoNota)?0.55:1}}>
+              {guardandoNota ? "⏳ GUARDANDO..." : "💾 GUARDAR NOTA"}
+            </button>
+          </section>
+
+          {colaOffline.some(x => x.entregaId === activa.id) && <div style={{padding:12,marginBottom:10,background:"#fef3c7",fontWeight:900}}>📴 Esta entrega está pendiente de sincronizar. No vuelvas a marcarla.</div>}
+          {activa.estado === "asignado" ? (
+            <div>
+              <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#1e3a8a",textAlign:"center",marginBottom:"9px"}}>
+                📋 ENTREGA ASIGNADA · Confirmá cuando este pedido esté cargado en el vehículo.
+              </div>
+              <button onClick={()=>marcarRecibida(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"16px"}}>
+                📦 MARCAR COMO RECIBIDA
+              </button>
+            </div>
+          ) : activa.estado === "recibido" ? (
+            <div>
+              <div style={{background:"#ecfeff",border:"1px solid #67e8f9",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#155e75",textAlign:"center",marginBottom:"9px"}}>
+                📦 RECIBIDA · Este pedido está cargado y listo para entrar en la ruta.
+              </div>
+              <button onClick={()=>devolverAAsignada(activa)} style={{...boton,width:"100%",background:"#64748b",color:"#fff",fontSize:"16px"}}>
+                ❌ RECHAZAR ESTA ENTREGA
+              </button>
+            </div>
+          ) : activa.estado === "entregado" ? (
+            <button type="button" onClick={() => setActiva(null)} style={{...boton,width:"100%",background:"#dcfce7",border:"1px solid #86efac",color:"#166534",fontSize:"16px"}}>
+              ✅ ENTREGA COMPLETADA · VOLVER A MIS ENTREGAS
+            </button>
+          ) : activa.estado === "no_entregado" ? (
+            <div>
+              <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#991b1b",textAlign:"center",marginBottom:"9px"}}>
+                ❌ NO ENTREGADA
+                {activa.motivo_no_entrega ? <div style={{fontSize:"16px",fontWeight:"700",marginTop:"5px"}}>{activa.motivo_no_entrega}</div> : null}
+              </div>
+              <div style={{fontSize:"15px",color:"#334155",textAlign:"center",marginBottom:10}}>
+                La visita ya quedó resuelta. El recorrido puede finalizar automáticamente; la devolución se registra por separado cuando regreses al depósito.
+              </div>
+              <button onClick={()=>informarDevolucion(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"16px"}}>
+                📦 INFORMAR MERCADERÍA DEVUELTA AL DEPÓSITO
+              </button>
+              <button type="button" onClick={() => setActiva(null)} style={{...boton,width:"100%",marginTop:"10px",background:"#1d4ed8",color:"#fff",fontSize:"15px"}}>
+                🏠 VOLVER A MIS ENTREGAS
+              </button>
+            </div>
+          ) : activa.estado === "devolucion_informada" ? (
+            <div style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#9a3412",textAlign:"center"}}>
+              📦 DEVOLUCIÓN INFORMADA
+              <div style={{fontSize:"16px",fontWeight:"700",marginTop:"5px"}}>Pendiente de recepción por Depósito.</div>
+            </div>
+          ) : activa.estado === "reintentar" ? (
+            <div>
+              <div style={{background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#9a3412",textAlign:"center",marginBottom:"9px"}}>
+                🕐 PASAR MÁS TARDE
+                {activa.observaciones ? <div style={{fontSize:"16px",fontWeight:"700",marginTop:"5px"}}>{activa.observaciones}</div> : null}
+              </div>
+              <div style={{display:"grid",gap:"8px"}}>
+                <button onClick={()=>irAlProximoDestino(activa)} style={{...boton,width:"100%",background:"#2563eb",color:"#fff",fontSize:"16px"}}>
+                  🚚 IR AL PRÓXIMO DESTINO
+                </button>
+                <button onClick={()=>retomarEntrega(activa)} style={{...boton,width:"100%",background:"#64748b",color:"#fff",fontSize:"16px"}}>
+                  🔄 REINTENTAR ENTREGA
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div style={{background:"#dcfce7",border:"1px solid #86efac",borderRadius:"10px",padding:"12px",fontWeight:"900",color:"#166534",textAlign:"center",marginBottom:"9px"}}>
+                🚚 REPARTO EN CURSO
+              </div>
+
+              <div style={{display:"grid",gap:"8px"}}>
+                <button onClick={()=>marcarEntregada(activa)} style={{...boton,width:"100%",background:"#16a34a",color:"#fff",fontSize:"16px"}}>
+                  ✅ ENTREGADA
+                </button>
+
+                <button onClick={()=>pasarMasTarde(activa)} style={{...boton,width:"100%",background:"#f59e0b",color:"#fff",fontSize:"16px"}}>
+                  🕐 PASAR MÁS TARDE
+                </button>
+
+                <button onClick={()=>marcarNoEntregada(activa)} style={{...boton,width:"100%",background:"#dc2626",color:"#fff",fontSize:"16px"}}>
+                  ❌ NO ENTREGADA
+                </button>
+              </div>
+            </div>
+          )}
+          <button type="button" onClick={() => setActiva(null)}
+            style={{...boton,width:"100%",minHeight:"62px",marginTop:"22px",marginBottom:"24px",background:"#1d4ed8",color:"#fff",fontSize:"18px",boxShadow:"0 3px 9px #0002"}}>
+            ⬅ VOLVER A MIS ENTREGAS
+          </button>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f1f5f9",fontFamily:"Arial,sans-serif",color:"#0f172a"}}>
+      <header style={{background:"#0f172a",color:"#fff",padding:"8px 10px"}}>
+        <div style={{maxWidth:"760px",margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"6px"}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:"clamp(15px,4.3vw,20px)",fontWeight:"950",whiteSpace:"nowrap"}}>🚚 RutaComercios</div>
+            <div style={{fontSize:"13px",color:"#cbd5e1",marginTop:"1px"}}>{perfil?.nombre || "Repartidor"} · Repartos</div>
+          </div>
+          <div style={{display:"flex",gap:"6px"}}>
+            {onVolver && <button onClick={onVolver} style={{...boton,background:"#1e293b",color:"#fff",border:"1px solid #64748b"}}>← VOLVER</button>}
+            <button onClick={salir} style={{...boton,background:"#1e293b",color:"#fff",border:"1px solid #64748b"}}>SALIR</button>
+          </div>
+        </div>
+      </header>
+
+      <main style={{maxWidth:"760px",margin:"0 auto",padding:"9px"}}>
+        {!cargando && !error && devolucionesPorInformar.length > 0 && (
+          <section role="status" style={{background:"#fff7ed",border:"3px solid #ea580c",borderRadius:12,padding:13,marginBottom:12,color:"#7c2d12"}}>
+            <div style={{fontSize:18,fontWeight:950}}>⚠️ MERCADERÍA PENDIENTE DE DEVOLUCIÓN</div>
+            <div style={{fontSize:15,marginTop:5,marginBottom:10,fontWeight:700}}>
+              Tenés {devolucionesPorInformar.length} entrega{devolucionesPorInformar.length === 1 ? "" : "s"} sin informar al depósito, incluso de repartos finalizados.
+            </div>
+            <div style={{display:"grid",gap:8}}>
+              {devolucionesPorInformar.map(e => (
+                <button key={e.id} type="button" onClick={() => setActiva(e)}
+                  style={{...boton,width:"100%",textAlign:"left",background:"#fff",border:"2px solid #fb923c",color:"#7c2d12",fontSize:16,padding:12}}>
+                  📦 {e.cliente || "Entrega no realizada"} · {e.ordenReparto?.numero || "Reparto anterior"}
+                  <div style={{fontSize:13,marginTop:4}}>VER DEVOLUCIÓN PENDIENTE →</div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+          {(sinConexion || colaOffline.length > 0 || errorOffline) && (
+            <div style={{padding:12,marginBottom:10,background:"#fff7ed",border:"2px solid #f97316",borderRadius:10,fontWeight:800,color:"#7c2d12"}}>
+              {sinConexion ? "📴 SIN CONEXIÓN · " : ""}{colaOffline.length} entrega/s PENDIENTE/S DE SINCRONIZAR
+              <div style={{fontSize:14,fontWeight:500,marginTop:5}}>Todavía no están confirmadas por Supabase. Mantené este teléfono y no borres los datos del navegador.</div>
+              {errorOffline && <div style={{fontSize:14,marginTop:5}}>⚠️ {errorOffline}</div>}
+              {colaOffline.length > 0 && <button type="button" disabled={sinConexion || sincronizandoOffline} onClick={sincronizarPendientes} style={{padding:10,marginTop:8,width:"100%",border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900}}>{sincronizandoOffline ? "⏳ SINCRONIZANDO..." : "🔄 SINCRONIZAR AHORA"}</button>}
+            </div>
+          )}
+
+        <div style={{marginBottom:"8px",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"10px",padding:"7px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+            <button type="button"
+              onClick={jornadaActiva ? () => setModalSuspension(true) : comenzarJornada}
+              disabled={procesandoJornada || (!jornadaActiva && recibidas.length===0)}
+              style={{...boton,width:"100%",minHeight:"44px",padding:"6px 4px",fontSize:"14px",lineHeight:1.15,
+                background:procesandoJornada||(!jornadaActiva&&recibidas.length===0)?"#94a3b8":jornadaActiva?"#0f172a":"#2563eb",
+                color:"#fff"}}>
+              {procesandoJornada?"⏳ PROCESANDO":jornadaActiva?"⚠️ SUSPENDER REPARTO":"🚚 COMENZAR REPARTO"}
+            </button>
+            <button type="button" onClick={()=>setChatAbierto(v=>!v)}
+              style={{...boton,width:"100%",minHeight:"44px",padding:"6px 4px",fontSize:"14px",lineHeight:1.15,background:"#166534",color:"#fff"}}>
+              💬 RUTACHAT {chatAbierto?"▲":"▼"}
+            </button>
+          </div>
+          {modalSuspension && <div role="dialog" aria-label="Suspender reparto" style={{background:"#fff7ed",border:"2px solid #f97316",borderRadius:9,padding:12,marginTop:10}}>
+            <strong>⚠️ SUSPENDER REPARTO</strong>
+            <p style={{fontSize:13}}>Si terminaste todas las entregas, el reparto se cierra solo. Suspendelo unicamente si no podes continuar.</p>
+            <select value={motivoSuspension} onChange={e=>setMotivoSuspension(e.target.value)} style={{width:"100%",padding:10,marginBottom:8}}>
+              <option value="vehiculo">🚚 Vehiculo averiado</option>
+              <option value="salud">🏥 Problema de salud</option>
+              <option value="otros">📝 Otro motivo</option>
+            </select>
+            <textarea aria-label="Explicacion obligatoria" value={observacionesSuspension} onChange={e=>setObservacionesSuspension(e.target.value)} placeholder="Explica lo ocurrido (obligatorio)" rows={3} style={{width:"100%",boxSizing:"border-box",padding:9}} />
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              <button type="button" onClick={()=>setModalSuspension(false)} disabled={procesandoJornada} style={{...boton,flex:1}}>CANCELAR</button>
+              <button type="button" onClick={suspenderJornada} disabled={procesandoJornada || observacionesSuspension.trim().length < 3} style={{...boton,flex:1,background:"#b91c1c",color:"white"}}>CONFIRMAR SUSPENSION</button>
+            </div>
+          </div>}
+          {chatAbierto && (
+            <div style={{paddingTop:"10px"}}>
+              <div style={{fontSize:"16px",fontWeight:"800",marginBottom:"6px"}}>Mensajes al Supervisor</div>
+              <select value={chatDestino} onChange={e=>setChatDestino(e.target.value)}
+                style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1px solid #cbd5e1"}}>
+                {!chatContactos.length && <option value="">No hay supervisores disponibles</option>}
+                {chatContactos.map(c=><option key={c.id} value={c.id}>{c.nombre||"Supervisor"}</option>)}
+              </select>
+              {chatError && <div style={{color:"#b91c1c",fontSize:"16px",marginTop:"8px"}}>⚠️ {chatError}</div>}
+              <div ref={fondoChatRef} style={{maxHeight:"230px",overflowY:"auto",background:"#f8fafc",borderRadius:"8px",padding:"8px",marginTop:"8px"}}>
+                {!conversacionChat.length && <div style={{fontSize:"16px",color:"#334155"}}>Todavía no hay mensajes.</div>}
+                {conversacionChat.map(m=><div key={m.id} style={{marginBottom:"8px",textAlign:m.remitente_id===miIdChat?"right":"left"}}>
+                  <div style={{display:"inline-block",maxWidth:"90%",background:m.remitente_id===miIdChat?"#dcfce7":"#e2e8f0",padding:"8px",borderRadius:"8px",fontSize:"16px",overflowWrap:"anywhere"}}>
+                    {m.contenido}
+                    <div style={{fontSize:"10px",color:"#334155",marginTop:"3px"}}>{new Date(m.creado_at).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</div>
+                  </div>
+                </div>)}
+              </div>
+              <textarea value={chatTexto} onChange={e=>setChatTexto(e.target.value)} rows={2}
+                placeholder="Escribí un mensaje..." style={{width:"100%",boxSizing:"border-box",marginTop:"8px",padding:"9px",border:"1px solid #cbd5e1",borderRadius:"8px"}} />
+              <button type="button" onClick={enviarChat} disabled={!chatDestino||!chatTexto.trim()||chatEnviando}
+                style={{...boton,width:"100%",background:"#166534",color:"#fff",opacity:!chatDestino||!chatTexto.trim()?.5:1}}>
+                {chatEnviando?"Enviando...":"ENVIAR MENSAJE"}
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:"5px",marginBottom:"8px"}}>
+          {[
+            {etiqueta:"ASIGNADAS",valor:asignadasMostradas,fondo:"#fff",borde:"#cbd5e1",color:"#334155"},
+            {etiqueta:"RECIBIDAS",valor:recibidasMostradas,fondo:"#ecfeff",borde:"#67e8f9",color:"#155e75"},
+            {etiqueta:"ENTREGADAS",valor:jornadaActiva ? `${entregadasEstaSalida} de ${totalSalidaMostrado}` : "0",fondo:"#f0fdf4",borde:"#86efac",color:"#166534"},
+            {etiqueta:"REINTENTAR",valor:paraVolver.length,fondo:"#fff7ed",borde:"#fdba74",color:"#9a3412"}
+          ].map(dato=><div key={dato.etiqueta} style={{background:dato.fondo,border:`1px solid ${dato.borde}`,borderRadius:"9px",padding:"7px 2px",textAlign:"center",minWidth:0}}>
+            <div style={{fontSize:"clamp(9px,2.3vw,12px)",fontWeight:900,color:dato.color,whiteSpace:"nowrap"}}>{dato.etiqueta}</div>
+            <div style={{fontSize:"clamp(19px,5vw,25px)",fontWeight:950,color:dato.color,lineHeight:1.25}}>{dato.valor}</div>
+          </div>)}
+        </div>
+
+        {!cargando && !error && !jornadaActiva && asignadas.length > 0 && (
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
+            <button type="button" onClick={() => setMapaAsignadasAbierto(v => !v)}
+              style={{...boton,width:"100%",background:"#eff6ff",color:"#1e40af",border:"1px solid #93c5fd"}}>
+              🗺️ {mapaAsignadasAbierto ? "OCULTAR MAPA DE ENTREGAS ▲" : "VER MAPA DE ENTREGAS ▼"}
+            </button>
+            {mapaAsignadasAbierto && (
+              <div style={{marginTop:"10px"}}>
+                <div style={{fontSize:"15px",color:"#475569",marginBottom:"8px"}}>
+                  Vista previa de {asignadas.length} entrega/s asignada/s. No inicia el reparto ni modifica el orden.
+                </div>
+                {destinosAsignados.length > 0 ? (
+                  <>
+                    <div style={{height:"320px",borderRadius:"10px",overflow:"hidden",border:"1px solid #cbd5e1"}}>
+                      <MapContainer center={[destinosAsignados[0].latitud,destinosAsignados[0].longitud]}
+                        zoom={14} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
+                        <TileLayer attribution="&copy; OpenStreetMap contributors"
+                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                        <AjustarMapa puntos={puntosAsignados} />
+                        {destinosAsignados.map(e => (
+                          <Marker key={e.id} position={[e.latitud,e.longitud]} icon={iconoNumero(e.numeroParada)}>
+                            <Popup>
+                              <strong>{e.cliente}</strong>
+                              <div>{e.direccion}</div>
+                              <div>{tituloEntrega(e)}</div>
+                            </Popup>
+                          </Marker>
+                        ))}
+                      </MapContainer>
+                    </div>
+                    {destinosAsignados.length < asignadas.length && (
+                      <div style={{fontSize:"15px",color:"#92400e",marginTop:"8px"}}>
+                        ⚠️ {asignadas.length - destinosAsignados.length} entrega/s sin coordenadas no aparecen en el mapa.
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{padding:"12px",background:"#fff7ed",borderRadius:"9px",fontSize:"16px"}}>
+                    Las entregas asignadas no tienen coordenadas guardadas. Consultá al Supervisor para corregir la ubicación.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!cargando && !error && !jornadaActiva && asignadas.length > 0 && (
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
+            <button type="button" onClick={() => setOrganizarAsignadasAbierto(v => !v)} style={{width:"100%",textAlign:"left",background:"#f1f5f9",border:"1px solid #cbd5e1",borderRadius:"8px",padding:"11px",fontSize:"16px",fontWeight:"950",cursor:"pointer"}}>🧭 ORGANIZAR MI RUTA {organizarAsignadasAbierto ? "▲" : "▼"}</button>
+            {organizarAsignadasAbierto && (<>
+
+            <div style={{fontSize:"15px",color:"#334155",marginBottom:"9px"}}>
+              Arrastrá los destinos desde ☰ o usá las flechas. El mapa mostrará los números en ese orden.
+              Esto no cambia las asignaciones del Supervisor.
+            </div>
+            <div style={{display:"grid",gap:"7px"}}>
+              {asignadasOrdenadas.map((e,idx) => (
+                <div key={e.id} data-ruta-entrega={e.id} draggable
+                  onDragStart={ev=>{setArrastrandoId(e.id);ev.dataTransfer.effectAllowed="move";ev.dataTransfer.setData("text/plain",e.id);}}
+                  onDragOver={ev=>ev.preventDefault()}
+                  onDrop={ev=>{ev.preventDefault();moverEnRuta(arrastrandoId||ev.dataTransfer.getData("text/plain"),e.id);setArrastrandoId(null);}}
+                  onDragEnd={()=>setArrastrandoId(null)}
+                  style={{display:"flex",alignItems:"center",gap:"8px",padding:"8px",border:"1px solid #e2e8f0",borderRadius:"8px",
+                    cursor:"grab",background:arrastrandoId===e.id?"#dbeafe":"#fff"}}>
+                  <span title="Arrastrar destino" onPointerDown={ev=>iniciarArrastreTactil(ev,e.id)} onPointerUp={terminarArrastreTactil} onPointerCancel={cancelarArrastreTactil} style={{fontSize:"20px",color:"#334155",cursor:"grab",touchAction:"none",userSelect:"none",padding:"8px 3px"}}>☰</span>
+                  <strong style={{minWidth:"22px"}}>{idx+1}</strong>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:"16px",fontWeight:"800"}}>{e.cliente}</div>
+                    <div style={{fontSize:"10px",color:"#334155"}}>{e.direccion}</div>
+                  </div>
+                  <button type="button" disabled={idx===0} onClick={()=>moverEnRuta(e.id,asignadasOrdenadas[idx-1].id)}
+                    style={{...boton,minHeight:"34px",background:"#e2e8f0",opacity:idx===0?.4:1}}>↑</button>
+                  <button type="button" disabled={idx===asignadasOrdenadas.length-1} onClick={()=>moverEnRuta(e.id,asignadasOrdenadas[idx+1].id)}
+                    style={{...boton,minHeight:"34px",background:"#e2e8f0",opacity:idx===asignadasOrdenadas.length-1?.4:1}}>↓</button>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={guardarOrdenRuta} disabled={guardandoRuta}
+              style={{...boton,width:"100%",marginTop:"10px",background:rutaGuardada?"#166534":"#2563eb",color:"#fff",opacity:guardandoRuta?.65:1}}>
+              {guardandoRuta ? "⏳ ENVIANDO RUTA..." : rutaGuardada ? "✅ RUTA ENVIADA" : "💾 GUARDAR Y ENVIAR RUTA"}
+            </button>
+            <div style={{fontSize:"10px",color:"#334155",marginTop:"6px",textAlign:"center"}}>
+              Se guarda en este dispositivo y se comparte con el Supervisor. No modifica las asignaciones.
+            </div>
+            </>)}
+          </div>
+        )}
+
+        {!cargando && !error && !jornadaActiva && recibidas.length > 0 && (
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
+            <button type="button" onClick={() => setOrganizarRecibidasAbierto(v => !v)} style={{width:"100%",textAlign:"left",background:"#f1f5f9",border:"1px solid #cbd5e1",borderRadius:"8px",padding:"11px",fontSize:"16px",fontWeight:"950",cursor:"pointer"}}>🗺️ ORGANIZAR RUTA {organizarRecibidasAbierto ? "▲" : "▼"}</button>
+            {organizarRecibidasAbierto && (<>
+
+            <div style={{fontSize:"10px",color:"#334155",marginBottom:"10px"}}>
+              Arrastrá las entregas para definir el orden del recorrido.
+            </div>
+
+            <div style={{display:"grid",gap:"7px"}}>
+              {recibidasOrdenadas.map((e, idx) => (
+                <div
+                  key={e.id}
+                  data-ruta-entrega={e.id}
+                  draggable
+                  onDragStart={() => setArrastrandoId(e.id)}
+                  onDragOver={(ev) => ev.preventDefault()}
+                  onDrop={() => {
+                    moverEnRuta(arrastrandoId, e.id);
+                    setArrastrandoId(null);
+                  }}
+                  onDragEnd={() => setArrastrandoId(null)}
+                  style={{
+                    display:"grid",
+                    gridTemplateColumns:"34px 28px 1fr 66px",
+                    alignItems:"center",
+                    gap:"7px",
+                    border:"1px solid #cbd5e1",
+                    borderRadius:"9px",
+                    padding:"9px",
+                    background: arrastrandoId===e.id ? "#f1f5f9" : "#fff",
+                    cursor:"grab"
+                  }}
+                >
+                  <div style={{fontSize:"18px",fontWeight:"950",textAlign:"center"}}>{idx+1}</div>
+                  <div onPointerDown={ev=>iniciarArrastreTactil(ev,e.id)} onPointerUp={terminarArrastreTactil} onPointerCancel={cancelarArrastreTactil} style={{fontSize:"18px",color:"#334155",textAlign:"center",touchAction:"none",userSelect:"none",padding:"8px 0",cursor:"grab"}}>☰</div>
+                  <div>
+                    <div style={{fontSize:"16px",fontWeight:"900"}}>{tituloEntrega(e)} · {e.cliente}</div>
+                    <div style={{fontSize:"10px",color:"#334155",marginTop:"3px"}}>📍 {e.direccion || "Sin dirección"}</div>
+                  </div>
+                  <div style={{display:"flex",gap:"4px",justifyContent:"flex-end"}}>
+                    <button
+                      type="button"
+                      disabled={idx===0}
+                      onClick={(ev)=>{
+                        ev.stopPropagation();
+                        if (idx===0) return;
+                        setRutaGuardada(false);
+                        setOrdenRuta(prev=>{
+                          const n=[...prev];
+                          [n[idx-1],n[idx]]=[n[idx],n[idx-1]];
+                          return n;
+                        });
+                      }}
+                      style={{border:"1px solid #cbd5e1",background:"#fff",borderRadius:"7px",width:"30px",height:"32px",fontWeight:"900",cursor:idx===0?"default":"pointer",opacity:idx===0?.35:1}}
+                    >↑</button>
+                    <button
+                      type="button"
+                      disabled={idx===recibidasOrdenadas.length-1}
+                      onClick={(ev)=>{
+                        ev.stopPropagation();
+                        if (idx===recibidasOrdenadas.length-1) return;
+                        setRutaGuardada(false);
+                        setOrdenRuta(prev=>{
+                          const n=[...prev];
+                          [n[idx],n[idx+1]]=[n[idx+1],n[idx]];
+                          return n;
+                        });
+                      }}
+                      style={{border:"1px solid #cbd5e1",background:"#fff",borderRadius:"7px",width:"30px",height:"32px",fontWeight:"900",cursor:idx===recibidasOrdenadas.length-1?"default":"pointer",opacity:idx===recibidasOrdenadas.length-1?.35:1}}
+                    >↓</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={guardarOrdenRuta} disabled={guardandoRuta}
+              style={{...boton,width:"100%",marginTop:"10px",background:rutaGuardada?"#166534":"#2563eb",color:"#fff",opacity:guardandoRuta?.65:1}}>
+              {guardandoRuta ? "⏳ ENVIANDO RUTA..." : rutaGuardada ? "✅ RUTA ENVIADA" : "💾 GUARDAR Y ENVIAR RUTA"}
+            </button>
+            <div style={{fontSize:"10px",color:"#334155",marginTop:"6px",textAlign:"center"}}>
+              Se comparte el orden de las entregas recibidas con el Supervisor de Repartos.
+            </div>
+            </>)}
+          </div>
+        )}
+
+        {!cargando && !error && !jornadaActiva && recibidas.length > 0 && (
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
+            <div style={{fontSize:"16px",fontWeight:"950",marginBottom:"8px"}}>📍 MAPA DE LA RUTA</div>
+
+            {paradasConCoordenadas.length > 0 ? (
+              <>
+                <div style={{height:"320px",borderRadius:"10px",overflow:"hidden",border:"1px solid #cbd5e1"}}>
+                  <MapContainer
+                    center={[paradasConCoordenadas[0].latitud, paradasConCoordenadas[0].longitud]}
+                    zoom={14}
+                    style={{height:"100%",width:"100%"}}
+                    scrollWheelZoom={true}
+                  >
+                    <TileLayer
+                      attribution="&copy; OpenStreetMap contributors"
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                    <AjustarMapa puntos={puntosRuta} />
+                    {puntosRuta.length > 1 && (
+                      <Polyline positions={puntosRuta} pathOptions={{weight:4,opacity:.65}} />
+                    )}
+                    {paradasConCoordenadas.map(e => (
+                      <Marker
+                        key={e.id}
+                        position={[e.latitud,e.longitud]}
+                        icon={iconoNumero(e.numeroParada)}
+                      >
+                        <Popup>
+                          <div style={{fontFamily:"Arial,sans-serif"}}>
+                            <div style={{fontWeight:"900"}}>Parada {e.numeroParada} · {e.cliente}</div>
+                            <div style={{fontSize:"16px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
+                            <div style={{fontSize:"16px",marginTop:"4px"}}>{e.direccion}</div>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+                  </MapContainer>
+                </div>
+                {paradasConCoordenadas.length < recibidasOrdenadas.length && (
+                  <div style={{fontSize:"10px",color:"#92400e",marginTop:"7px"}}>
+                    ⚠️ {recibidasOrdenadas.length - paradasConCoordenadas.length} entrega/s no tienen coordenadas guardadas y no pueden mostrarse todavía en el mapa.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{padding:"14px",background:"#fff7ed",border:"1px solid #fdba74",borderRadius:"9px",fontSize:"16px",color:"#9a3412"}}>
+                ⚠️ Las entregas recibidas todavía no tienen coordenadas guardadas en sus comercios.
+              </div>
+            )}
+          </div>
+        )}
+
+        {!cargando && !error && jornadaActiva && mapaDuranteRuta.length > 0 && (
+          <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
+            <div style={{fontSize:"16px",fontWeight:"950",marginBottom:"8px"}}>📍 RUTA PENDIENTE</div>
+            <div style={{height:"320px",borderRadius:"10px",overflow:"hidden",border:"1px solid #cbd5e1"}}>
+              <MapContainer
+                center={[mapaDuranteRuta[0].latitud, mapaDuranteRuta[0].longitud]}
+                zoom={14}
+                style={{height:"100%",width:"100%"}}
+                scrollWheelZoom={true}
+              >
+                <TileLayer
+                  attribution="&copy; OpenStreetMap contributors"
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                <AjustarMapa puntos={puntosDuranteRuta} />
+                {puntosDuranteRuta.length > 1 && (
+                  <Polyline positions={puntosDuranteRuta} pathOptions={{weight:4,opacity:.65}} />
+                )}
+                {mapaDuranteRuta.map(e => (
+                  <Marker
+                    key={e.id}
+                    position={[e.latitud,e.longitud]}
+                    icon={iconoNumero(e.numeroParada)}
+                  >
+                    <Popup>
+                      <div style={{fontFamily:"Arial,sans-serif"}}>
+                        <div style={{fontWeight:"900"}}>Próxima {e.numeroParada} · {e.cliente}</div>
+                        <div style={{fontSize:"16px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
+                        <div style={{fontSize:"16px",marginTop:"4px"}}>{e.direccion}</div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
+              </MapContainer>
+            </div>
+          </div>
+        )}
+
+        {!cargando && !error && jornadaActiva && proximoDestino && (
+          <div style={{background:"#fff",border:"2px solid #2563eb",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
+            <div style={{fontSize:"10px",fontWeight:"950",color:"#2563eb",marginBottom:"5px"}}>
+              📍 PRÓXIMO DESTINO
+            </div>
+            <div style={{fontSize:"16px",fontWeight:"950"}}>
+              {proximoDestino.cliente}
+            </div>
+            <div style={{fontSize:"15px",color:"#334155",marginTop:"4px"}}>
+              {tituloEntrega(proximoDestino)} · {proximoDestino.direccion || "Sin dirección"}
+            </div>
+            <button
+              type="button"
+              onClick={()=>navegarEntrega(proximoDestino)}
+              style={{...boton,width:"100%",background:"#2563eb",color:"#fff",fontSize:"16px",marginTop:"10px"}}
+            >
+              📍 NAVEGAR AL PRÓXIMO DESTINO
+            </button>
+            <button
+              type="button"
+              onClick={()=>setActiva(proximoDestino)}
+              style={{...boton,width:"100%",background:"#16a34a",color:"#fff",fontSize:"16px",marginTop:"8px"}}
+            >
+              📍 LLEGUÉ AL DESTINO
+            </button>
+          </div>
+        )}
+
+
+        {cargando ? (
+          <div style={{textAlign:"center",padding:"40px",color:"#111827"}}>⏳ Cargando entregas...</div>
+        ) : error ? (
+          <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:"10px",padding:"14px",color:"#991b1b"}}>❌ {error}</div>
+        ) : (
+          <>
+            {ordenActualId && (
+              <div style={{fontSize:"17px",fontWeight:950,color:"#111827",marginBottom:"10px",textAlign:"center"}}>
+                🚚 Reparto {entregas.find(e=>e.reparto_orden_id===ordenActualId)?.ordenReparto?.numero || "actual"} (Actual)
+              </div>
+            )}
+            <div style={{display:"grid",gap:"9px"}}>
+              {entregasActualesPantalla.filter(e => !(jornadaActiva && proximoDestino && e.id === proximoDestino.id)).map(e=>(
+                <button key={e.id} onClick={()=>setActiva(e)} style={{width:"100%",textAlign:"left",background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",cursor:"pointer",color:"#111827"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:"10px"}}>
+                    <div>
+                      <div style={{fontWeight:"950",fontSize:"16px"}}>🧾 {tituloEntrega(e)} · {e.cliente}</div>
+                      <div style={{fontSize:"16px",color:"#111827",marginTop:"4px"}}>📍 {e.direccion || "Sin dirección cargada"}</div>
+                      <div style={{fontSize:"15px",color:"#111827",marginTop:"4px"}}>
+                        📅 {e.fecha_programada || "Sin fecha"} · 📦 {e.bultos ?? "—"} bulto/s
+                      </div>
+                    </div>
+                    <div style={{fontSize:"13px",fontWeight:"900",whiteSpace:"nowrap",color:e.estado==="entregado"?"#166534":e.estado==="no_entregado"?"#991b1b":"#1d4ed8"}}>
+                      {e.estado==="reintentar" ? "🔄 REINTENTAR" : e.estado==="entregado" ? "✅ ENTREGADA" :
+                       e.estado==="no_entregado" ? "❌ NO ENTREGADA" : e.estado==="devolucion_informada" ? "📦 DEVOLUCIÓN" :
+                       e.estado==="recibido" ? "📦 RECIBIDA" : e.estado==="en_reparto" ? "🚚 EN REPARTO" : "📋 ASIGNADA"}
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {!entregasActualesPantalla.length && <div style={{padding:"10px",background:"#fff",borderRadius:"10px",textAlign:"center",color:"#111827",fontSize:"15px"}}>No hay entregas en el reparto actual.</div>}
+            </div>
+            <div style={{marginTop:"9px",marginBottom:"12px",border:"1px solid #94a3b8",borderRadius:"11px",background:"#fff",overflow:"hidden"}}>
+              <button type="button" onClick={()=>setHistorialAbierto(v=>!v)}
+                aria-expanded={historialAbierto}
+                style={{width:"100%",padding:"10px",background:"#e2e8f0",color:"#111827",fontSize:"16px",fontWeight:950,border:"none",cursor:"pointer",textAlign:"left"}}>
+                📚 ENTREGAS ANTERIORES ({entregasAnterioresPantalla.length}) {historialAbierto ? "▲" : "▼"}
+              </button>
+              {historialAbierto && <div style={{padding:"8px",display:"grid",gap:"5px",minWidth:0}}>
+                {entregasAnterioresPantalla.length === 0 && <div style={{color:"#111827",fontSize:"16px",padding:"8px"}}>Todavía no hay entregas anteriores.</div>}
+                {entregasAnterioresPantalla.map(e=>(
+                  <button key={e.id} type="button" onClick={()=>setActiva(e)}
+                    style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"7px",padding:"7px 8px",textAlign:"left",color:"#111827",cursor:"pointer",width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",overflow:"hidden"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:"5px",fontSize:"15px",fontWeight:900,minWidth:0}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>📦 {e.cliente}</span>
+                      <span style={{color:e.estado==="entregado"?"#166534":"#991b1b",whiteSpace:"nowrap",fontSize:"13px",flexShrink:0}}>{e.estado==="entregado"?"✓ ENTREGADA":e.estado==="no_entregado"?"✕ NO ENTREGADA":e.estado==="vuelto_deposito"?"✓ RECIBIDA EN DEPÓSITO":"↩ DEVOLUCIÓN"}</span>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:"5px",marginTop:"3px",fontSize:"13px",fontWeight:800,minWidth:0}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}} title={e.ordenReparto?.numero || "Sin número (sistema anterior)"}>🚚 {e.ordenReparto?.numero || "Sin número anterior"}</span>
+                      <span style={{whiteSpace:"nowrap",fontSize:"12px",flexShrink:0}}>{fechaEntregaHistorial(e).slice(0, 6) + fechaEntregaHistorial(e).slice(-2)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>}
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}

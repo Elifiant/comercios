@@ -1,0 +1,3076 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "./supabase";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+// Mapa de planificación: no consulta Geoapify mientras se navega por el mapa.
+const puntoValido = (lat, lng) => lat != null && lng != null &&
+  Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) &&
+  Math.abs(Number(lat)) <= 90 && Math.abs(Number(lng)) <= 180;
+
+function AjustarMapaRepartos({ puntos }) {
+  const map = useMap();
+  useEffect(() => {
+    if (puntos.length === 1) map.setView(puntos[0], 14);
+    else if (puntos.length > 1) map.fitBounds(puntos, { padding: [35, 35], maxZoom: 15 });
+  }, [map, puntos]);
+  return null;
+}
+
+function ElegirPuntoMapa({ onElegir }) {
+  useMapEvents({ click(evento) { onElegir([evento.latlng.lat, evento.latlng.lng]); } });
+  return null;
+}
+
+const iconoEntrega = (estado) => {
+  const color = ["asignado", "recibido", "en_reparto"].includes(estado) ? "#2563eb" :
+    ["entregado"].includes(estado) ? "#16a34a" : "#ea580c";
+  return L.divIcon({ className: "", html: `<div style="width:19px;height:19px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 1px 5px #33415588"></div>`, iconSize:[25,25], iconAnchor:[12,12] });
+};
+
+const ESTADO_LABEL = {
+  pendiente_preparacion: "📦 PENDIENTE",
+  preparado: "✅ PREPARADO",
+  asignado: "🚚 ASIGNADO",
+  en_reparto: "🚚 EN REPARTO",
+  entregado: "✅ ENTREGADO",
+  no_entregado: "❌ NO ENTREGADO",
+  devolucion_informada: "📦 RECHAZO INFORMADO AL DEPÓSITO",
+  vuelto_deposito: "✅ RECHAZO RECIBIDO EN DEPÓSITO",
+  anulacion_solicitada: "⏳ ANULACIÓN SOLICITADA",
+};
+
+const PROVINCIAS_ARGENTINAS = ["Buenos Aires", "Catamarca", "Chaco", "Chubut", "Ciudad Autónoma de Buenos Aires", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego, Antártida e Islas del Atlántico Sur", "Tucumán"];
+
+const esProvinciaCABA = provincia => ["ciudad autonoma de buenos aires", "caba", "capital federal"].includes(
+  String(provincia || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
+);
+
+// Filtro geográfico aproximado para CABA. El rectángulo no reemplaza la
+// comprobación visual de la dirección, porque incluye algunas zonas limítrofes.
+const dentroAreaCABA = (lat, lon) => Number.isFinite(Number(lat)) && Number.isFinite(Number(lon)) &&
+  Number(lat) >= -34.72 && Number(lat) <= -34.52 &&
+  Number(lon) >= -58.55 && Number(lon) <= -58.32;
+const candidatoEsCABA = r => {
+  if (!dentroAreaCABA(r.lat, r.lon)) return false;
+  const normalizar = v => String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const estado = normalizar(r.state);
+  const condado = normalizar(r.county);
+  // Si Geoapify identifica expresamente un partido del conurbano, rechazarlo.
+  const fuera = ["quilmes", "avellaneda", "lanus", "lomas de zamora", "vicente lopez", "san martin", "tres de febrero", "la matanza"];
+  if (fuera.some(v => condado === v || condado.includes(`partido de ${v}`))) return false;
+  return ["buenos aires", "ciudad autonoma de buenos aires", "capital federal", "caba"].some(v => estado === v) ||
+    ["capital federal", "ciudad autonoma de buenos aires"].some(v => condado.includes(v));
+};
+
+const fechaLocalISO = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dia}`;
+};
+
+
+// RutaChat de Depósito y Repartos. No modifica entregas ni estados logísticos.
+function RutaChatSupervisor({ empresaId, repartidores }) {
+  const [abierto, setAbierto] = useState(false);
+  const [miId, setMiId] = useState(null);
+  const [destino, setDestino] = useState("");
+  const [mensajes, setMensajes] = useState([]);
+  const [texto, setTexto] = useState("");
+  const [error, setError] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const fondoChatRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+    let vigente = true;
+    supabase.auth.getUser().then(({ data, error: err }) => {
+      if (!vigente) return;
+      if (err) setError(err.message);
+      else setMiId(data?.user?.id || null);
+    });
+    return () => { vigente = false; };
+  }, [abierto]);
+
+  useEffect(() => {
+    if (!repartidores.some(r => String(r.id) === destino)) {
+      setDestino(repartidores[0]?.id || "");
+    }
+  }, [repartidores, destino]);
+
+  const cargarMensajes = async () => {
+    if (!empresaId || !miId) return;
+    const { data, error: err } = await supabase.from("mensajes_operativos")
+      .select("id,empresa_id,remitente_id,destinatario_id,contenido,creado_at,leido_at")
+      .eq("empresa_id", empresaId)
+      .or(`remitente_id.eq.${miId},destinatario_id.eq.${miId}`)
+      .order("creado_at", { ascending: true }).limit(300);
+    if (err) setError(err.message);
+    else { setMensajes(data || []); setError(""); }
+  };
+
+  // Leer una conversación debe marcar sus mensajes recibidos como leídos
+  // en Supabase, no solamente mostrarlos en pantalla.
+  const marcandoLecturaRef = React.useRef(false);
+  useEffect(() => {
+    if (!abierto || !empresaId || !miId || !destino || marcandoLecturaRef.current) return;
+    const pendientes = mensajes.filter(m =>
+      String(m.destinatario_id) === String(miId) &&
+      String(m.remitente_id) === String(destino) && !m.leido_at);
+    if (!pendientes.length) return;
+    let vigente = true;
+    marcandoLecturaRef.current = true;
+    (async () => {
+      try {
+        const ids = pendientes.map(m => m.id);
+        const { data, error: err } = await supabase.from("mensajes_operativos")
+          .update({ leido_at: new Date().toISOString() })
+          .eq("empresa_id", empresaId)
+          .eq("destinatario_id", miId)
+          .eq("remitente_id", destino)
+          .is("leido_at", null)
+          .in("id", ids)
+          .select("id,leido_at");
+        if (err) throw err;
+        if (!vigente) return;
+        if (!data?.length) {
+          setError("No se pudieron marcar los mensajes como leídos. Revisar permisos de RutaChat.");
+          return;
+        }
+        const actualizados = new Map(data.map(m => [String(m.id), m.leido_at]));
+        setMensajes(prev => prev.map(m =>
+          actualizados.has(String(m.id)) ? {...m, leido_at: actualizados.get(String(m.id))} : m));
+        setError("");
+      } catch (e) {
+        if (vigente) setError("No se pudo registrar la lectura: " + (e.message || "error desconocido"));
+      } finally { marcandoLecturaRef.current = false; }
+    })();
+    return () => { vigente = false; };
+  }, [abierto, empresaId, miId, destino, mensajes]);
+
+  useEffect(() => {
+    if (!abierto || !empresaId || !miId) return;
+    cargarMensajes();
+    const intervalo = setInterval(cargarMensajes, 10000);
+    return () => clearInterval(intervalo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, empresaId, miId]);
+
+  const enviar = async () => {
+    if (!destino || !texto.trim() || enviando) return;
+    setEnviando(true);
+    try {
+      const { error: err } = await supabase.rpc("enviar_mensaje_operativo", {
+        p_destinatario: destino, p_contenido: texto.trim()
+      });
+      if (err) throw err;
+      setTexto("");
+      await cargarMensajes();
+    } catch (e) { setError(e.message || "No se pudo enviar el mensaje."); }
+    finally { setEnviando(false); }
+  };
+
+  const conversacion = mensajes.filter(m =>
+    (m.remitente_id === miId && m.destinatario_id === destino) ||
+    (m.remitente_id === destino && m.destinatario_id === miId));
+  const sinLeer = mensajes.filter(m => m.destinatario_id === miId && !m.leido_at).length;
+  // Al abrir el chat, cambiar de chofer o llegar un mensaje, mostrar el final.
+  useEffect(() => {
+    if (abierto && fondoChatRef.current) {
+      fondoChatRef.current.scrollTop = fondoChatRef.current.scrollHeight;
+    }
+  }, [abierto, destino, conversacion.length, conversacion[conversacion.length - 1]?.id]);
+
+
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
+    <button type="button" onClick={() => setAbierto(v => !v)}
+      style={{width:"100%",padding:12,border:0,borderRadius:8,background:"#166534",color:"white",fontWeight:900,cursor:"pointer"}}>
+      💬 RUTACHAT {sinLeer ? `· ${sinLeer} sin leer` : ""} {abierto ? "▲" : "▼"}
+    </button>
+    {abierto && <div style={{paddingTop:12}}>
+      <strong>Mensajes con los repartidores</strong>
+      <select aria-label="Elegir repartidor" value={destino} onChange={e => setDestino(e.target.value)}
+        style={{width:"100%",padding:10,marginTop:8,borderRadius:8,border:"1px solid #cbd5e1"}}>
+        {!repartidores.length && <option value="">No hay repartidores disponibles</option>}
+        {repartidores.map(r => <option key={r.id} value={r.id}>{r.nombre || r.email || "Repartidor"}</option>)}
+      </select>
+      {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}
+      <div ref={fondoChatRef} style={{maxHeight:280,overflowY:"auto",background:"#f8fafc",padding:10,borderRadius:8,marginTop:10}}>
+        {!conversacion.length && <div style={{fontSize:12,color:"#64748b"}}>Todavía no hay mensajes con este repartidor.</div>}
+        {conversacion.map(m => <div key={m.id} style={{textAlign:m.remitente_id === miId ? "right" : "left",marginBottom:8}}>
+          <div style={{display:"inline-block",maxWidth:"90%",background:m.remitente_id === miId ? "#dcfce7" : "#e2e8f0",padding:9,borderRadius:8,fontSize:13,overflowWrap:"anywhere"}}>
+            {m.contenido}
+            <div style={{fontSize:10,color:"#64748b",marginTop:4}}>{new Date(m.creado_at).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</div>
+          </div>
+        </div>)}
+      </div>
+      <textarea value={texto} onChange={e => setTexto(e.target.value)} maxLength={1000} rows={2}
+        placeholder="Escribí un mensaje al repartidor..." style={{width:"100%",boxSizing:"border-box",marginTop:10,padding:10,border:"1px solid #cbd5e1",borderRadius:8}} />
+      <button type="button" disabled={!destino || !texto.trim() || enviando} onClick={enviar}
+        style={{width:"100%",padding:12,background:"#166534",color:"white",border:0,borderRadius:8,fontWeight:900,opacity:!destino || !texto.trim() || enviando ? .5 : 1}}>
+        {enviando ? "ENVIANDO..." : "ENVIAR MENSAJE"}
+      </button>
+    </div>}
+  </section>;
+}
+
+
+// Aviso de RutaChat: funciona con el chat plegado, sin alterar las entregas.
+// El primer control de mensajes establece la base y no reproduce mensajes antiguos.
+function useRutaChatAviso(empresaId, usuarioId) {
+  const audioRef = React.useRef(null);
+  const vistosRef = React.useRef(null);
+
+  useEffect(() => {
+    if (!empresaId || !usuarioId) return;
+    let vigente = true;
+    let consultando = false;
+    vistosRef.current = null;
+
+    // Los navegadores móviles requieren un gesto del usuario para habilitar audio.
+    const habilitarAudio = () => {
+      try {
+        const AudioContexto = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContexto) return;
+        if (!audioRef.current) audioRef.current = new AudioContexto();
+        if (audioRef.current.state === "suspended") audioRef.current.resume().catch(() => {});
+      } catch (e) { console.warn("RutaChat: audio no disponible", e); }
+    };
+
+    const sonar = () => {
+      const contexto = audioRef.current;
+      if (!contexto || contexto.state !== "running") return;
+      try {
+        const ahora = contexto.currentTime;
+        // Tres avisos firmes, pensados para escucharse mejor en la calle.
+        // El volumen real nunca puede superar el límite del dispositivo.
+        [0, 0.46, 0.92].forEach((desfase, indice) => {
+          const inicio = ahora + desfase;
+          const oscilador = contexto.createOscillator();
+          const volumen = contexto.createGain();
+          oscilador.type = "square";
+          oscilador.frequency.setValueAtTime(indice === 1 ? 950 : 790, inicio);
+          oscilador.frequency.setValueAtTime(indice === 1 ? 1190 : 990, inicio + 0.18);
+          volumen.gain.setValueAtTime(0.0001, inicio);
+          volumen.gain.linearRampToValueAtTime(0.65, inicio + 0.012);
+          volumen.gain.setValueAtTime(0.65, inicio + 0.32);
+          volumen.gain.linearRampToValueAtTime(0.0001, inicio + 0.38);
+          oscilador.connect(volumen);
+          volumen.connect(contexto.destination);
+          oscilador.start(inicio);
+          oscilador.stop(inicio + 0.39);
+        });
+      } catch (e) { console.warn("RutaChat: no se pudo reproducir aviso", e); }
+    };
+
+    const revisar = async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const { data, error } = await supabase.from("mensajes_operativos")
+          .select("id")
+          .eq("empresa_id", empresaId)
+          .eq("destinatario_id", usuarioId)
+          .order("creado_at", { ascending: false })
+          .limit(100);
+        if (error || !vigente) return;
+        const actuales = new Set((data || []).map(m => m.id));
+        if (vistosRef.current !== null &&
+            [...actuales].some(id => !vistosRef.current.has(id))) sonar();
+        vistosRef.current = actuales;
+      } catch (e) { console.warn("RutaChat: consulta de avisos", e); }
+      finally { consultando = false; }
+    };
+
+    window.addEventListener("pointerdown", habilitarAudio, { capture: true });
+    window.addEventListener("keydown", habilitarAudio, { capture: true });
+    revisar();
+    const intervalo = window.setInterval(revisar, 8000);
+    return () => {
+      vigente = false;
+      window.clearInterval(intervalo);
+      window.removeEventListener("pointerdown", habilitarAudio, true);
+      window.removeEventListener("keydown", habilitarAudio, true);
+      vistosRef.current = null;
+      if (audioRef.current) {
+        audioRef.current.close().catch(() => {});
+        audioRef.current = null;
+      }
+    };
+  }, [empresaId, usuarioId]);
+}
+
+
+// Mapa exclusivo de la ruta enviada. Los números respetan el orden del repartidor.
+function MapaRutaEnviada({ paradas, ubicacionChofer, nombreChofer }) {
+  const ubicadas = paradas.filter(p => puntoValido(p.latitud, p.longitud));
+  const puntos = ubicadas.map(p => [Number(p.latitud), Number(p.longitud)]);
+  // Solo trazar la ruta pendiente: desde el GPS actual hacia las paradas
+  // todavía por visitar. Las finalizadas conservan su marcador histórico.
+  const pendientes = ubicadas.filter(p => !["entregado", "no_entregado", "devolucion_informada"].includes(p.estado));
+  const gpsValido = puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud);
+  const lineaPendiente = [
+    ...(gpsValido ? [[Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)]] : []),
+    ...pendientes.map(p => [Number(p.latitud), Number(p.longitud)]),
+  ];
+  if (!ubicadas.length && !puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud)) return <div style={{fontSize:12,padding:12,background:"#f8fafc",borderRadius:8}}>Todavía no hay coordenadas disponibles para mostrar el recorrido.</div>;
+  const centro = puntos[0] || [Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)];
+  const puntosEncuadre = puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud)
+    ? [...puntos, [Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)]] : puntos;
+  return <div>
+    <div style={{height:300,borderRadius:9,overflow:"hidden",marginTop:9}}>
+      <MapContainer center={centro} zoom={13} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
+        <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <AjustarMapaRepartos puntos={puntosEncuadre.length ? puntosEncuadre : [centro]} />
+        {lineaPendiente.length > 1 && <Polyline positions={lineaPendiente} pathOptions={{color:"#2563eb",weight:3,dashArray:"7,7"}} />}
+        {ubicadas.map(p => <Marker key={p.id} position={[Number(p.latitud),Number(p.longitud)]}
+          icon={L.divIcon({className:"",html:`<div style="width:30px;height:30px;border-radius:50%;background:${p.estado === "entregado" ? "#16a34a" : p.estado === "no_entregado" ? "#dc2626" : p.estado === "reintentar" ? "#f59e0b" : "#1d4ed8"};color:white;border:3px solid white;box-shadow:0 2px 6px #33415588;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900">${p.numero}</div>`,iconSize:[36,36],iconAnchor:[18,18]})}>
+          <Popup><strong>{p.numero}. {p.nombre}</strong><div>{p.direccion}</div><div>Estado: {p.estado || "Pendiente"}</div></Popup>
+        </Marker>)}
+        {puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud) &&
+          <Marker position={[Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)]}
+            icon={L.divIcon({className:"",html:'<div style="font-size:26px;filter:drop-shadow(0 2px 3px #334155);line-height:32px">🚚</div>',iconSize:[36,36],iconAnchor:[18,18]})}>
+            <Popup><strong>🚚 {nombreChofer || "Repartidor"}</strong><div>Última posición: {ubicacionChofer.ultima_posicion_at ? new Date(ubicacionChofer.ultima_posicion_at).toLocaleString("es-AR") : "Sin hora"}</div></Popup>
+          </Marker>}
+      </MapContainer>
+    </div>
+    <div style={{fontSize:11,color:"#475569",marginTop:6}}>🔵 Pendiente/en reparto · 🟢 Entregado · 🔴 No entregado · 🟠 Volver más tarde · 🚚 Última posición GPS</div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Los números indican el orden enviado. La línea parte del GPS y une únicamente las paradas pendientes; no representa calles ni navegación.</div>
+    {ubicadas.length !== paradas.length && <div style={{fontSize:12,color:"#92400e",marginTop:5}}>⚠️ {paradas.length - ubicadas.length} parada/s sin coordenadas no aparecen en el mapa.</div>}
+  </div>;
+}
+
+// Se consulta solo mientras se abre la ruta de un repartidor.
+// Las coordenadas se leen de perfiles; los estados, de las entregas.
+function RutaEnviadaViva({ empresaId, repartidorId, nombreChofer, paradasIniciales, abierto }) {
+  const [ubicacion, setUbicacion] = useState(null);
+  const [estados, setEstados] = useState({});
+  const [errorVivo, setErrorVivo] = useState("");
+  const [mapaAbierto, setMapaAbierto] = useState(false);
+  useEffect(() => {
+    if (!abierto || !empresaId || !repartidorId) return;
+    let vigente = true;
+    let consultando = false;
+    const consultar = async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const ids = paradasIniciales.map(p => p.id).filter(Boolean);
+        const consultas = [supabase.from("perfiles")
+          .select("id,latitud,longitud,ultima_posicion_at")
+          .eq("empresa_id", empresaId).eq("id", repartidorId).maybeSingle()];
+        if (ids.length) consultas.push(supabase.from("repartos_entregas")
+          .select("id,estado,salida_at,entregado_at,actualizado_at,motivo_no_entrega,observaciones").eq("empresa_id", empresaId).in("id", ids));
+        const resultados = await Promise.all(consultas);
+        const error = resultados.find(r => r.error)?.error;
+        if (error) throw error;
+        if (!vigente) return;
+        setUbicacion(resultados[0].data || null);
+        if (ids.length) {
+          const nuevos = {};
+          (resultados[1].data || []).forEach(e => { nuevos[String(e.id)] = e; });
+          setEstados(nuevos);
+        }
+        setErrorVivo("");
+      } catch (e) {
+        if (vigente) setErrorVivo(e?.message || "No se pudo actualizar el seguimiento.");
+      } finally { consultando = false; }
+    };
+    consultar();
+    const intervalo = window.setInterval(consultar, 30000);
+    return () => { vigente = false; window.clearInterval(intervalo); };
+  }, [abierto, empresaId, repartidorId, paradasIniciales.map(p => p.id).join("|")]);
+  if (!abierto) return null;
+  const paradas = paradasIniciales.map(p => ({...p, ...(estados[String(p.id)] || {})}));
+  return <>
+    <details open={mapaAbierto} onToggle={e => setMapaAbierto(e.currentTarget.open)} style={{marginTop:10,background:"white",border:"1px solid #bfdbfe",borderRadius:8,padding:10}}>
+      <summary style={{cursor:"pointer",fontWeight:800,color:"#1d4ed8"}}>🗺️ VER RECORRIDO EN MAPA</summary>
+      {mapaAbierto && <MapaRutaEnviada paradas={paradas} ubicacionChofer={ubicacion} nombreChofer={nombreChofer} />}
+    </details>
+    <div style={{fontSize:12,color:"#475569",marginTop:8}}>
+      🚚 {puntoValido(ubicacion?.latitud, ubicacion?.longitud)
+        ? `Última posición: ${ubicacion.ultima_posicion_at ? new Date(ubicacion.ultima_posicion_at).toLocaleTimeString("es-AR") : "hora no disponible"}`
+        : "Todavía no hay posición GPS registrada"} · Consulta cada 30 segundos
+    </div>
+    {errorVivo && <div style={{fontSize:12,color:"#b91c1c"}}>⚠️ {errorVivo}</div>}
+    <div style={{display:"grid",gap:6,marginTop:10}}>
+      {paradas.map(p => {
+        const partesDireccion = String(p.direccion || "").split(",").map(x => x.trim()).filter(Boolean);
+        // Ocultar la provincia solo en esta vista; conservar la dirección original en datos y mapa.
+        const ultima = partesDireccion[partesDireccion.length - 1] || "";
+        const provincias = ["Buenos Aires", "Catamarca", "Chaco", "Chubut", "Ciudad Autónoma de Buenos Aires", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán"];
+        if (provincias.some(x => x.toLocaleLowerCase("es") === ultima.toLocaleLowerCase("es"))) partesDireccion.pop();
+        // Evitar repetir localidad cuando también figura como partido.
+        if (partesDireccion.length >= 3 && partesDireccion[partesDireccion.length - 1].toLocaleLowerCase("es") === partesDireccion[partesDireccion.length - 2].toLocaleLowerCase("es")) partesDireccion.pop();
+        const direccionBreve = partesDireccion.join(", ") || "Dirección no disponible";
+        const estadoTexto = p.estado === "entregado" ? "✅ Entregada" : p.estado === "no_entregado" ? "❌ No entregada" : p.estado === "reintentar" ? "🟠 Más tarde" : "🔵 " + (p.estado || "Pendiente").replaceAll("_", " ");
+        const color = p.estado === "entregado" ? "#166534" : p.estado === "no_entregado" ? "#b91c1c" : p.estado === "reintentar" ? "#92400e" : "#1d4ed8";
+        const horaParada = valor => valor ? new Date(valor).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"}) : null;
+        const nota = p.estado === "no_entregado" ? [p.motivo_no_entrega, p.observaciones].filter(Boolean).join(" · ") : (p.observaciones || "");
+        return <div key={p.id} style={{background:"white",border:"1px solid #dbeafe",borderRadius:8,padding:"9px 12px",fontSize:16,lineHeight:1.4,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",columnGap:16,rowGap:3}}>
+            <strong style={{color,minWidth:25}}>{p.numero}.</strong>
+            <strong>{p.nombre}</strong>
+            <span>📍 {direccionBreve}</span>
+            <strong style={{color}}>{estadoTexto}</strong>
+            {p.estado === "entregado" && p.entregado_at && <strong style={{color:"#166534"}}>✅ {horaParada(p.entregado_at)}</strong>}
+            {p.estado === "no_entregado" && p.actualizado_at && <strong style={{color:"#b91c1c"}}>❌ {horaParada(p.actualizado_at)}</strong>}
+          </div>
+          {nota && <div title={nota} style={{marginTop:3,color:p.estado === "no_entregado" ? "#b91c1c" : "#475569",fontSize:15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📝 {p.estado === "no_entregado" ? "Motivo / nota: " : "Nota: "}{nota}</div>}
+        </div>;
+      })}
+    </div>
+  </>;
+}
+
+// Recorridos enviados por los repartidores: consulta exclusivamente de lectura.
+function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas, pedidos, ordenesCompartidas, codigoRepartosCompartido }) {
+  const [rutasAbiertas, setRutasAbiertas] = useState({});
+  const [datos, setDatos] = useState([]);
+  const [gps, setGps] = useState({});
+  const ordenesActuales = ordenesCompartidas.filter(o => ["preparado", "en_reparto"].includes(o.estado));
+  const codigoEmpresaRepartos = codigoRepartosCompartido;
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(null);
+  useEffect(() => {
+    if (!empresaId || !repartidores.length) { setDatos([]); setGps({}); return; }
+    let vigente = true;
+    let consultando = false;
+    const consultar = async () => {
+      if (consultando) return;
+      consultando = true;
+      try {
+        const ids = repartidores.map(r => r.id);
+        const [resEntregas, resGps] = await Promise.all([
+          supabase.from("repartos_entregas")
+            .select("id,repartidor_id,reparto_orden_id,estado,salida_at,entregado_at,actualizado_at")
+            .eq("empresa_id", empresaId).in("repartidor_id", ids),
+          supabase.from("perfiles")
+            .select("id,latitud,longitud,ultima_posicion_at")
+            .eq("empresa_id", empresaId).in("id", ids),
+        ]);
+        if (resEntregas.error) throw resEntregas.error;
+        if (resGps.error) throw resGps.error;
+        if (!vigente) return;
+        setDatos(resEntregas.data || []);
+        setGps(Object.fromEntries((resGps.data || []).map(p => [String(p.id), p])));
+        setRevision(new Date());
+        setError("");
+      } catch (e) { if (vigente) setError(e.message || "No se pudo actualizar el tablero."); }
+      finally { consultando = false; }
+    };
+    consultar();
+    const intervalo = window.setInterval(consultar, 30000);
+    return () => { vigente = false; window.clearInterval(intervalo); };
+  }, [empresaId, repartidores.map(r => r.id).join("|")]);
+  const hora = valor => valor && !Number.isNaN(new Date(valor).getTime())
+    ? new Date(valor).toLocaleTimeString("es-AR", { hour:"2-digit", minute:"2-digit" }) : "—";
+  const tiempoGps = valor => {
+    if (!valor) return "Sin posición reciente";
+    const minutos = Math.max(0, Math.floor((Date.now() - new Date(valor).getTime()) / 60000));
+    if (!Number.isFinite(minutos)) return "Hora GPS no disponible";
+    return minutos < 1 ? "hace menos de 1 min" : `hace ${minutos} min`;
+  };
+
+  const [rutas, setRutas] = useState([]);
+  const [cargando, setCargando] = useState(false);
+  const [ultimaRevision, setUltimaRevision] = useState(null);
+  const [pendientes, setPendientes] = useState({});
+  const versionesVistasRef = React.useRef(null);
+  const pendientesRef = React.useRef({});
+  const audioRutasRef = React.useRef(null);
+  const claveAvisos = empresaId && usuarioId ? `rutacomercio_rutas_vistas_${empresaId}_${usuarioId}` : null;
+
+  // Aviso independiente de RutaChat. El audio requiere interacción previa del navegador.
+  useEffect(() => {
+    if (!claveAvisos) return;
+    versionesVistasRef.current = null;
+    pendientesRef.current = {};
+    setPendientes({});
+    const habilitar = () => {
+      try {
+        const Constructor = window.AudioContext || window.webkitAudioContext;
+        if (!Constructor) return;
+        if (!audioRutasRef.current) audioRutasRef.current = new Constructor();
+        if (audioRutasRef.current.state === "suspended") audioRutasRef.current.resume().catch(() => {});
+      } catch (e) { console.warn("Aviso de rutas: audio no disponible", e); }
+    };
+    window.addEventListener("pointerdown", habilitar, true);
+    window.addEventListener("keydown", habilitar, true);
+    return () => {
+      window.removeEventListener("pointerdown", habilitar, true);
+      window.removeEventListener("keydown", habilitar, true);
+      if (audioRutasRef.current) {
+        audioRutasRef.current.close().catch(() => {});
+        audioRutasRef.current = null;
+      }
+    };
+  }, [claveAvisos]);
+
+  const sonarRuta = () => {
+    const contexto = audioRutasRef.current;
+    if (!contexto || contexto.state !== "running") return;
+    try {
+      const ahora = contexto.currentTime;
+      [0, 0.35, 0.70].forEach((desfase, i) => {
+        const inicio = ahora + desfase;
+        const osc = contexto.createOscillator();
+        const gain = contexto.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(i === 1 ? 880 : 740, inicio);
+        gain.gain.setValueAtTime(0.0001, inicio);
+        gain.gain.linearRampToValueAtTime(0.28, inicio + 0.02);
+        gain.gain.setValueAtTime(0.28, inicio + 0.21);
+        gain.gain.linearRampToValueAtTime(0.0001, inicio + 0.28);
+        osc.connect(gain);
+        gain.connect(contexto.destination);
+        osc.start(inicio);
+        osc.stop(inicio + 0.29);
+      });
+    } catch (e) { console.warn("Aviso de rutas: no se pudo reproducir", e); }
+  };
+
+  const marcarVista = (ruta) => {
+    if (!claveAvisos || !versionesVistasRef.current) return;
+    const id = String(ruta.repartidor_id);
+    const fecha = String(ruta.actualizado_at || "");
+    versionesVistasRef.current[id] = fecha;
+    try { window.localStorage.setItem(claveAvisos, JSON.stringify(versionesVistasRef.current)); }
+    catch (e) { console.warn("Aviso de rutas: no se pudo conservar lectura", e); }
+    const siguiente = { ...pendientesRef.current };
+    delete siguiente[id];
+    pendientesRef.current = siguiente;
+    setPendientes(siguiente);
+  };
+
+  useEffect(() => {
+    if (!empresaId || !claveAvisos) return;
+    let vigente = true;
+    let consultando = false;
+    const consultar = async () => {
+      if (consultando) return;
+      consultando = true;
+      if (vigente) setCargando(true);
+      try {
+        const { data, error: err } = await supabase
+          .from("repartos_rutas_planificadas")
+          .select("repartidor_id,entrega_ids,actualizado_at")
+          .eq("empresa_id", empresaId)
+          .order("actualizado_at", { ascending: false });
+        if (err) throw err;
+        if (vigente) {
+          const recibidas = data || [];
+          if (versionesVistasRef.current === null) {
+            // Primera consulta: establecer base, sin avisar por rutas antiguas.
+            let guardadas = {};
+            try { guardadas = JSON.parse(window.localStorage.getItem(claveAvisos) || "{}") || {}; }
+            catch (e) { guardadas = {}; }
+            recibidas.forEach(r => {
+              const id = String(r.repartidor_id);
+              if (!(id in guardadas)) guardadas[id] = String(r.actualizado_at || "");
+            });
+            versionesVistasRef.current = guardadas;
+            try { window.localStorage.setItem(claveAvisos, JSON.stringify(guardadas)); }
+            catch (e) { console.warn("Aviso de rutas: no se pudo conservar base", e); }
+          } else {
+            const nuevas = {};
+            recibidas.forEach(r => {
+              const id = String(r.repartidor_id);
+              if (String(r.actualizado_at || "") !== versionesVistasRef.current[id]) nuevas[id] = true;
+            });
+            const pendientesAnteriores = pendientesRef.current;
+            if (Object.keys(nuevas).some(id => !pendientesAnteriores[id])) sonarRuta();
+            pendientesRef.current = nuevas;
+            setPendientes(nuevas);
+          }
+          setRutas(recibidas);
+          setError("");
+          setUltimaRevision(new Date());
+        }
+      } catch (e) {
+        if (vigente) setError(e?.message || "No se pudieron consultar las rutas.");
+      } finally {
+        consultando = false;
+        if (vigente) setCargando(false);
+      }
+    };
+    consultar();
+    const intervalo = window.setInterval(consultar, 60000);
+    return () => { vigente = false; window.clearInterval(intervalo); };
+  }, [empresaId, claveAvisos]);
+
+  const entregasPorId = new Map(entregas.map(e => [String(e.id), e]));
+  const pedidosPorId = new Map(pedidos.map(p => [String(p.id), p]));
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10}}>
+      <strong>🚚 CONTROL DE REPARTIDORES</strong>
+      <span style={{fontSize:11,color:"#64748b"}}>GPS y entregas: cada 30 s · Rutas: cada 60 s{revision ? ` · ${hora(revision)}` : ""}</span>
+    </div>
+    {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}
+    {cargando && !ultimaRevision && <p style={{fontSize:12}}>Consultando rutas...</p>}
+    {!repartidores.length && <p style={{fontSize:12}}>Todavía no hay repartidores habilitados.</p>}
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {repartidores.map(rep => {
+        const r = rutas.find(x => String(x.repartidor_id) === String(rep.id));
+        // La orden numerada activa tiene prioridad sobre cualquier ruta histórica.
+        const ordenActual = ordenesActuales
+          .filter(o => String(o.repartidor_id) === String(rep.id))
+          // Una orden antigua puede conservar "en_reparto" por el error de cierre
+          // anterior. Si todas sus entregas están resueltas, no es la actual.
+          .filter(o => {
+            const items = datos.filter(e => String(e.reparto_orden_id) === String(o.id));
+            return !items.length || items.some(e => !["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado));
+          })
+          // El número más nuevo prevalece sobre el estado obsoleto de una orden anterior.
+          .sort((a,b) => Number(b.numero) - Number(a.numero))[0] || null;
+        // La orden numerada define QUÉ entregas pertenecen al reparto;
+        // la ruta enviada por el chofer define EN QUÉ ORDEN visitarlas.
+        // Intersecar por ID impide mezclar paradas de repartos anteriores.
+        const idsRutaEnviada = Array.isArray(r?.entrega_ids) ? r.entrega_ids : [];
+        const idsOrden = ordenActual ? datos.filter(e => String(e.reparto_orden_id) === String(ordenActual.id)).map(e => e.id) : [];
+        const idsPermitidos = new Set(idsOrden.map(String));
+        const idsEnviadosActuales = idsRutaEnviada.filter(id => idsPermitidos.has(String(id)));
+        const idsEnviadosSet = new Set(idsEnviadosActuales.map(String));
+        const ids = ordenActual ? [
+          ...idsEnviadosActuales,
+          ...idsOrden.filter(id => !idsEnviadosSet.has(String(id)))
+        ] : [];
+        const todas = datos.filter(e => String(e.repartidor_id) === String(rep.id));
+        const salidas = todas.filter(e => e.salida_at);
+        const ultimaSalida = salidas.reduce((max,e) => {
+          const t = new Date(e.salida_at).getTime();
+          return Number.isFinite(t) && t > max ? t : max;
+        }, 0);
+        // Priorizar las paradas de la ruta enviada para que cifras y detalle coincidan.
+        const base = ordenActual ? ids.map(id => todas.find(e => String(e.id) === String(id))).filter(Boolean)
+          : todas.filter(e => !e.reparto_orden_id && ["asignado","recibido","en_reparto","reintentar"].includes(e.estado));
+        const completadas = base.filter(e => e.estado === "entregado").length;
+        const fallidas = base.filter(e => e.estado === "no_entregado").length;
+        const pendientesRuta = base.filter(e => ["asignado","recibido","en_reparto","reintentar"].includes(e.estado)).length;
+        const enRuta = ordenActual ? ordenActual.estado === "en_reparto" || base.some(e => ["en_reparto","reintentar"].includes(e.estado)) : false;
+        const numeroReparto = ordenActual && codigoEmpresaRepartos != null ? `REP${String(codigoEmpresaRepartos).padStart(3,"0")}-${String(ordenActual.numero).padStart(6,"0")}` : null;
+        const porcentaje = base.length ? Math.round(completadas / base.length * 100) : 0;
+        const ubicacion = gps[String(rep.id)];
+        const paradasMapa = ids.map((id, indice) => {
+          const e = entregasPorId.get(String(id));
+          const ped = e?.pedido_id ? pedidosPorId.get(String(e.pedido_id)) : null;
+          return {
+            id, numero: indice + 1,
+            nombre: e?.pedido_id ? (ped?.cliente || "Entrega de NVI") : (e?.destinatario || "Entrega manual"),
+            direccion: e?.pedido_id ? (ped?.direccion || [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", ")) : [e?.direccion,e?.localidad,e?.partido,e?.provincia].filter(Boolean).join(", "),
+            latitud: puntoValido(e?.latitud,e?.longitud) ? e.latitud : ped?.latitud,
+            longitud: puntoValido(e?.latitud,e?.longitud) ? e.longitud : ped?.longitud,
+            estado: e?.estado || null,
+          };
+        });
+        return <details key={rep.id} onToggle={e => {
+          const estaAbierta = e.currentTarget.open;
+          setRutasAbiertas(prev => ({...prev,[String(rep.id)]:estaAbierta}));
+          if (estaAbierta && r) marcarVista(r);
+        }} style={{border:"1px solid #cbd5e1",borderRadius:9,background:"#f8fafc",padding:"10px 12px"}}>
+          <summary style={{cursor:"pointer",listStyle:"revert"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
+              <strong style={{minWidth:115,fontSize:14}}>🚚 {rep.nombre || rep.email || "Repartidor"}</strong>
+              <span style={{fontSize:12,color:enRuta?"#166534":"#475569"}}>{enRuta?"● En ruta":"Sin reparto activo"}</span>
+              {ordenActual && <span style={{fontSize:12}}>🕐 Inicio del reparto: <b>{hora(ordenActual.salida_at || ultimaSalida || null)}</b></span>}
+              <span style={{fontSize:13,color:"#166534",fontWeight:800}}>✅ {completadas}/{base.length}</span>
+              <span style={{fontSize:12}}>📦 {pendientesRuta} pendientes</span>
+              <span style={{fontSize:12,color:fallidas?"#b91c1c":"#475569"}}>❌ {fallidas}</span>
+              <span style={{fontSize:12}}>📍 GPS: {tiempoGps(ubicacion?.ultima_posicion_at)}</span>
+              {pendientes[String(rep.id)] && <span style={{fontSize:11,color:"#b91c1c",fontWeight:900}}>🔔 NUEVA RUTA</span>}
+              <span style={{fontSize:12,color:"#1d4ed8",fontWeight:800}}>Ver ruta {rutasAbiertas[String(rep.id)]?"▲":"▼"}</span>
+            </div>
+            <div style={{height:5,background:"#e2e8f0",borderRadius:8,overflow:"hidden",marginTop:9}}>
+              <div style={{height:"100%",width:`${porcentaje}%`,background:"#16a34a"}} />
+            </div>
+          </summary>
+          {ordenActual ? <div style={{marginTop:10}}>
+            <div style={{fontSize:17,color:"#111827",fontWeight:900,marginBottom:8}}>
+              🚚 {numeroReparto ? `Reparto ${numeroReparto} (Actual)` : "Reparto actual"}
+              <div style={{fontSize:14,fontWeight:600,marginTop:4}}>{ids.length} entrega/s · {ordenActual.estado === "en_reparto" ? "En reparto" : "En preparación"}</div>
+            </div>
+            <RutaEnviadaViva empresaId={empresaId} repartidorId={rep.id}
+              nombreChofer={rep.nombre || rep.email || "Repartidor"}
+              paradasIniciales={paradasMapa} abierto={Boolean(rutasAbiertas[String(rep.id)])} />
+          </div> : <p style={{fontSize:14,color:"#334155"}}>Este repartidor no tiene un reparto numerado activo ni una ruta enviada.</p>}
+        </details>;
+      })}
+    </div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:10}}>Tocá el renglón para abrir el mapa, las entregas y sus horarios. Para solicitar cambios, usá RutaChat.</div>
+  </section>;
+}
+
+
+
+// Avisos persistentes de cierre o suspension; lectura aislada por empresa.
+function AvisosRepartosSupervisor({ empresaId, repartidores }) {
+  const [avisos,setAvisos] = useState([]);
+  const [ordenesAvisos,setOrdenesAvisos] = useState({});
+  const [choferesAvisos,setChoferesAvisos] = useState({});
+  const [prefijoAvisos,setPrefijoAvisos] = useState(null);
+  const [error,setError] = useState("");
+  const [vistoHasta,setVistoHasta] = useState(0);
+  useEffect(() => {
+    if (!empresaId) return;
+    try { setVistoHasta(Number(localStorage.getItem(`rutacomercios:avisos:${empresaId}`) || 0)); } catch {}
+    let vigente = true;
+    const cargar = async () => {
+      const {data,error:err} = await supabase.from("repartos_avisos")
+        .select("id,reparto_orden_id,tipo,creado_at")
+        .eq("empresa_id",empresaId).order("creado_at",{ascending:false}).limit(40);
+      if (!vigente) return;
+      if (err) {setError(err.message);return;}
+      setAvisos(data || []);setError("");
+      const ids = [...new Set((data || []).map(a => a.reparto_orden_id).filter(Boolean))];
+      if (ids.length) {
+        const {data:ordenes,error:errorOrdenes} = await supabase.from("repartos_ordenes")
+          .select("id,numero").eq("empresa_id",empresaId).in("id",ids);
+        if (vigente && !errorOrdenes) setOrdenesAvisos(Object.fromEntries((ordenes || []).map(o => [o.id,o.numero])));
+        // Consulta independiente: si falta un dato del chofer, NO afecta los números.
+        const {data:asignaciones,error:errorAsignaciones} = await supabase.from("repartos_ordenes")
+          .select("id,repartidor_id").eq("empresa_id",empresaId).in("id",ids);
+        if (vigente && !errorAsignaciones) setChoferesAvisos(Object.fromEntries((asignaciones || []).map(o => [o.id,o.repartidor_id])));
+      }
+      const {data:prefijo,error:errorPrefijo} = await supabase.from("repartos_prefijos_empresa")
+        .select("codigo").eq("empresa_id",empresaId).maybeSingle();
+      if (vigente && !errorPrefijo) setPrefijoAvisos(prefijo?.codigo ?? null);
+    };
+    cargar(); const timer = window.setInterval(cargar,15000);
+    return ()=>{vigente=false;window.clearInterval(timer);};
+  },[empresaId]);
+  const numeroAviso = id => {
+    const numero = ordenesAvisos[id];
+    if (numero == null || prefijoAvisos == null) return "Reparto (número no disponible)";
+    return `REP${String(prefijoAvisos).padStart(3,"0")}-${String(numero).padStart(6,"0")}`;
+  };
+  const repartidorAviso = id => {
+    const repartidorId = choferesAvisos[id];
+    if (!repartidorId) return "No disponible";
+    const repartidor = repartidores.find(r => String(r.id) === String(repartidorId));
+    return repartidor?.nombre || repartidor?.email || "No disponible";
+  };
+  const nuevos = avisos.filter(a=>new Date(a.creado_at).getTime()>vistoHasta);
+  const marcar = () => {
+    const max = Math.max(Date.now(),...avisos.map(a=>new Date(a.creado_at).getTime()));
+    setVistoHasta(max);
+    try {localStorage.setItem(`rutacomercios:avisos:${empresaId}`,String(max));}catch{}
+  };
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:10,padding:10,marginBottom:12}}>
+    <details>
+      <summary style={{fontWeight:900,cursor:"pointer",fontSize:16}}>🔔 AVISOS DE REPARTOS {nuevos.length ? `· ${nuevos.length} nuevos` : ""}</summary>
+      {error && <p style={{color:"#b91c1c"}}>No se pudieron cargar avisos: {error}</p>}
+      {!avisos.length && !error && <p>Sin avisos registrados.</p>}
+      {avisos.map(a=><div key={a.id} style={{padding:"8px 0",borderBottom:"1px solid #e2e8f0",fontSize:14}}>
+        <strong>{a.tipo==="suspendido"?"⚠️ Reparto suspendido":"✅ Reparto finalizado"}</strong>
+        <span> · {new Date(a.creado_at).toLocaleString("es-AR")}</span>
+        <div style={{fontSize:12,color:"#64748b"}}>Número de reparto: <strong>{numeroAviso(a.reparto_orden_id)}</strong></div>
+        <div style={{fontSize:12,color:"#334155",marginTop:3}}>🚚 Repartidor responsable: <strong>{repartidorAviso(a.reparto_orden_id)}</strong></div>
+      </div>)}
+      <button type="button" onClick={marcar} style={{marginTop:8,padding:9,borderRadius:7,border:"1px solid #94a3b8",background:"#f8fafc",fontWeight:800}}>MARCAR COMO VISTOS</button>
+    </details>
+  </section>;
+}
+
+// Consulta compacta de repartos terminados, separada de las rutas en curso.
+function HistorialRepartosSupervisor({ empresaId, repartidores }) {
+  const [abierto, setAbierto] = useState(false);
+  const [ordenes, setOrdenes] = useState([]);
+  const [entregasHistoricas, setEntregasHistoricas] = useState([]);
+  const [codigo, setCodigo] = useState(null);
+  const [busqueda, setBusqueda] = useState("");
+  const [chofer, setChofer] = useState("");
+  const [fecha, setFecha] = useState("");
+  const [detalleId, setDetalleId] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+  const [limite, setLimite] = useState(30);
+
+  useEffect(() => {
+    if (!abierto || !empresaId) return;
+    let vigente = true;
+    const consultar = async () => {
+      setCargando(true); setError("");
+      try {
+        const [resOrdenes, resEntregas, resPrefijo] = await Promise.all([
+          supabase.from("repartos_ordenes")
+            .select("id,numero,estado,repartidor_id,creado_at,salida_at,finalizado_at,motivo_suspension,observaciones_suspension")
+            .eq("empresa_id", empresaId).order("numero", {ascending:false}).limit(500),
+          supabase.from("repartos_entregas")
+            .select("id,reparto_orden_id,repartidor_id,pedido_id,destinatario,direccion,localidad,estado,entregado_at,actualizado_at,motivo_no_entrega")
+            .eq("empresa_id", empresaId).not("reparto_orden_id", "is", null).limit(5000),
+          supabase.from("repartos_prefijos_empresa").select("codigo").eq("empresa_id", empresaId).maybeSingle()
+        ]);
+        if (resOrdenes.error) throw resOrdenes.error;
+        if (resEntregas.error) throw resEntregas.error;
+        if (resPrefijo.error) throw resPrefijo.error;
+        if (!vigente) return;
+        setOrdenes(resOrdenes.data || []);
+        setEntregasHistoricas(resEntregas.data || []);
+        setCodigo(resPrefijo.data?.codigo ?? null);
+      } catch (e) { if (vigente) setError(e?.message || "No se pudo consultar el historial."); }
+      finally { if (vigente) setCargando(false); }
+    };
+    consultar();
+    return () => { vigente = false; };
+  }, [abierto, empresaId]);
+
+  const numeroVisible = o => `REP${codigo == null ? "???" : String(codigo).padStart(3,"0")}-${String(o.numero).padStart(6,"0")}`;
+  const fechaVisible = valor => valor ? new Date(valor).toLocaleDateString("es-AR") : "Sin fecha";
+  const porOrden = useMemo(() => {
+    const mapa = new Map();
+    entregasHistoricas.forEach(e => {
+      if (!mapa.has(e.reparto_orden_id)) mapa.set(e.reparto_orden_id, []);
+      mapa.get(e.reparto_orden_id).push(e);
+    });
+    return mapa;
+  }, [entregasHistoricas]);
+  const historicas = ordenes.filter(o => {
+    const items = porOrden.get(o.id) || [];
+    // También contemplar órdenes antiguas cuyas entregas ya terminaron,
+    // aunque el estado de la orden no haya sido actualizado al finalizar.
+    const terminada = ["finalizado","suspendido"].includes(o.estado) || (items.length > 0 &&
+      items.every(e => ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado)));
+    if (!terminada) return false;
+    const texto = `${numeroVisible(o)} ${o.numero}`.toLowerCase();
+    const nombre = repartidores.find(r => String(r.id) === String(o.repartidor_id))?.nombre || "";
+    const fechaOrden = o.finalizado_at || items.map(e => e.entregado_at || e.actualizado_at).filter(Boolean).sort().at(-1) || o.salida_at || o.creado_at;
+    return (!busqueda || texto.includes(busqueda.toLowerCase().trim()) || nombre.toLowerCase().includes(busqueda.toLowerCase().trim())) &&
+      (!chofer || String(o.repartidor_id) === chofer) &&
+      (!fecha || fechaOrden?.slice(0,10) === fecha);
+  });
+  const campo = {padding:"7px 9px",fontSize:15,border:"1px solid #94a3b8",borderRadius:7,color:"#111827",background:"white",minWidth:0};
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:10,marginBottom:14,color:"#111827"}}>
+    <button type="button" onClick={() => setAbierto(v => !v)} style={{width:"100%",background:"#334155",color:"white",border:0,borderRadius:8,padding:11,fontWeight:900,fontSize:16,cursor:"pointer"}}>
+      {abierto ? "▼" : "▶"} 📚 HISTORIAL DE REPARTOS
+    </button>
+    {abierto && <div style={{marginTop:10}}>
+      <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:10}}>
+        <input aria-label="Buscar número de reparto o chofer" placeholder="🔎 Número o chofer" value={busqueda} onChange={e=>{setBusqueda(e.target.value);setLimite(30);}} style={{...campo,flex:"2 1 170px"}} />
+        <input aria-label="Filtrar por fecha" type="date" value={fecha} onChange={e=>{setFecha(e.target.value);setLimite(30);}} style={{...campo,flex:"1 1 145px"}} />
+        <select aria-label="Filtrar por repartidor" value={chofer} onChange={e=>{setChofer(e.target.value);setLimite(30);}} style={{...campo,flex:"1 1 145px"}}>
+          <option value="">Todos los choferes</option>
+          {repartidores.map(r=><option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}
+        </select>
+      </div>
+      {cargando && <div>Consultando historial...</div>}
+      {error && <div style={{color:"#b91c1c"}}>⚠️ {error}</div>}
+      {!cargando && !error && !historicas.length && <div style={{fontSize:15}}>No hay repartos finalizados con estos filtros.</div>}
+      {historicas.slice(0,limite).map(o => {
+        const items = porOrden.get(o.id) || [];
+        const nombre = repartidores.find(r => String(r.id) === String(o.repartidor_id))?.nombre || "Sin chofer";
+        const cierre = o.finalizado_at || items.map(e => e.entregado_at || e.actualizado_at).filter(Boolean).sort().at(-1) || o.salida_at || o.creado_at;
+        const entregadas = items.filter(e=>e.estado === "entregado").length;
+        return <div key={o.id} style={{borderBottom:"1px solid #cbd5e1"}}>
+          <button type="button" onClick={()=>setDetalleId(v=>v===o.id?null:o.id)} style={{width:"100%",textAlign:"left",padding:"9px 5px",background:"transparent",border:0,cursor:"pointer",color:"#111827",fontSize:15,display:"flex",flexWrap:"wrap",alignItems:"center",gap:"5px 14px"}}>
+            <strong style={{color:"#1d4ed8"}}>🚚 {numeroVisible(o)}</strong>
+            <span>📅 {fechaVisible(cierre)}</span><span>👤 {nombre}</span>
+            <strong>{o.estado === "suspendido" ? "⚠️ SUSPENDIDO" : "✅ FINALIZADO"}</strong>
+            <strong>📦 {entregadas}/{items.length} entregadas</strong>
+            <span style={{marginLeft:"auto",fontWeight:800}}>{detalleId===o.id?"▲":"▼"}</span>
+          </button>
+          {detalleId===o.id && <div style={{background:"#f8fafc",padding:"5px 10px 9px",borderRadius:7}}>
+            <div style={{fontSize:14,marginBottom:8}}>
+              <strong>Inicio:</strong> {o.salida_at ? new Date(o.salida_at).toLocaleString("es-AR") : "Sin horario registrado"}
+              {" · "}<strong>Fin:</strong> {o.finalizado_at ? new Date(o.finalizado_at).toLocaleString("es-AR") : "Sin horario registrado"}
+              {o.salida_at && o.finalizado_at && new Date(o.finalizado_at)>=new Date(o.salida_at) && <span> · <strong>Duracion:</strong> {Math.floor((new Date(o.finalizado_at)-new Date(o.salida_at))/60000)} min</span>}
+              {o.estado === "suspendido" && <div style={{color:"#9a3412"}}>⚠️ Motivo: {({vehiculo:"Vehiculo averiado",salud:"Problema de salud",otros:"Otro motivo"})[o.motivo_suspension] || "No registrado"} · {o.observaciones_suspension || "Sin observaciones"}</div>}
+            </div>
+            {!items.length && <div>Sin entregas vinculadas.</div>}
+            {items.map(e=><div key={e.id} style={{padding:"5px 0",borderBottom:"1px solid #e2e8f0",display:"flex",flexWrap:"wrap",gap:"4px 12px",fontSize:15}}>
+              <strong>📦 {e.destinatario || (e.pedido_id ? "Entrega NVI" : "Destinatario")}</strong>
+              <span>📍 {[e.direccion,e.localidad].filter(Boolean).join(", ") || "Sin dirección"}</span>
+              <strong style={{color:e.estado==="entregado"?"#166534":"#991b1b"}}>{e.estado==="entregado"?"✓ Entregada":e.estado.replaceAll("_"," ")}</strong>
+              <span>🕐 {e.entregado_at || e.actualizado_at ? new Date(e.entregado_at || e.actualizado_at).toLocaleString("es-AR") : "Sin horario registrado"}</span>
+              {e.motivo_no_entrega && <span title={e.motivo_no_entrega}>📝 {e.motivo_no_entrega}</span>}
+            </div>)}
+          </div>}
+        </div>;
+      })}
+      {historicas.length>limite && <button type="button" onClick={()=>setLimite(v=>v+30)} style={{...campo,marginTop:9,cursor:"pointer",fontWeight:800}}>Mostrar 30 repartos más ({historicas.length-limite} restantes)</button>}
+      {ordenes.length===500 && <div style={{fontSize:13,marginTop:7}}>Se muestran hasta los últimos 500 repartos. Para consultar anteriores será necesario ampliar la búsqueda.</div>}
+    </div>}
+  </section>;
+}
+
+// Confirmación de salida: agrupa entregas ya asignadas en una orden única.
+// La RPC confirma y numera en una transacción; nunca se calcula el número en el navegador.
+function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaEntrega, modoIndependiente, ordenesCompartidas, codigoRepartosCompartido, consultarOrdenesCompartidas, errorOrdenesCompartidas }) {
+  const [abierto, setAbierto] = useState(true);
+  const ordenes = ordenesCompartidas;
+  const codigo = codigoRepartosCompartido;
+  const [seleccion, setSeleccion] = useState("");
+  const [entregaId, setEntregaId] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [mensaje, setMensaje] = useState("");
+  const [cargandoOrdenes, setCargandoOrdenes] = useState(false);
+  const [alertaAnticipada, setAlertaAnticipada] = useState(null);
+
+  const recargar = async () => {
+    setCargandoOrdenes(true);
+    try { await consultarOrdenesCompartidas(); }
+    catch (e) { setMensaje("❌ " + (e.message || "No se pudieron consultar los repartos.")); }
+    finally { setCargandoOrdenes(false); }
+  };
+  const formato = o => `REP${codigo == null ? "???" : String(codigo).padStart(3,"0")}-${String(o.numero).padStart(6,"0")}`;
+  // Los repartos cerrados (y los antiguos con todas sus entregas resueltas)
+  // se consultan en Historial, no en el selector de gestión activa.
+  const ordenesActivas = ordenes.filter(o => {
+    if (o.estado === "finalizado") return false;
+    const items = entregas.filter(e => e.reparto_orden_id === o.id);
+    const historicaPorEntregas = items.length > 0 &&
+      items.every(e => ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado));
+    return !historicaPorEntregas;
+  });
+  const orden = ordenesActivas.find(o => o.id === seleccion);
+  
+  const incluidas = orden ? entregas.filter(e => e.reparto_orden_id === seleccion) : [];
+  const yaSalio = Boolean(orden?.salida_at) || incluidas.some(e => Boolean(e.salida_at) || ["en_reparto","reintentar","entregado","no_entregado","devolucion_informada"].includes(e.estado));
+  const disponibles = entregas.filter(e => !e.reparto_orden_id && !e.salida_at &&
+    ["preparado","asignado"].includes(e.estado) &&
+    (!e.repartidor_id || String(e.repartidor_id) === String(orden?.repartidor_id || "")));
+  const nombreChofer = id => {
+    if (!id) return "Sin repartidor";
+    const rep = repartidores.find(r => String(r.id) === String(id));
+    return rep?.nombre || rep?.email || "Repartidor asignado";
+  };
+  const nombreEntrega = e => [e.destinatario || (e.pedido_id ? "Entrega NVI" : "Entrega manual"),e.direccion,e.numero_remito ? `Remito ${e.numero_remito}` : ""].filter(Boolean).join(" · ");
+  const ejecutar = async (operacion, mensajeExito) => {
+    if (ocupado) return;
+    setOcupado(true); setMensaje("");
+    try {
+      const {data,error} = await operacion();
+      if (error) throw error;
+      await onCambio();
+      await recargar();
+      setMensaje(mensajeExito(data));
+      return data;
+    } catch(e) { setMensaje("❌ " + (e.message || "No se pudo completar la operación.")); }
+    finally { setOcupado(false); }
+  };
+  const crear = async () => {
+    if (!window.confirm("¿Generar un NUEVO REPARTO numerado, todavía sin chofer?")) return;
+    const data = await ejecutar(() => supabase.rpc("crear_nuevo_reparto"),
+      d => `✅ Reparto ${d?.[0]?.numero_reparto || "creado"}. Ahora podés agregar entregas y asignar chofer.`);
+    if (data?.[0]?.orden_id) setSeleccion(data[0].orden_id);
+  };
+  // Borrado exclusivamente de repartos vacíos, sin chofer y aún en preparación.
+  // Órdenes antiguas pueden tener confirmado_at pese a no haber salido;
+  // ese dato no debe ocultar el botón si no hay entregas ni chofer.
+  // El servidor debe autorizar la eliminación mediante sus políticas de seguridad.
+  const eliminarRepartoVacio = async () => {
+    if (!modoIndependiente || !orden || ocupado || orden.estado !== "preparado" ||
+        orden.repartidor_id || orden.salida_at || incluidas.length) return;
+    const numero = formato(orden);
+    if (!window.confirm(`¿ELIMINAR ${numero}?\n\nEstá en preparación, sin chofer y sin entregas. Esta acción no se puede deshacer.`)) return;
+    setOcupado(true);
+    setMensaje("");
+    try {
+      // Verificar nuevamente en la base que no existan entregas asociadas,
+      // incluso si el listado local no está actualizado.
+      const { data: vinculadas, error: errorVinculadas } = await supabase
+        .from("repartos_entregas").select("id").eq("empresa_id", empresaId)
+        .eq("reparto_orden_id", orden.id).limit(1);
+      if (errorVinculadas) throw errorVinculadas;
+      if (vinculadas?.length) throw new Error("Este reparto tiene entregas vinculadas y no se puede eliminar.");
+      const { data: borradas, error: errorBorrado } = await supabase
+        .from("repartos_ordenes").delete()
+        .eq("id", orden.id).eq("empresa_id", empresaId)
+        .eq("estado", "preparado")
+        .is("repartidor_id", null)
+        .is("salida_at", null)
+        .select("id");
+      if (errorBorrado) throw errorBorrado;
+      if (!borradas?.length) throw new Error("No se pudo eliminar. Puede que el reparto haya cambiado o que falten permisos.");
+      setSeleccion("");
+      setEntregaId("");
+      await recargar();
+      setMensaje(`✅ ${numero} eliminado. Los números de los demás repartos no cambian.`);
+    } catch (e) {
+      setMensaje("❌ " + (e.message || "No se pudo eliminar el reparto vacío."));
+    } finally { setOcupado(false); }
+  };
+  const agregarConfirmado = async (idEntrega) => {
+    const data = await ejecutar(() => supabase.rpc("agregar_entrega_a_reparto", {p_orden_id:seleccion,p_entrega_id:idEntrega}),
+      () => "✅ Entrega agregada al reparto. El número no cambia.");
+    if (data !== undefined) setEntregaId("");
+  };
+  const agregar = async () => {
+    if (!seleccion || !entregaId || ocupado) return;
+    const elegida = entregas.find(e => String(e.id) === String(entregaId));
+    const hoy = fechaLocalISO();
+    const fecha = String(elegida?.fecha_programada || "").slice(0, 10);
+    if (fecha > hoy && /^\d{4}-\d{2}-\d{2}$/.test(fecha) && orden?.repartidor_id) {
+      setAlertaAnticipada({tipo:"agregar", entregaId, nombre:nombreChofer(orden.repartidor_id), futuras:[elegida], hoy, numero:formato(orden)});
+      return;
+    }
+    await agregarConfirmado(entregaId);
+  };
+  // Corrección de planificación exclusiva de Repartos independiente.
+  // El servidor vuelve a verificar que el reparto no haya salido ni sido recibido.
+  const quitarEntrega = async (e) => {
+    if (!modoIndependiente || !orden || ocupado || orden.estado !== "preparado" || yaSalio || e.pedido_id) return;
+    if (!window.confirm(`¿QUITAR del reparto ${formato(orden)} la entrega de ${e.destinatario || "este destinatario"}?\n\nLa entrega NO se elimina y conserva su fecha programada. Quedará preparada y sin repartidor.`)) return;
+    await ejecutar(() => supabase.rpc("quitar_entrega_reparto_en_preparacion", {
+      p_orden_id: orden.id, p_entrega_id: e.id
+    }), () => "✅ Entrega retirada del reparto. Conserva su fecha y queda disponible para una futura asignación.");
+  };
+  const confirmarAsignacion = async (id) => {
+    setAlertaAnticipada(null);
+    await ejecutar(() => supabase.rpc("asignar_repartidor_a_reparto", {p_orden_id:seleccion,p_repartidor_id:id || null}),
+      () => id ? "✅ Repartidor asignado al reparto." : "✅ Reparto sin chofer asignado.");
+  };
+  const esFutura = (e, hoy) => {
+    const fecha = String(e?.fecha_programada || "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(fecha) && fecha > hoy;
+  };
+  const asignar = async (id) => {
+    if (!seleccion || ocupado || String(id || "") === String(orden?.repartidor_id || "")) return;
+    if (!id) { await confirmarAsignacion(null); return; }
+    const hoy = fechaLocalISO();
+    // Mostrar la advertencia inmediatamente cuando la fecha ya figura en pantalla.
+    // La comprobación adicional de Supabase no debe ocultar esta advertencia.
+    const locales = incluidas.filter(e => esFutura(e, hoy));
+    if (locales.length) {
+      setAlertaAnticipada({tipo:"asignar", id, nombre:nombreChofer(id), futuras:locales, hoy, numero:formato(orden)});
+      return;
+    }
+    setOcupado(true);
+    setMensaje("");
+    let futuras = [];
+    try {
+      const { data, error } = await supabase.from("repartos_entregas")
+        .select("id,pedido_id,destinatario,direccion,numero_remito,fecha_programada")
+        .eq("empresa_id", empresaId).eq("reparto_orden_id", seleccion);
+      if (error) throw error;
+      if (!data?.length && incluidas.length) throw new Error("No se pudieron verificar las fechas de las entregas.");
+      futuras = (data || []).filter(e => esFutura(e, hoy));
+    } catch (e) {
+      setMensaje("❌ No se asignó el chofer: " + (e.message || "Error consultando fechas."));
+      return;
+    } finally {
+      setOcupado(false);
+    }
+    if (futuras.length) {
+      setAlertaAnticipada({tipo:"asignar", id, nombre:nombreChofer(id), futuras, hoy, numero:formato(orden)});
+      return;
+    }
+    await confirmarAsignacion(id);
+  };
+  return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
+    <button type="button" onClick={() => setAbierto(x => !x)} style={{width:"100%",padding:12,border:0,borderRadius:8,background:"#1d4ed8",color:"white",fontWeight:900}}>
+      🚚 GESTIÓN DE REPARTOS {abierto ? "▲" : "▼"}
+    </button>
+    {abierto && <div style={{marginTop:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8}}>
+        <button type="button" disabled={ocupado} onClick={crear} style={{padding:13,border:0,borderRadius:8,background:"#166534",color:"white",fontWeight:900}}>🚚 NUEVO REPARTO</button>
+
+      </div>
+      <div style={{fontSize:12,color:"#475569",marginTop:8}}>{modoIndependiente ? "Podés crear entregas sin reparto desde Gestión de entregas. Cuando estén preparadas, incorporalas aquí." : "Para las NVI, primero prepará la entrega desde Depósito; luego incorporala a este reparto."}</div>
+      <label style={{display:"block",fontSize:13,fontWeight:800,marginTop:12}}>Elegir reparto
+        <select value={seleccion} onChange={e => {setSeleccion(e.target.value);setEntregaId("");}} style={{display:"block",width:"100%",padding:10,marginTop:5}}>
+          <option value="">Seleccionar reparto...</option>
+          {ordenesActivas.map(o => <option key={o.id} value={o.id}>{formato(o)} · {o.estado === "preparado" ? "En preparación" : o.estado.replaceAll("_", " ")} · {o.repartidor_id ? `Chofer: ${nombreChofer(o.repartidor_id)}` : "Sin chofer"}</option>)}
+        </select>
+      </label>
+      {cargandoOrdenes && <p style={{fontSize:12}}>Actualizando repartos...</p>}
+      {errorOrdenesCompartidas && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {errorOrdenesCompartidas}</p>}
+      {orden && <div style={{border:"1px solid #bfdbfe",background:"#eff6ff",padding:12,borderRadius:8,marginTop:12}}>
+        <strong style={{fontSize:18}}>{formato(orden)}</strong>
+        <div style={{fontSize:12,marginTop:4}}>Estado: {orden.estado === "preparado" ? "En preparación" : orden.estado.replaceAll("_", " ")} · {incluidas.length} entrega/s · {orden.repartidor_id ? `Chofer: ${nombreChofer(orden.repartidor_id)}` : "Sin repartidor"}</div>
+        {modoIndependiente && orden.estado === "preparado" && !orden.repartidor_id && !orden.salida_at && incluidas.length === 0 &&
+          <button type="button" disabled={ocupado} onClick={eliminarRepartoVacio}
+            style={{marginTop:10,padding:"9px 12px",border:"1px solid #dc2626",borderRadius:7,background:"#fef2f2",color:"#991b1b",fontWeight:800,cursor:"pointer"}}>
+            🗑️ ELIMINAR REPARTO VACÍO
+          </button>}
+        {incluidas.some(e => esFutura(e, fechaLocalISO())) &&
+          <div style={{background:"#fef2f2",border:"3px solid #dc2626",borderRadius:9,padding:12,marginTop:12,color:"#991b1b",fontSize:16,fontWeight:900}}>
+            ⚠️ ATENCIÓN: ESTE REPARTO CONTIENE ENTREGAS CON FECHA FUTURA.
+            <div style={{fontSize:13,marginTop:5}}>Antes de asignar un chofer o agregar más entregas, revisá las fechas programadas.</div>
+          </div>}
+        <div style={{fontWeight:800,fontSize:13,marginTop:12}}>Entregas del reparto</div>
+        {incluidas.length ? incluidas.map(e => <div key={e.id} style={{padding:"8px 0",borderBottom:"1px solid #bfdbfe",fontSize:13,display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
+          <span>{nombreEntrega(e)} · {e.estado}{e.fecha_programada ? ` · 📅 Programada: ${String(e.fecha_programada).slice(0,10).split("-").reverse().join("/")}` : ""}{(() => {
+            const instante = e.estado === "entregado" ? (e.entregado_at || e.actualizado_at) :
+              ["no_entregado", "reintentar", "devolucion_informada", "vuelto_deposito"].includes(e.estado) ? e.actualizado_at : null;
+            return instante && !Number.isNaN(new Date(instante).getTime()) ? ` · 🕐 ${new Date(instante).toLocaleString("es-AR", {day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}` : "";
+          })()}</span>
+          {modoIndependiente && !e.pedido_id && orden.estado === "preparado" && !yaSalio && ["preparado","asignado"].includes(e.estado) &&
+            <button type="button" disabled={ocupado} onClick={() => quitarEntrega(e)} style={{padding:"8px 10px",border:"1px solid #b45309",borderRadius:7,background:"#fff7ed",color:"#9a3412",fontWeight:800,cursor:"pointer"}}>↩️ QUITAR DEL REPARTO</button>}
+        </div>) : <div style={{fontSize:12,color:"#64748b"}}>Todavía no hay entregas.</div>}
+        {orden.estado === "preparado" && !yaSalio && <>
+          <label style={{display:"block",fontSize:13,fontWeight:800,marginTop:12}}>Agregar entrega existente
+            <select value={entregaId} onChange={e=>setEntregaId(e.target.value)} style={{display:"block",width:"100%",padding:10,marginTop:5}}>
+              <option value="">Seleccionar entrega preparada...</option>
+              {disponibles.map(e => <option key={e.id} value={e.id}>{nombreEntrega(e)}</option>)}
+            </select>
+          </label>
+          <button type="button" disabled={!entregaId || ocupado} onClick={agregar} style={{padding:10,marginTop:8,border:0,borderRadius:7,background:"#2563eb",color:"white",fontWeight:900,opacity:entregaId ? 1 : .5}}>＋ AGREGAR ENTREGA</button>
+          <label style={{display:"block",fontSize:13,fontWeight:800,marginTop:12}}>Asignar repartidor
+            <select value={orden.repartidor_id || ""} disabled={ocupado} onChange={e=>asignar(e.target.value)} style={{display:"block",width:"100%",padding:10,marginTop:5}}>
+              <option value="">Sin repartidor asignado</option>
+              {repartidores.map(r=><option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}
+            </select>
+          </label>
+          <div style={{fontSize:12,color:"#475569",marginTop:7}}>Podés agregar entregas antes de la salida, incluso si el chofer ya está asignado.</div>
+        </>}
+      </div>}
+      {mensaje && <p style={{fontSize:13,fontWeight:700}}>{mensaje}</p>}
+    </div>}
+    {alertaAnticipada && <div role="dialog" aria-modal="true" aria-label="Advertencia de entrega anticipada"
+      style={{position:"fixed",inset:0,zIndex:99999,background:"#0f172acc",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"white",border:"4px solid #dc2626",borderRadius:14,padding:22,maxWidth:590,width:"100%",maxHeight:"85vh",overflowY:"auto",boxShadow:"0 12px 45px #0005",color:"#111827"}}>
+        <div style={{fontSize:23,fontWeight:950,color:"#b91c1c",marginBottom:12}}>⚠️ ATENCIÓN: ENTREGA ANTICIPADA</div>
+        <p style={{fontSize:17,fontWeight:800}}>{alertaAnticipada.tipo === "agregar" ? `Estás por agregar una entrega con fecha futura al ${alertaAnticipada.numero}, que ya tiene asignado al chofer ${alertaAnticipada.nombre}.` : `Estás por asignar ${alertaAnticipada.numero} al chofer ${alertaAnticipada.nombre}, pero hay ${alertaAnticipada.futuras.length} entrega/s con fecha futura.`}</p>
+        <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:9,padding:12,marginBottom:14}}>
+          {alertaAnticipada.futuras.map(e => {
+            const fecha = String(e.fecha_programada).slice(0,10);
+            const dias = Math.round((Date.parse(fecha + "T12:00:00") - Date.parse(alertaAnticipada.hoy + "T12:00:00")) / 86400000);
+            return <div key={e.id} style={{fontSize:16,padding:"7px 0",borderBottom:"1px solid #fecaca"}}>
+              <strong>{nombreEntrega(e)}</strong><div>📅 Programada: <strong>{fecha.split("-").reverse().join("/")}</strong> · {dias} día/s antes</div>
+            </div>;
+          })}
+        </div>
+        <p style={{fontSize:16,fontWeight:800}}>{alertaAnticipada.tipo === "agregar" ? "¿Querés agregar esta entrega igualmente?" : "¿Querés asignar el chofer igualmente?"}</p>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <button type="button" onClick={() => setAlertaAnticipada(null)} style={{flex:"1 1 180px",padding:13,borderRadius:8,border:"2px solid #64748b",background:"white",fontWeight:900,cursor:"pointer"}}>CANCELAR · REVISAR FECHAS</button>
+          <button type="button" onClick={() => { const a = alertaAnticipada; setAlertaAnticipada(null); if (a.tipo === "agregar") agregarConfirmado(a.entregaId); else confirmarAsignacion(a.id); }} style={{flex:"1 1 180px",padding:13,borderRadius:8,border:0,background:"#b91c1c",color:"white",fontWeight:900,cursor:"pointer"}}>{alertaAnticipada.tipo === "agregar" ? "AGREGAR IGUALMENTE" : "ASIGNAR IGUALMENTE"}</button>
+        </div>
+      </div>
+    </div>}
+  </section>;
+}
+
+export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
+  const [perfil, setPerfil] = useState(perfilProp || null);
+  const [empresaId, setEmpresaId] = useState(perfilProp?.empresa_id || null);
+  useRutaChatAviso(empresaId, sesionProp?.user?.id || perfil?.id);
+  const [empresaNombre, setEmpresaNombre] = useState(perfilProp?.empresa || "");
+  const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState("");
+  const [modoIndependiente, setModoIndependiente] = useState(false);
+  const [nuevaEntregaAbierta, setNuevaEntregaAbierta] = useState(false);
+  const [entregaManualActiva, setEntregaManualActiva] = useState(null);
+  const [guardandoManual, setGuardandoManual] = useState(false);
+  const [corrigiendoPunto, setCorrigiendoPunto] = useState(false);
+  const [editandoDomicilio, setEditandoDomicilio] = useState(false);
+  const [domicilioEditado, setDomicilioEditado] = useState({direccion:"",localidad:"",provincia:"",partido:""});
+  const [puntoElegido, setPuntoElegido] = useState(null);
+  const [manual, setManual] = useState({ destinatario: "", direccion: "", localidad: "", provincia: "", partido: "", telefono: "", referencia_domicilio: "", bultos: "1", fecha_programada: fechaLocalISO(), numero_remito: "", numero_factura: "", observaciones: "" });
+  const [pedidos, setPedidos] = useState([]);
+  const [entregas, setEntregas] = useState([]);
+  const [pedidoActivo, setPedidoActivo] = useState(null);
+  const [guardando, setGuardando] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
+  const [bandeja, setBandeja] = useState("pendientes");
+  const [fechaConsultaEntregas, setFechaConsultaEntregas] = useState(fechaLocalISO());
+  const [fechaHistorialRetiradas, setFechaHistorialRetiradas] = useState("");
+  // Fuente única de órdenes para Gestión y Control. No duplicar consultas por sección.
+  const [ordenesCompartidas, setOrdenesCompartidas] = useState([]);
+  const [codigoRepartosCompartido, setCodigoRepartosCompartido] = useState(null);
+  const [revisionOrdenesCompartidas, setRevisionOrdenesCompartidas] = useState(null);
+  const [errorOrdenesCompartidas, setErrorOrdenesCompartidas] = useState("");
+  const consultarOrdenesCompartidas = React.useCallback(async () => {
+    if (!empresaId) return;
+    const [resOrdenes, resPrefijo] = await Promise.all([
+      supabase.from("repartos_ordenes")
+        .select("id,numero,repartidor_id,estado,confirmado_at,salida_at")
+        .eq("empresa_id", empresaId).order("numero", {ascending:false}).limit(100),
+      supabase.from("repartos_prefijos_empresa")
+        .select("codigo").eq("empresa_id",empresaId).maybeSingle(),
+    ]);
+    if (resOrdenes.error) throw resOrdenes.error;
+    if (resPrefijo.error) throw resPrefijo.error;
+    setOrdenesCompartidas(resOrdenes.data || []);
+    setCodigoRepartosCompartido(resPrefijo.data?.codigo ?? null);
+    setRevisionOrdenesCompartidas(new Date());
+    setErrorOrdenesCompartidas("");
+  }, [empresaId]);
+  useEffect(() => {
+    if (!empresaId) return;
+    let consultando = false;
+    const consultar = async () => {
+      if (consultando || document.visibilityState === "hidden") return;
+      consultando = true;
+      try { await consultarOrdenesCompartidas(); }
+      catch (e) { setErrorOrdenesCompartidas(e.message || "No se pudieron consultar las órdenes."); }
+      finally { consultando = false; }
+    };
+    consultar();
+    const timer = window.setInterval(consultar, 30000);
+    const alVolver = () => { if (document.visibilityState === "visible") consultar(); };
+    document.addEventListener("visibilitychange", alVolver);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", alVolver); };
+  }, [empresaId, consultarOrdenesCompartidas]);
+  const [repartidores, setRepartidores] = useState([]);
+  const [filtroRepartidor, setFiltroRepartidor] = useState("todos");
+  const [ubicandoDestinos, setUbicandoDestinos] = useState(false);
+  const [seleccionUbicacion, setSeleccionUbicacion] = useState(null);
+  const [indiceUbicacion, setIndiceUbicacion] = useState("");
+  const [geoEntregaId, setGeoEntregaId] = useState("");
+  const [geoProgreso, setGeoProgreso] = useState("");
+  const [municipios, setMunicipios] = useState([]);
+  const [cargandoMunicipios, setCargandoMunicipios] = useState(false);
+  const [municipiosError, setMunicipiosError] = useState("");
+  const [corrigiendoUbicacion, setCorrigiendoUbicacion] = useState(false);
+
+  // Catálogo público de municipios/departamentos argentinos; nunca se escribe en Supabase.
+  useEffect(() => {
+    if (!manual.provincia || esProvinciaCABA(manual.provincia) || !nuevaEntregaAbierta) { setMunicipios([]); return; }
+    const controller = new AbortController();
+    const obtener = async () => {
+      setCargandoMunicipios(true); setMunicipiosError(""); setMunicipios([]);
+      try {
+        const p = await fetch("https://apis.datos.gob.ar/georef/api/provincias?nombre=" + encodeURIComponent(manual.provincia) + "&campos=id,nombre", {signal:controller.signal});
+        if (!p.ok) throw new Error("No se pudo consultar provincias");
+        const prov = (await p.json()).provincias?.find(x => x.nombre.toLowerCase() === manual.provincia.toLowerCase());
+        if (!prov) throw new Error("Provincia no encontrada en el catálogo");
+        const tipo = manual.provincia === "Buenos Aires" ? "municipios" : "departamentos";
+        const r = await fetch(`https://apis.datos.gob.ar/georef/api/${tipo}?provincia=${encodeURIComponent(prov.id)}&max=5000&campos=id,nombre`, {signal:controller.signal});
+        if (!r.ok) throw new Error("No se pudo consultar municipios");
+        const datos = await r.json();
+        setMunicipios((datos[tipo] || []).map(x => x.nombre).sort((a,b)=>a.localeCompare(b,"es")));
+      } catch(e) { if (e.name !== "AbortError") setMunicipiosError("No se pudo cargar el catálogo. Podés escribir el partido manualmente."); }
+      finally { if (!controller.signal.aborted) setCargandoMunicipios(false); }
+    };
+    obtener();
+    return () => controller.abort();
+  }, [manual.provincia, nuevaEntregaAbierta]);
+  const [repartidorSeleccionado, setRepartidorSeleccionado] = useState("");
+  const [asignando, setAsignando] = useState(false);
+  const [guardandoDatos, setGuardandoDatos] = useState(false);
+  const [procesandoDevolucion, setProcesandoDevolucion] = useState(false);
+
+  const [form, setForm] = useState({
+    bultos: "",
+    numero_factura: "",
+    numero_remito: "",
+    fecha_programada: fechaLocalISO(),
+    observaciones: "",
+  });
+
+  const cargarDatos = async () => {
+    setCargando(true);
+    setErrorCarga("");
+
+    try {
+      let p = perfilProp || perfil || null;
+
+      if (!p?.empresa_id) {
+        const session = sesionProp || (await supabase.auth.getSession()).data?.session;
+        if (!session?.user?.id) throw new Error("No hay una sesión activa.");
+
+        const { data: perfilDb, error: errorPerfil } = await supabase
+          .from("perfiles")
+          .select("id,nombre,email,rol,empresa,empresa_id")
+          .eq("id", session.user.id)
+          .maybeSingle();
+
+        if (errorPerfil) throw errorPerfil;
+        if (!perfilDb?.empresa_id) throw new Error("El usuario no tiene empresa_id asignado.");
+        p = perfilDb;
+        setPerfil(perfilDb);
+      }
+
+      setEmpresaId(p.empresa_id);
+
+      const { data: empresaDb } = await supabase
+        .from("empresas")
+        .select("nombre")
+        .eq("id", p.empresa_id)
+        .maybeSingle();
+
+      setEmpresaNombre(empresaDb?.nombre || p.empresa || "");
+
+      // La modalidad depende del abono vigente, nunca del nombre de la empresa.
+      const { data: abonosDb, error: errorAbonos } = await supabase
+        .from("empresa_abonos")
+        .select("cupo_preventistas,cupo_repartidores,activo,created_at")
+        .eq("empresa_id", p.empresa_id)
+        .eq("activo", true)
+        .order("created_at", { ascending: false });
+      if (errorAbonos) throw errorAbonos;
+      const abono = (abonosDb || [])[0];
+      const independiente = Boolean(abono && Number(abono.cupo_repartidores) > 0 && Number(abono.cupo_preventistas) === 0);
+      setModoIndependiente(independiente);
+      console.log("🔎 DIAGNÓSTICO REPARTOS:", {
+  empresaId: p.empresa_id,
+  abonos: abonosDb,
+  independiente
+});
+
+
+      // Repartidores habilitados de la empresa.
+      const { data: rolesRepartidor, error: errorRolesRepartidor } = await supabase
+        .from("perfiles_roles")
+        .select("perfil_id")
+        .eq("empresa_id", p.empresa_id)
+        .eq("rol", "repartidor")
+        .eq("activo", true);
+
+      if (errorRolesRepartidor) throw errorRolesRepartidor;
+
+      const idsRepartidores = [...new Set((rolesRepartidor || []).map(r => r.perfil_id).filter(Boolean))];
+      let listaRepartidores = [];
+
+      if (idsRepartidores.length) {
+        const { data: perfilesRepartidor, error: errorPerfilesRepartidor } = await supabase
+          .from("perfiles")
+          .select("id,nombre,email,activo")
+          .eq("empresa_id", p.empresa_id)
+          .in("id", idsRepartidores);
+
+        if (errorPerfilesRepartidor) throw errorPerfilesRepartidor;
+
+        listaRepartidores = (perfilesRepartidor || [])
+          .filter(r => r.activo !== false)
+          .sort((a, b) => String(a.nombre || a.email || "").localeCompare(String(b.nombre || b.email || ""), "es"));
+      }
+
+      setRepartidores(listaRepartidores);
+
+      if (!independiente) {
+      // NVI que ya fueron enviadas por el Supervisor a Depósito.
+      const { data: pedidosDb, error: errorPedidos } = await supabase
+        .from("pedidos")
+        .select("id,empresa_id,numero_pedido,comercio_id,comercio_nombre,preventista,total,estado,created_at,pasado_deposito_at,deposito_stock_id,notas")
+        .eq("empresa_id", p.empresa_id)
+        .in("estado", ["Pasado a Depósito", "En Depósito"])
+        .order("created_at", { ascending: false });
+
+      if (errorPedidos) throw errorPedidos;
+
+      const idsPedidos = (pedidosDb || []).map(x => x.id).filter(Boolean);
+      const idsComercios = [...new Set((pedidosDb || []).map(x => x.comercio_id).filter(Boolean))];
+
+      let itemsPorPedido = {};
+      if (idsPedidos.length) {
+        const { data: itemsDb, error: errorItems } = await supabase
+          .from("pedido_items")
+          .select("pedido_id,producto_id,producto_nombre,codigo,color,talle,cantidad,precio_unitario,subtotal")
+          .in("pedido_id", idsPedidos);
+
+        if (errorItems) throw errorItems;
+
+        (itemsDb || []).forEach(it => {
+          const k = String(it.pedido_id);
+          if (!itemsPorPedido[k]) itemsPorPedido[k] = [];
+          itemsPorPedido[k].push({
+            producto_id: it.producto_id || null,
+            descripcion: it.producto_nombre || it.codigo || "Producto",
+            codigo: it.codigo || "",
+            color: it.color || "",
+            talle: it.talle || "",
+            cantidad: Number(it.cantidad || 0),
+            precio_unitario: Number(it.precio_unitario || 0),
+            subtotal: Number(it.subtotal || 0),
+          });
+        });
+      }
+
+      let comercioPorId = {};
+      if (idsComercios.length) {
+        const { data: comerciosDb, error: errorComercios } = await supabase
+          .from("comercios")
+          .select("id,direccion,localidad,provincia,telefono,whatsapp,contacto,ubicacion_exacta_latitud,ubicacion_exacta_longitud")
+          .in("id", idsComercios);
+
+        if (errorComercios) throw errorComercios;
+
+        (comerciosDb || []).forEach(c => {
+          comercioPorId[String(c.id)] = c;
+        });
+      }
+
+      const consolidados = (pedidosDb || []).map(ped => {
+        const c = comercioPorId[String(ped.comercio_id)] || {};
+        return {
+          ...ped,
+          numeroVisible: String(ped.numero_pedido || "").padStart(6, "0"),
+          cliente: ped.comercio_nombre || `Comercio #${ped.comercio_id || ""}`,
+          direccion: [c.direccion, c.localidad, c.provincia].filter(Boolean).join(", "),
+          latitud: c.ubicacion_exacta_latitud,
+          longitud: c.ubicacion_exacta_longitud,
+          telefono: c.telefono || "",
+          whatsapp: c.whatsapp || "",
+          contacto: c.contacto || "",
+          items: itemsPorPedido[String(ped.id)] || [],
+        };
+      });
+
+      setPedidos(consolidados);
+
+      } else {
+        setPedidos([]);
+      }
+
+      const { data: entregasDb, error: errorEntregas } = await supabase
+        .from("repartos_entregas")
+        .select("*")
+        .eq("empresa_id", p.empresa_id)
+        .order("creado_at", { ascending: false });
+
+      if (errorEntregas) throw errorEntregas;
+      setEntregas(entregasDb || []);
+    } catch (e) {
+      console.error("Error cargando Depósito y Repartos:", e);
+      setErrorCarga(e?.message || "No se pudo cargar Depósito y Repartos.");
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    cargarDatos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Repartos independiente: las visitas se resuelven desde el celular del chofer.
+  // Refrescar la bandeja sin recargar toda la pantalla ni modificar estados.
+  // Así Gestión de entregas refleja los cambios confirmados por Supabase.
+  useEffect(() => {
+    if (!modoIndependiente || !empresaId) return;
+    let vigente = true;
+    let consultando = false;
+    const actualizarEstados = async () => {
+      if (!vigente || consultando || document.visibilityState === "hidden") return;
+      consultando = true;
+      try {
+        const { data, error } = await supabase.from("repartos_entregas")
+          .select("*")
+          .eq("empresa_id", empresaId)
+          .is("pedido_id", null)
+          .order("creado_at", { ascending: false });
+        if (error) throw error;
+        if (vigente) setEntregas(actuales => [
+          ...actuales.filter(e => e.pedido_id),
+          ...(data || []),
+        ]);
+      } catch (e) {
+        console.warn("No se pudieron actualizar las entregas independientes:", e);
+      } finally {
+        consultando = false;
+      }
+    };
+    const alVolver = () => {
+      if (document.visibilityState === "visible") actualizarEstados();
+    };
+    const timer = window.setInterval(actualizarEstados, 20000);
+    window.addEventListener("focus", actualizarEstados);
+    document.addEventListener("visibilitychange", alVolver);
+    return () => {
+      vigente = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", actualizarEstados);
+      document.removeEventListener("visibilitychange", alVolver);
+    };
+  }, [modoIndependiente, empresaId]);
+
+  const entregasPorPedido = useMemo(() => {
+    const mapa = new Map();
+    (entregas || []).forEach(e => {
+      const k = String(e.pedido_id || "");
+      if (!k) return;
+      if (!mapa.has(k)) mapa.set(k, []);
+      mapa.get(k).push(e);
+    });
+    return mapa;
+  }, [entregas]);
+
+  const estadoLogisticoPedido = (pedido) => {
+    const creadas = entregasPorPedido.get(String(pedido.id)) || [];
+    return creadas[0]?.estado || "pendiente_preparacion";
+  };
+
+  const esDeHoy = (valor) => {
+    if (!valor) return false;
+    const d = new Date(valor);
+    if (Number.isNaN(d.getTime())) return false;
+    const hoy = new Date();
+    return d.getFullYear() === hoy.getFullYear() &&
+      d.getMonth() === hoy.getMonth() &&
+      d.getDate() === hoy.getDate();
+  };
+
+  const pedidosRecibidosHoy = useMemo(
+    () => pedidos.filter(p => esDeHoy(p.pasado_deposito_at)),
+    [pedidos]
+  );
+
+  const fueAsignado = (pedido) => {
+    const creadas = entregasPorPedido.get(String(pedido.id)) || [];
+    return creadas.some(e => Boolean(e.repartidor_id || e.asignado_at));
+  };
+
+  const volvioDeposito = (pedido) => {
+    const creadas = entregasPorPedido.get(String(pedido.id)) || [];
+    return creadas.some(e => Boolean(e.devolucion_recibida_at) || e.estado === "vuelto_deposito" || e.estado === "anulacion_solicitada");
+  };
+
+  const contadoresBandeja = useMemo(() => {
+    const pendientes = pedidos.filter(p => estadoLogisticoPedido(p) === "pendiente_preparacion").length;
+    const preparados = pedidos.filter(p => estadoLogisticoPedido(p) === "preparado").length;
+    const asignados = pedidos.filter(p =>
+      ["asignado", "en_reparto"].includes(estadoLogisticoPedido(p))
+    ).length;
+
+    return { pendientes, preparados, asignados, todos: pedidos.length };
+  }, [pedidos, entregasPorPedido]);
+
+  const resumenHoy = useMemo(() => {
+    const recibidas = pedidosRecibidosHoy.length;
+    const sinPreparar = pedidosRecibidosHoy.filter(p =>
+      estadoLogisticoPedido(p) === "pendiente_preparacion"
+    ).length;
+    const asignadas = pedidosRecibidosHoy.filter(fueAsignado).length;
+    const devolucionesPendientes = pedidos.filter(p =>
+      estadoLogisticoPedido(p) === "devolucion_informada"
+    ).length;
+    const volvieron = pedidosRecibidosHoy.filter(volvioDeposito).length;
+    return { recibidas, sinPreparar, asignadas, devolucionesPendientes, volvieron };
+  }, [pedidosRecibidosHoy, entregasPorPedido]);
+
+  const pedidosFiltrados = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+
+    return pedidos.filter(p => {
+      const estado = estadoLogisticoPedido(p);
+      const recibidoHoy = esDeHoy(p.pasado_deposito_at);
+
+      const perteneceBandeja =
+        bandeja === "todos" ||
+        (bandeja === "hoy" && recibidoHoy) ||
+        (bandeja === "sin_preparar_hoy" && recibidoHoy && estado === "pendiente_preparacion") ||
+        (bandeja === "asignadas_hoy" && recibidoHoy && fueAsignado(p)) ||
+        (bandeja === "devoluciones_pendientes" && estado === "devolucion_informada") ||
+        (bandeja === "volvieron_hoy" && recibidoHoy && volvioDeposito(p)) ||
+        (bandeja === "pendientes" && estado === "pendiente_preparacion") ||
+        (bandeja === "preparados" && estado === "preparado") ||
+        (bandeja === "asignados" && ["asignado", "en_reparto"].includes(estado));
+
+      if (!perteneceBandeja) return false;
+      if (!q) return true;
+
+      return [p.numeroVisible, p.cliente, p.direccion, p.preventista]
+        .some(v => String(v || "").toLowerCase().includes(q));
+    });
+  }, [pedidos, busqueda, bandeja, entregasPorPedido]);
+
+  const abrirPedido = (pedido) => {
+    setPedidoActivo(pedido);
+
+    const ya = entregasPorPedido.get(String(pedido.id)) || [];
+    const ultima = ya[0] || null;
+
+    setForm({
+      bultos: ultima?.bultos ?? "",
+      numero_factura: ultima?.numero_factura || "",
+      numero_remito: ultima?.numero_remito || "",
+      fecha_programada: ultima?.fecha_programada || fechaLocalISO(),
+      observaciones: ultima?.observaciones || "",
+    });
+    setRepartidorSeleccionado(ultima?.repartidor_id || "");
+  };
+
+  const prepararEntregaCompleta = async () => {
+    if (!pedidoActivo?.id || !empresaId || guardando) return;
+
+    const bultos = form.bultos === "" ? null : Number(form.bultos);
+    if (bultos === null || !Number.isInteger(bultos) || bultos < 1) {
+      alert("⚠️ Ingresá la cantidad de bultos. Debe ser un número entero de 1 o más.");
+      return;
+    }
+
+    const existentes = entregasPorPedido.get(String(pedidoActivo.id)) || [];
+    if (existentes.length > 0) {
+      alert(
+        "⚠️ Esta NVI ya tiene una entrega creada.\n\n" +
+        "La división en varios remitos/entregas la vamos a habilitar en el siguiente paso."
+      );
+      return;
+    }
+
+    if (!pedidoActivo.items?.length) {
+      alert("⚠️ Esta NVI no tiene renglones de pedido para preparar.");
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `¿Marcar como PREPARADA la entrega completa de la NVI #${pedidoActivo.numeroVisible}?\n\n` +
+      `${pedidoActivo.cliente}\n` +
+      `${pedidoActivo.items.length} renglón/es`
+    );
+    if (!confirmar) return;
+
+    setGuardando(true);
+
+    try {
+      const ahora = new Date().toISOString();
+
+      const { data: entrega, error: errorEntrega } = await supabase
+        .from("repartos_entregas")
+        .insert([{
+          empresa_id: empresaId,
+          pedido_id: pedidoActivo.id,
+          deposito_id: pedidoActivo.deposito_stock_id || null,
+          repartidor_id: null,
+          numero_factura: form.numero_factura.trim() || null,
+          numero_remito: form.numero_remito.trim() || null,
+          bultos,
+          fecha_programada: form.fecha_programada || null,
+          estado: "preparado",
+          observaciones: form.observaciones.trim() || null,
+          motivo_no_entrega: null,
+          preparado_at: ahora,
+          actualizado_at: ahora,
+        }])
+        .select("*")
+        .single();
+
+      if (errorEntrega) throw errorEntrega;
+
+      const filasItems = pedidoActivo.items
+        .filter(it => Number(it.cantidad || 0) > 0)
+        .map(it => ({
+          empresa_id: empresaId,
+          entrega_id: entrega.id,
+          producto_id: it.producto_id || null,
+          codigo: it.codigo || null,
+          descripcion: it.descripcion || "Producto",
+          color: it.color || null,
+          talle: it.talle || null,
+          cantidad: Number(it.cantidad || 0),
+        }));
+
+      const { error: errorItems } = await supabase
+        .from("repartos_entrega_items")
+        .insert(filasItems);
+
+      if (errorItems) {
+        // Evitamos dejar una entrega vacía si falló la copia de los renglones.
+        await supabase.from("repartos_entregas").delete().eq("id", entrega.id);
+        throw errorItems;
+      }
+
+      alert(`✅ NVI #${pedidoActivo.numeroVisible} preparada para reparto.`);
+      setPedidoActivo(null);
+      await cargarDatos();
+    } catch (e) {
+      console.error("Error preparando entrega:", e);
+      alert("❌ No se pudo preparar la entrega: " + (e?.message || "error desconocido"));
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const guardarDatosLogisticos = async () => {
+    if (!pedidoActivo?.id || guardandoDatos) return;
+
+    const existentes = entregasPorPedido.get(String(pedidoActivo.id)) || [];
+    const entrega = existentes[0] || null;
+    if (!entrega) return;
+
+    // Logística puede corregir la preparación mientras todavía no salió a reparto.
+    if (!["preparado", "asignado"].includes(entrega.estado)) {
+      alert("⚠️ Esta entrega ya salió a reparto. Los datos de preparación ya no se modifican desde Depósito y Repartos.");
+      return;
+    }
+
+    const bultos = form.bultos === "" ? null : Number(form.bultos);
+    if (bultos === null || !Number.isInteger(bultos) || bultos < 1) {
+      alert("⚠️ Ingresá la cantidad de bultos. Debe ser un número entero de 1 o más.");
+      return;
+    }
+
+    setGuardandoDatos(true);
+    try {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({
+          bultos,
+          numero_remito: form.numero_remito.trim() || null,
+          numero_factura: form.numero_factura.trim() || null,
+          fecha_programada: form.fecha_programada || null,
+          observaciones: form.observaciones.trim() || null,
+          actualizado_at: ahora,
+        })
+        .eq("id", entrega.id)
+        .eq("empresa_id", empresaId);
+
+      if (error) throw error;
+
+      alert("✅ Datos de logística actualizados.");
+      await cargarDatos();
+      setPedidoActivo(prev => prev ? { ...prev } : prev);
+    } catch (e) {
+      console.error("Error actualizando datos logísticos:", e);
+      alert("❌ No se pudieron guardar los cambios: " + (e?.message || "error desconocido"));
+    } finally {
+      setGuardandoDatos(false);
+    }
+  };
+
+  const asignarReparto = async () => {
+    alert("🚚 Primero creá un NUEVO REPARTO, agregá esta entrega y luego asigná el chofer desde GESTIÓN DE REPARTOS.");
+    setPedidoActivo(null);
+  };
+
+  const recibirMercaderiaDevuelta = async () => {
+    if (!pedidoActivo?.id || procesandoDevolucion) return;
+    const existentes = entregasPorPedido.get(String(pedidoActivo.id)) || [];
+    const entrega = existentes[0] || null;
+    if (!entrega || entrega.estado !== "devolucion_informada") {
+      alert("⚠️ El repartidor todavía no informó la devolución de esta mercadería.");
+      return;
+    }
+
+    const ok = window.confirm(
+      `¿Confirmar que la mercadería de la NVI #${pedidoActivo.numeroVisible} volvió físicamente al depósito?\n\n` +
+      `${pedidoActivo.cliente}\n` +
+      `Motivo: ${entrega.motivo_no_entrega || "No informado"}\n\n` +
+      `Esto NO anula la venta ni devuelve todavía la mercadería al stock disponible.`
+    );
+    if (!ok) return;
+
+    setProcesandoDevolucion(true);
+    try {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({
+          estado: "vuelto_deposito",
+          devolucion_recibida_at: ahora,
+          devolucion_recibida_por: perfil?.id || null,
+          actualizado_at: ahora,
+        })
+        .eq("id", entrega.id)
+        .eq("empresa_id", empresaId);
+      if (error) throw error;
+      alert(`📥 NVI #${pedidoActivo.numeroVisible}: devolución recibida en Depósito.`);
+      setPedidoActivo(null);
+      setBandeja("volvieron_hoy");
+      await cargarDatos();
+    } catch (e) {
+      console.error("Error recibiendo devolución:", e);
+      alert("❌ No se pudo registrar la devolución: " + (e?.message || "error desconocido"));
+    } finally {
+      setProcesandoDevolucion(false);
+    }
+  };
+
+  const reenviarDevolucion = async () => {
+    if (!pedidoActivo?.id || procesandoDevolucion) return;
+    const existentes = entregasPorPedido.get(String(pedidoActivo.id)) || [];
+    const entrega = existentes[0] || null;
+    if (!entrega || !["vuelto_deposito"].includes(entrega.estado)) {
+      alert("⚠️ Esta devolución todavía no está disponible para reenvío.");
+      return;
+    }
+    if (!repartidorSeleccionado) {
+      alert("⚠️ Elegí el repartidor para el reenvío.");
+      return;
+    }
+    if (!form.fecha_programada) {
+      alert("⚠️ Elegí la nueva fecha de reparto.");
+      return;
+    }
+    const rep = repartidores.find(r => String(r.id) === String(repartidorSeleccionado));
+    const nombreRep = rep?.nombre || rep?.email || "Repartidor";
+    const ok = window.confirm(
+      `¿REENVIAR la NVI #${pedidoActivo.numeroVisible}?\n\n` +
+      `Repartidor: ${nombreRep}\nFecha: ${form.fecha_programada}\n\nLa NVI seguirá vigente.`
+    );
+    if (!ok) return;
+
+    setProcesandoDevolucion(true);
+    try {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({
+          repartidor_id: repartidorSeleccionado,
+          fecha_programada: form.fecha_programada,
+          estado: "asignado",
+          asignado_at: ahora,
+          salida_at: null,
+          entregado_at: null,
+          motivo_no_entrega: null,
+          solicitud_anulacion_at: null,
+          motivo_solicitud_anulacion: null,
+          actualizado_at: ahora,
+        })
+        .eq("id", entrega.id)
+        .eq("empresa_id", empresaId);
+      if (error) throw error;
+      alert(`🚚 NVI #${pedidoActivo.numeroVisible} reprogramada y asignada a ${nombreRep}.`);
+      setPedidoActivo(null);
+      setBandeja("asignados");
+      await cargarDatos();
+    } catch (e) {
+      console.error("Error reenviando devolución:", e);
+      alert("❌ No se pudo programar el reenvío: " + (e?.message || "error desconocido"));
+    } finally {
+      setProcesandoDevolucion(false);
+    }
+  };
+
+  const solicitarAnulacionNvi = async () => {
+    if (!pedidoActivo?.id || procesandoDevolucion) return;
+    const existentes = entregasPorPedido.get(String(pedidoActivo.id)) || [];
+    const entrega = existentes[0] || null;
+    if (!entrega || entrega.estado !== "vuelto_deposito") {
+      alert("⚠️ Primero Depósito debe confirmar la recepción física de la devolución.");
+      return;
+    }
+    const motivo = window.prompt(
+      `Motivo de la solicitud de anulación de la NVI #${pedidoActivo.numeroVisible}:\n\n` +
+      `Esta acción NO anula la NVI. La decisión quedará pendiente del Supervisor.`
+    );
+    if (motivo === null) return;
+    if (!motivo.trim()) {
+      alert("⚠️ Escribí el motivo de la solicitud.");
+      return;
+    }
+    const ok = window.confirm(
+      `¿Enviar SOLICITUD DE ANULACIÓN al Supervisor?\n\nNVI #${pedidoActivo.numeroVisible} · ${pedidoActivo.cliente}\nMotivo: ${motivo.trim()}\n\nLa venta y el stock NO se modificarán todavía.`
+    );
+    if (!ok) return;
+
+    setProcesandoDevolucion(true);
+    try {
+      const ahora = new Date().toISOString();
+      const { error } = await supabase
+        .from("repartos_entregas")
+        .update({
+          estado: "anulacion_solicitada",
+          solicitud_anulacion_at: ahora,
+          solicitud_anulacion_por: perfil?.id || null,
+          motivo_solicitud_anulacion: motivo.trim(),
+          actualizado_at: ahora,
+        })
+        .eq("id", entrega.id)
+        .eq("empresa_id", empresaId);
+      if (error) throw error;
+      alert("📨 Solicitud enviada al Supervisor. La NVI continúa vigente hasta que sea aprobada.");
+      setPedidoActivo(null);
+      setBandeja("volvieron_hoy");
+      await cargarDatos();
+    } catch (e) {
+      console.error("Error solicitando anulación:", e);
+      alert("❌ No se pudo enviar la solicitud: " + (e?.message || "error desconocido"));
+    } finally {
+      setProcesandoDevolucion(false);
+    }
+  };
+
+  // Repartos independientes: confirmar recepción física de una entrega manual.
+  // No modifica el estado del recorrido, que ya terminó con la última visita.
+  const recibirDevolucionManual = async () => {
+    const entrega = entregaManualActiva;
+    if (!entrega || entrega.estado !== "devolucion_informada" || guardandoManual) return;
+    if (!window.confirm(`¿Confirmar recepción física en Depósito de ${entrega.bultos || "los"} bulto/s de ${entrega.destinatario || "esta entrega"}?\n\nEl recorrido ya finalizado NO se modificará.`)) return;
+    setGuardandoManual(true);
+    try {
+      const ahora = new Date().toISOString();
+      const { data, error: err } = await supabase.from("repartos_entregas")
+        .update({ estado:"vuelto_deposito", devolucion_recibida_at:ahora,
+          devolucion_recibida_por: perfil?.id || sesionProp?.user?.id || null, actualizado_at:ahora })
+        .eq("id", entrega.id).eq("empresa_id", empresaId)
+        .eq("estado", "devolucion_informada").select("id");
+      if (err) throw err;
+      if (!data?.length) throw new Error("La entrega cambió de estado. Actualizá la pantalla.");
+      setEntregaManualActiva(null);
+      setBandeja("volvieron_hoy");
+      await cargarDatos();
+      alert("✅ Mercadería recibida en Depósito. El recorrido no se modificó.");
+    } catch (e) { alert("❌ No se pudo confirmar la devolución: " + (e.message || e)); }
+    finally { setGuardandoManual(false); }
+  };
+
+  const guardarDomicilioEditado = async () => {
+    const e = entregaManualActiva;
+    if (!e || guardandoManual) return;
+    const d = domicilioEditado;
+    if (!d.direccion.trim() || !d.provincia.trim() || (!esProvinciaCABA(d.provincia) && (!d.localidad.trim() || !d.partido.trim()))) {
+      alert("Completá la dirección, provincia y, fuera de CABA, localidad y partido."); return;
+    }
+    if (e.pedido_id || e.repartidor_id || e.reparto_orden_id || !["pendiente_preparacion","preparado"].includes(e.estado)) {
+      alert("Solo se puede editar el domicilio de una entrega manual todavía sin asignar ni iniciar."); return;
+    }
+    if (!window.confirm("¿Guardar el nuevo domicilio? Se quitará el punto anterior del mapa para que puedas geolocalizarlo nuevamente.")) return;
+    setGuardandoManual(true);
+    try {
+      const cambios = {direccion:d.direccion.trim(), provincia:d.provincia.trim(),
+        localidad:esProvinciaCABA(d.provincia)?null:d.localidad.trim(),
+        partido:esProvinciaCABA(d.provincia)?null:d.partido.trim(),
+        latitud:null,longitud:null,actualizado_at:new Date().toISOString()};
+      const {data,error} = await supabase.from("repartos_entregas").update(cambios)
+        .eq("id",e.id).eq("empresa_id",empresaId)
+        .in("estado",["pendiente_preparacion","preparado"])
+        .is("repartidor_id",null).is("reparto_orden_id",null).select("id");
+      if(error) throw error;
+      if(!data?.length) throw new Error("No se guardó: la entrega pudo haber cambiado de estado. Actualizá la pantalla.");
+      setEditandoDomicilio(false);setCorrigiendoPunto(false);setEntregaManualActiva(null);
+      await cargarDatos();
+      alert("✅ Domicilio actualizado. Ahora geolocalizá nuevamente esta entrega.");
+    } catch(err) {alert("❌ No se pudo editar el domicilio: "+(err.message||err));}
+    finally {setGuardandoManual(false);}
+  };
+
+  const crearEntregaManual = async () => {
+    if (guardandoManual || !empresaId) return;
+    if (!manual.destinatario.trim() || !manual.direccion.trim() || !manual.provincia.trim() ||
+        (!esProvinciaCABA(manual.provincia) && (!manual.partido.trim() || !manual.localidad.trim()))) {
+      alert(esProvinciaCABA(manual.provincia)
+        ? "Ingresá destinatario, dirección y provincia."
+        : "Ingresá destinatario, calle, provincia, partido y localidad."); return;
+    }
+    const bultos = Number(manual.bultos);
+    if (!Number.isInteger(bultos) || bultos < 1) {
+      alert("Los bultos deben ser un número entero mayor que cero."); return;
+    }
+    setGuardandoManual(true);
+    try {
+      const { error } = await supabase.from("repartos_entregas").insert([{
+        empresa_id: empresaId, pedido_id: null, deposito_id: null, repartidor_id: null,
+        destinatario: manual.destinatario.trim(), direccion: manual.direccion.trim(),
+        localidad: esProvinciaCABA(manual.provincia) ? null : (manual.localidad.trim() || null), provincia: manual.provincia.trim() || null,
+        partido: esProvinciaCABA(manual.provincia) ? null : (manual.partido.trim() || null),
+        telefono: manual.telefono.trim() || null, referencia_domicilio: manual.referencia_domicilio.trim() || null,
+        bultos, fecha_programada: manual.fecha_programada || null,
+        numero_remito: manual.numero_remito.trim() || null, numero_factura: manual.numero_factura.trim() || null,
+        observaciones: manual.observaciones.trim() || null, estado: "pendiente_preparacion",
+        actualizado_at: new Date().toISOString(),
+      }]);
+      if (error) throw error;
+      setNuevaEntregaAbierta(false);
+      setManual({ destinatario: "", direccion: "", localidad: "", provincia: "", partido: "", telefono: "", referencia_domicilio: "", bultos: "1", fecha_programada: fechaLocalISO(), numero_remito: "", numero_factura: "", observaciones: "" });
+      await cargarDatos();
+      alert("✅ Entrega creada correctamente.");
+    } catch (e) { alert("❌ No se pudo crear la entrega: " + (e?.message || "Error")); }
+    finally { setGuardandoManual(false); }
+  };
+
+  const actualizarEntregaManual = async (nuevoEstado, repartidorId = null) => {
+    if (!entregaManualActiva || guardandoManual) return;
+    if (nuevoEstado === "asignado") { alert("🚚 Para asignar esta entrega, usá NUEVO REPARTO → AGREGAR ENTREGA → ASIGNAR REPARTIDOR."); return; }
+    if (entregaManualActiva.reparto_orden_id) { alert("Esta entrega pertenece a un reparto. Modificala desde GESTIÓN DE REPARTOS."); return; }
+    setGuardandoManual(true);
+    try {
+      const ahora = new Date().toISOString();
+      const cambios = { estado: nuevoEstado, actualizado_at: ahora };
+      if (nuevoEstado === "preparado") cambios.preparado_at = ahora;
+      if (nuevoEstado === "asignado") { cambios.repartidor_id = repartidorId; cambios.asignado_at = ahora; }
+      const { error } = await supabase.from("repartos_entregas").update(cambios)
+        .eq("id", entregaManualActiva.id).eq("empresa_id", empresaId).eq("estado", entregaManualActiva.estado);
+      if (error) throw error;
+      setEntregaManualActiva(null);
+      await cargarDatos();
+    } catch (e) { alert("❌ No se pudo actualizar: " + (e?.message || "Error")); }
+    finally { setGuardandoManual(false); }
+  };
+
+  const eliminarEntregaSinAsignar = async () => {
+    const e = entregaManualActiva;
+    if (!e || guardandoManual || !empresaId) return;
+    const permitidos = ["pendiente_preparacion", "preparado"];
+    if (!permitidos.includes(e.estado) || e.repartidor_id || e.pedido_id || e.reparto_orden_id) {
+      alert("Esta entrega no se puede eliminar desde aquí: ya está vinculada a un repartidor o a Ventas.");
+      return;
+    }
+    const nombre = e.destinatario || "esta entrega";
+    if (!window.confirm(`¿ELIMINAR DEFINITIVAMENTE la entrega de ${nombre}?\n\nEsta operación no se puede deshacer. No afecta otras entregas.`)) return;
+    setGuardandoManual(true);
+    try {
+      // No eliminar entregas que contienen artículos: requieren un proceso específico.
+      const { data: articulos, error: errorArticulos } = await supabase
+        .from("repartos_entrega_items").select("id").eq("entrega_id", e.id)
+        .eq("empresa_id", empresaId).limit(1);
+      if (errorArticulos) throw errorArticulos;
+      if (articulos?.length) throw new Error("La entrega tiene artículos vinculados. No se eliminó para proteger los datos.");
+      const { data, error } = await supabase.from("repartos_entregas")
+        .delete()
+        .eq("id", e.id).eq("empresa_id", empresaId)
+        .is("pedido_id", null).is("repartidor_id", null)
+        .in("estado", permitidos)
+        .select("id");
+      if (error) throw error;
+      if (data?.length !== 1) throw new Error("No se eliminó: la entrega pudo haber cambiado de estado o faltan permisos.");
+      setEntregaManualActiva(null);
+      await cargarDatos();
+      alert("✅ Entrega eliminada correctamente.");
+    } catch (err) {
+      alert("❌ No se pudo eliminar: " + (err?.message || "Error desconocido"));
+    } finally {
+      setGuardandoManual(false);
+    }
+  };
+
+  // Acciones exclusivas de entregas independientes: transacción protegida en Supabase.
+  const resolverEntregaFallidaIndependiente = async (accion) => {
+    const e = entregaManualActiva;
+    if (!e || guardandoManual || !empresaId || e.pedido_id || !["no_entregado", "vuelto_deposito"].includes(e.estado) || e.cancelada_operativamente_at) return;
+    const esReprogramacion = accion === "reprogramar";
+    const fecha = esReprogramacion ? window.prompt("Nueva fecha de entrega (AAAA-MM-DD):", fechaLocalISO()) : null;
+    if (esReprogramacion && fecha === null) return;
+    if (esReprogramacion && (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || Number.isNaN(new Date(`${fecha}T12:00:00`).getTime()) || new Date(`${fecha}T12:00:00`).toISOString().slice(0,10) !== fecha)) {
+      alert("Ingresá una fecha válida en formato AAAA-MM-DD."); return;
+    }
+    const motivo = window.prompt(esReprogramacion ? "Motivo de la reprogramación:" : "Motivo para retirar esta entrega de los pendientes:", esReprogramacion ? "Nueva visita solicitada" : "Entrega cancelada operativamente");
+    if (motivo === null) return;
+    if (!motivo.trim()) { alert("Indicá un motivo."); return; }
+    if (!window.confirm(esReprogramacion
+      ? `¿REPROGRAMAR la entrega de ${e.destinatario || "este destinatario"} para ${fecha}?\n\nSe conservará la visita fallida y el registro de devolución.`
+      : `¿QUITAR de pendientes la entrega de ${e.destinatario || "este destinatario"}?\n\nNo se borrará el historial ni el registro de devolución.`)) return;
+    setGuardandoManual(true);
+    try {
+      const { data, error } = await supabase.rpc("repartos_resolver_fallida_independiente", {
+        p_entrega_id: e.id, p_accion: accion, p_fecha: esReprogramacion ? fecha : null, p_motivo: motivo.trim()
+      });
+      if (error) throw error;
+      setEntregaManualActiva(null);
+      await cargarDatos();
+      alert(esReprogramacion ? "✅ Nueva entrega creada. La visita anterior queda en el historial." : "✅ Entrega retirada de pendientes. El historial y la devolución siguen registrados.");
+    } catch (err) { alert("❌ No se pudo completar la operación: " + (err?.message || "Error desconocido")); }
+    finally { setGuardandoManual(false); }
+  };
+
+  const desasignarManual = async () => {
+    const e = entregaManualActiva;
+    if (!e || e.estado !== "asignado" || !e.repartidor_id || guardandoManual) return;
+    if (e.reparto_orden_id) { alert("Esta entrega pertenece a un reparto numerado. No se puede desasignar por separado."); return; }
+    if (!window.confirm(`¿DESASIGNAR la entrega de ${e.destinatario}?\n\nVolverá a PREPARADO y quedará sin repartidor.`)) return;
+    setGuardandoManual(true);
+    try {
+      const { data, error } = await supabase.from("repartos_entregas")
+        .update({ estado: "preparado", repartidor_id: null, asignado_at: null, actualizado_at: new Date().toISOString() })
+        .eq("id", e.id).eq("empresa_id", empresaId).eq("estado", "asignado")
+        .select("id");
+      if (error) throw error;
+      if (!data?.length) throw new Error("La entrega cambió de estado. Actualizá la pantalla.");
+      setEntregaManualActiva(null);
+      await cargarDatos();
+    } catch (err) { alert("No se pudo desasignar: " + (err.message || err)); }
+    finally { setGuardandoManual(false); }
+  };
+
+  const guardarPuntoManual = async () => {
+    if (!entregaManualActiva || !puntoElegido || guardandoManual) return;
+    const idEntrega = entregaManualActiva.id;
+    const latitud = Number(puntoElegido[0]);
+    const longitud = Number(puntoElegido[1]);
+    if (!puntoValido(latitud, longitud)) { alert("El punto seleccionado no es válido."); return; }
+    if (esProvinciaCABA(entregaManualActiva.provincia) && !dentroAreaCABA(latitud, longitud)) {
+      alert("El punto elegido está fuera del área aproximada de CABA. No se guardó. Buscá el domicilio dentro de la Ciudad Autónoma de Buenos Aires.");
+      return;
+    }
+    if (!window.confirm(`¿Guardar este punto para ${entregaManualActiva.destinatario}?\n\nLatitud: ${latitud.toFixed(6)}\nLongitud: ${longitud.toFixed(6)}\n\nConfirmá solo si está en el domicilio correcto.`)) return;
+    setGuardandoManual(true);
+    try {
+      // Verificar la fila devuelta: un UPDATE sin error puede afectar cero filas por RLS.
+      const { data: actualizadas, error } = await supabase.from("repartos_entregas")
+        .update({ latitud, longitud, actualizado_at: new Date().toISOString() })
+        .eq("id", idEntrega).eq("empresa_id", empresaId)
+        .select("id,latitud,longitud");
+      if (error) throw error;
+      if (!actualizadas || actualizadas.length !== 1) throw new Error("Supabase no confirmó la actualización. Revisar permisos de la empresa.");
+      const guardada = actualizadas[0];
+      if (Math.abs(Number(guardada.latitud) - latitud) > 0.000001 || Math.abs(Number(guardada.longitud) - longitud) > 0.000001)
+        throw new Error("Las coordenadas devueltas no coinciden con las seleccionadas.");
+      // Confirmar con una lectura nueva antes de cerrar el editor.
+      const { data: verificada, error: errorLectura } = await supabase.from("repartos_entregas")
+        .select("id,latitud,longitud").eq("id", idEntrega).eq("empresa_id", empresaId).single();
+      if (errorLectura) throw errorLectura;
+      if (Math.abs(Number(verificada.latitud) - latitud) > 0.000001 || Math.abs(Number(verificada.longitud) - longitud) > 0.000001)
+        throw new Error("El punto no quedó persistido en la base de datos.");
+      setEntregas(prev => prev.map(e => e.id === idEntrega ? { ...e, latitud, longitud } : e));
+      setCorrigiendoPunto(false);
+      setPuntoElegido(null);
+      setEntregaManualActiva(null);
+      await cargarDatos();
+      alert("✅ Ubicación guardada y verificada en Supabase. Al actualizar la página debe permanecer en el mismo lugar.");
+    } catch (err) { alert("❌ No se pudo confirmar el guardado del punto: " + (err.message || err)); }
+    finally { setGuardandoManual(false); }
+  };
+
+  // Las búsquedas individuales permiten revisar y elegir el punto.
+  // La búsqueda masiva solo guarda resultados con número y localidad verificables.
+  const pendientesGeo = entregas.filter(e => !e.pedido_id && !puntoValido(e.latitud, e.longitud) && e.direccion);
+  const textoDireccionGeo = e => esProvinciaCABA(e.provincia)
+    ? [e.direccion, "Ciudad Autónoma de Buenos Aires", "Argentina"].filter(Boolean).join(", ")
+    : [e.direccion, e.localidad, e.partido, e.provincia, "Argentina"].filter(Boolean).join(", ");
+  const normalizarGeo = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const buscarGeo = async (e, clave) => {
+    const texto = textoDireccionGeo(e);
+    const params = new URLSearchParams({text:texto,filter:esProvinciaCABA(e.provincia)
+      ? "rect:-58.55,-34.72,-58.32,-34.52"
+      : "countrycode:ar",format:"json",limit:"10",apiKey:clave});
+    const respuesta = await fetch(`https://api.geoapify.com/v1/geocode/search?${params}`);
+    if (!respuesta.ok) throw new Error(`Geoapify respondió ${respuesta.status}`);
+    const data = await respuesta.json();
+    return {texto, candidatos:(data.results || []).filter(r => puntoValido(r.lat,r.lon))};
+  };
+  const ubicarUnaDireccion = async () => {
+    const clave = import.meta.env.VITE_GEOAPIFY_API_KEY;
+    if (!clave) { alert("Falta configurar VITE_GEOAPIFY_API_KEY."); return; }
+    const e = pendientesGeo.find(x => String(x.id) === geoEntregaId) || pendientesGeo[0];
+    if (!e) { alert("No hay direcciones pendientes de ubicar."); return; }
+    setUbicandoDestinos(true);
+    try {
+      const resultado = await buscarGeo(e, clave);
+      setIndiceUbicacion("");
+      setSeleccionUbicacion({entrega:e,...resultado});
+    } catch (err) { alert("No se pudo buscar la dirección: " + (err.message || err)); }
+    finally { setUbicandoDestinos(false); }
+  };
+  const ubicarTodasDirecciones = async () => {
+    const clave = import.meta.env.VITE_GEOAPIFY_API_KEY;
+    if (!clave) { alert("Falta configurar VITE_GEOAPIFY_API_KEY."); return; }
+    if (!pendientesGeo.length) { alert("No hay direcciones pendientes de ubicar."); return; }
+    if (!window.confirm(`¿Buscar automáticamente ${pendientesGeo.length} domicilio/s sin coordenadas?\n\nSolo se guardarán coincidencias precisas. Las dudosas quedarán pendientes para revisión manual.`)) return;
+    setUbicandoDestinos(true);
+    let guardadas=0, revisar=0, fallidas=0;
+    try {
+      for (let i=0;i<pendientesGeo.length;i++) {
+        const e = pendientesGeo[i];
+        setGeoProgreso(`Buscando ${i+1} de ${pendientesGeo.length}: ${e.destinatario || e.direccion}`);
+        try {
+          const {candidatos} = await buscarGeo(e, clave);
+          const calleNumero = String(e.direccion || "").match(/\b(\d{1,6})\b/);
+          const numero = calleNumero?.[1];
+          const aceptables = candidatos.filter(r => {
+            const texto = normalizarGeo([r.formatted,r.city,r.county,r.suburb,r.state].join(" "));
+            const ciudadOk = esProvinciaCABA(e.provincia)
+              ? candidatoEsCABA(r)
+              : (!e.localidad || texto.includes(normalizarGeo(e.localidad))) &&
+                (!e.partido || texto.includes(normalizarGeo(e.partido)));
+            const numeroOk = numero && String(r.housenumber || "") === numero;
+            const precisa = r.result_type === "building" || r.result_type === "amenity" || r.result_type === "street" && Boolean(r.housenumber);
+            return ciudadOk && numeroOk && precisa && Number(r.rank?.confidence ?? 0) >= 0.85;
+          });
+          if (aceptables.length !== 1) { revisar++; continue; }
+          const r = aceptables[0];
+          const {data,error} = await supabase.from("repartos_entregas")
+            .update({latitud:Number(r.lat),longitud:Number(r.lon)})
+            .eq("id",e.id).eq("empresa_id",empresaId)
+            .is("latitud",null).is("longitud",null).select("id");
+          if (error) throw error;
+          if (data?.length !== 1) { revisar++; continue; }
+          guardadas++;
+        } catch (err) {
+          fallidas++;
+          if (String(err.message || err).includes("429")) { alert("Geoapify alcanzó su límite de consultas. Podés continuar más tarde."); break; }
+        }
+        // Evita lanzar muchas consultas seguidas contra el proveedor.
+        if (i < pendientesGeo.length-1) await new Promise(resolve => setTimeout(resolve, 450));
+      }
+      await cargarDatos();
+      alert(`Geolocalización terminada.\n\n✅ Ubicadas: ${guardadas}\n📍 Para revisar individualmente: ${revisar}\n⚠️ Errores: ${fallidas}\n\nNo se modificaron ubicaciones existentes.`);
+    } finally { setGeoProgreso(""); setUbicandoDestinos(false); }
+  };
+
+  const guardarCandidato = async () => {
+    if (!seleccionUbicacion || indiceUbicacion === "") return;
+    const r = seleccionUbicacion.candidatos[Number(indiceUbicacion)];
+    if (!r) return;
+    const e = seleccionUbicacion.entrega;
+    const normalizar = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    const ubicacion = normalizar([r.formatted,r.county,r.city,r.state,r.suburb].join(" "));
+    const esCaba = esProvinciaCABA(e.provincia);
+    const partidoOk = esCaba || !e.partido || ubicacion.includes(normalizar(e.partido));
+    const localidadOk = esCaba || !e.localidad || ubicacion.includes(normalizar(e.localidad));
+    const provinciaSolicitada = normalizar(e.provincia);
+    const estadoCandidato = normalizar(r.state);
+    const provinciaOk = esCaba
+      ? candidatoEsCABA(r)
+      : provinciaSolicitada === "buenos aires"
+        ? estadoCandidato === "buenos aires" && !candidatoEsCABA(r)
+        : estadoCandidato === provinciaSolicitada;
+    if (!provinciaOk) {
+      alert("La ubicación elegida no corresponde a la provincia indicada. No se guardó. Revisá el resultado o elegí el punto manualmente.");
+      return;
+    }
+    const numeroSolicitado = String(e.direccion || "").match(/\b(\d{1,6})\b/)?.[1];
+    const numeroDevuelto = String(r.housenumber || "").trim();
+    if (numeroSolicitado && numeroDevuelto && numeroSolicitado !== numeroDevuelto) {
+      alert(`La altura encontrada (${numeroDevuelto}) no coincide con la solicitada (${numeroSolicitado}). No se guardó. Elegí otro resultado o marcá el punto manualmente.`);
+      return;
+    }
+    const diferenciaAdministrativa = !partidoOk || !localidadOk;
+    const aviso = diferenciaAdministrativa
+      ? `⚠️ Geoapify usa otra denominación para la localidad o el partido.\n\nCargado: ${[e.localidad,e.partido,e.provincia].filter(Boolean).join(", ")}\nEncontrado: ${r.formatted}\n\nVerificá que la calle y altura sean correctas. ¿Confirmás que corresponde al domicilio?`
+      : `¿Guardar esta ubicación para ${e.destinatario}?\n\n${r.formatted}\n\nConfirmá solamente si es el domicilio correcto.`;
+    if (!window.confirm(aviso)) return;
+    setUbicandoDestinos(true);
+    try {
+      const {data: actualizadas, error} = await supabase.from("repartos_entregas")
+        .update({latitud:Number(r.lat),longitud:Number(r.lon)})
+        .eq("id",e.id).eq("empresa_id",empresaId)
+        .is("latitud", null).is("longitud", null)
+        .select("id");
+      if (error) throw error;
+      if (!actualizadas?.length) throw new Error("No se guardó: esta entrega ya tiene una ubicación o no hay permiso para modificarla.");
+      setSeleccionUbicacion(null);
+      await cargarDatos();
+    } catch (err) { alert("No se pudo guardar la ubicación: " + (err.message || err)); }
+    finally { setUbicandoDestinos(false); }
+  };
+
+  const destinosMapa = modoIndependiente
+    ? entregas.filter(e => !e.pedido_id).map(e => ({ ...e, cliente: e.destinatario || "Destinatario", direccion: [e.direccion,e.localidad,e.partido,e.provincia].filter(Boolean).join(", ") }))
+    : pedidos.map(p => ({
+        ...p, estado: estadoLogisticoPedido(p),
+        repartidor_id: (entregasPorPedido.get(String(p.id)) || [])[0]?.repartidor_id || null,
+      }));
+
+  const cerrarSesion = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
+    window.location.replace("/");
+  };
+
+  const inputStyle = {
+    width: "100%",
+    boxSizing: "border-box",
+    minHeight: "42px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "8px",
+    padding: "9px 10px",
+    fontSize: "14px",
+    background: "#fff",
+    color: "#0f172a",
+  };
+
+  if (modoIndependiente) {
+    const hoy = fechaLocalISO();
+    const manuales = entregas.filter(e => !e.pedido_id);
+    const operativas = manuales.filter(e => !e.cancelada_operativamente_at);
+    const historicasRetiradas = manuales.filter(e => e.cancelada_operativamente_at);
+    // El contador refleja la fecha seleccionada; el historial completo permanece disponible.
+    const fechaLocalDeMarca = valor => {
+      if (!valor) return "";
+      const d = new Date(valor);
+      if (Number.isNaN(d.getTime())) return "";
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    };
+    const retiradasEnFecha = historicasRetiradas.filter(e => fechaLocalDeMarca(e.cancelada_operativamente_at) === fechaConsultaEntregas);
+    // Identificar el reparto real por su ID, nunca por el nombre del cliente.
+    const ordenesPorIdHistorial = new Map(ordenesCompartidas.map(o => [String(o.id), o]));
+    const datosRepartoHistorial = e => {
+      const orden = e.reparto_orden_id ? ordenesPorIdHistorial.get(String(e.reparto_orden_id)) : null;
+      const numero = orden && codigoRepartosCompartido != null
+        ? `REP${String(codigoRepartosCompartido).padStart(3, "0")}-${String(orden.numero).padStart(6, "0")}`
+        : e.reparto_orden_id ? "Reparto: número no disponible" : "Sin reparto asignado";
+      const idChofer = e.repartidor_id || orden?.repartidor_id;
+      const chofer = idChofer ? repartidores.find(r => String(r.id) === String(idChofer)) : null;
+      return { numero, chofer: chofer?.nombre || chofer?.email || (idChofer ? "Repartidor no disponible" : "Sin repartidor asignado") };
+    };
+    // La jornada se define por la fecha programada, no por cuándo se cargó.
+    // Las bandejas operativas conservan los pendientes de cualquier día.
+    const fechaDeEntrega = e => String(e.fecha_programada || e.creado_at || "").slice(0, 10);
+    const entregasFecha = operativas.filter(e => fechaDeEntrega(e) === fechaConsultaEntregas);
+    // Bandeja independiente: todas las entregas programadas desde mañana.
+    const entregasFuturas = operativas.filter(e => fechaDeEntrega(e) > hoy);
+    const pendienteDevolver = e => e.estado === "no_entregado" && (!e.cancelada_operativamente_at || (e.reparto_orden_id && e.salida_at && e.repartidor_id));
+    const totalPendientesDevolver = manuales.filter(pendienteDevolver).length;
+    const cuenta = estado => operativas.filter(e => e.estado === estado).length;
+    // Historial de visitas fallidas: no desaparece al informar o recibir la devolución.
+    const esNoEntregada = e => ["no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado);
+    const totalNoEntregadas = operativas.filter(esNoEntregada).length;
+    const filtradas = manuales.filter(e => {
+      if (e.cancelada_operativamente_at && bandeja !== "retiradas" && !(bandeja === "pendientes_devolver" && pendienteDevolver(e))) return false;
+      if (!e.cancelada_operativamente_at && bandeja === "retiradas") return false;
+      const grupo = (bandeja === "todos" && fechaDeEntrega(e) === fechaConsultaEntregas) ||
+        (bandeja === "futuras" && fechaDeEntrega(e) > hoy) ||
+        (bandeja === "pendientes" && e.estado === "pendiente_preparacion") ||
+        (bandeja === "preparados" && e.estado === "preparado") ||
+        (bandeja === "asignados" && ["asignado", "en_reparto"].includes(e.estado)) ||
+        (bandeja === "hoy" && e.creado_at?.slice(0, 10) === hoy) ||
+        (bandeja === "pendientes_devolver" && pendienteDevolver(e)) ||
+        (bandeja === "devoluciones_pendientes" && e.estado === "devolucion_informada") ||
+        (bandeja === "no_entregadas" && esNoEntregada(e)) ||
+        (bandeja === "volvieron_hoy" && e.estado === "vuelto_deposito") ||
+        (bandeja === "retiradas" && Boolean(e.cancelada_operativamente_at) &&
+          (!fechaHistorialRetiradas || fechaLocalDeMarca(e.cancelada_operativamente_at) === fechaHistorialRetiradas));
+      const coincideRepartidor = filtroRepartidor === "todos" ||
+        (filtroRepartidor === "sin_asignar" ? !e.repartidor_id : String(e.repartidor_id) === filtroRepartidor);
+      return grupo && coincideRepartidor && [e.destinatario, e.direccion, e.localidad, e.numero_remito, e.numero_factura]
+        .some(x => String(x || "").toLowerCase().includes(busqueda.toLowerCase().trim()));
+    });
+    // Prioridad operativa: atrasadas, hoy y futuras; sin cambiar fechas ni estados.
+    const prioridadFecha = e => {
+      const fecha = String(e.fecha_programada || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return [3, "9999-99-99"];
+      return [fecha < hoy ? 0 : fecha === hoy ? 1 : 2, fecha];
+    };
+    if (["pendientes", "preparados", "futuras"].includes(bandeja)) {
+      filtradas.sort((a, b) => {
+        const pa = prioridadFecha(a), pb = prioridadFecha(b);
+        return (bandeja === "futuras" ? 0 : pa[0] - pb[0]) || pa[1].localeCompare(pb[1]) ||
+          String(a.destinatario || "").localeCompare(String(b.destinatario || ""), "es");
+      });
+    }
+    const avisoFecha = e => {
+      const fecha = String(e.fecha_programada || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return {texto:"⚠️ SIN FECHA PROGRAMADA",fondo:"#fef2f2",borde:"#b91c1c"};
+      const legible = `${fecha.slice(8, 10)}/${fecha.slice(5, 7)}/${fecha.slice(0, 4)}`;
+      if (e.cancelada_operativamente_at) return {texto:`📚 RETIRADA DE PENDIENTES · ${e.entrega_origen_id ? "REPROGRAMADA" : "CANCELADA"} · DEVOLUCIÓN A CONTROLAR`,fondo:"#e2e8f0",borde:"#64748b"};
+      if (e.estado === "no_entregado") return {texto:`❌ NO ENTREGADA · ${legible} · DEVOLUCIÓN SIN INFORMAR`,fondo:"#fee2e2",borde:"#b91c1c"};
+      if (e.estado === "devolucion_informada") return {texto:`📥 DEVOLUCIÓN INFORMADA · ${legible} · PENDIENTE DE RECEPCIÓN`,fondo:"#ffedd5",borde:"#c2410c"};
+      if (e.estado === "vuelto_deposito") return {texto:`🔄 DEVUELTA AL DEPÓSITO · ${legible}`,fondo:"#ccfbf1",borde:"#0f766e"};
+      if (e.estado === "entregado") return {texto:`✅ ENTREGADA · ${legible}`,fondo:"#dcfce7",borde:"#15803d"};
+      if (fecha < hoy) return {texto:`⚠️ ENTREGA ATRASADA · ${legible}`,fondo:"#fee2e2",borde:"#dc2626"};
+      if (fecha === hoy) return {texto:`🟢 ENTREGAR HOY · ${legible}`,fondo:"#dcfce7",borde:"#15803d"};
+      return {texto:`📅 ENTREGAR ${legible}`,fondo:"#ffedd5",borde:"#ea580c"};
+    };
+    const campo = (clave, titulo, tipo = "text", obligatorio = false) => (
+      <label style={{ display: "block", fontSize: 12, fontWeight: 800 }} key={clave}>
+        {titulo}
+        <input type={tipo} required={obligatorio} value={manual[clave]}
+          onChange={e => setManual(m => ({ ...m, [clave]: e.target.value }))}
+          style={{ ...inputStyle, marginTop: 5 }} />
+      </label>
+    );
+    return (
+      <div style={{ minHeight: "100vh", background: "#f1f5f9", color: "#0f172a", fontFamily: "Arial, sans-serif" }}>
+        <header style={{ background: "#0f172a", color: "white", padding: 16 }}>
+          <div style={{ maxWidth: 1000, margin: "auto", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div><div style={{ fontSize: 20, fontWeight: 900 }}>🚚 RutaComercio · Repartos</div>
+              <div style={{ color: "#94a3b8", fontSize: 12 }}>{empresaNombre} · Repartos independiente</div></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {typeof onVolver === "function" && <button onClick={onVolver}>← VOLVER</button>}
+              <button onClick={cerrarSesion} style={{ padding: 9 }}>SALIR</button>
+            </div>
+          </div>
+        </header>
+        <main style={{ maxWidth: 1000, margin: "auto", padding: 14 }}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:14}}>
+            <div style={{fontSize:19,fontWeight:900}}>📦 Gestión de entregas</div>
+            <button type="button" onClick={() => {setNuevaEntregaAbierta(true);setEntregaManualActiva(null);}}
+              style={{background:"#16a34a",color:"white",border:0,borderRadius:8,padding:"12px 16px",fontWeight:900,cursor:"pointer"}}>
+              ＋ NUEVA ENTREGA
+            </button>
+          </div>
+          {/* Tarjetas en dos filas para mantener etiquetas legibles. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 4, marginBottom: 14 }}>
+            {[
+              ["pendientes", "📦 PENDIENTES", "DE PREPARAR", cuenta("pendiente_preparacion"), "Pendientes de preparar"],
+              ["preparados", "✅ PREPARADAS", "PARA ASIGNAR", cuenta("preparado"), "Preparadas para asignar a repartidores"],
+              ["asignados", "🚚 ASIGNADAS", "A REPARTIDORES", cuenta("asignado") + cuenta("en_reparto"), "Asignadas a repartidores"],
+              ["todos", "🗓️ TODAS", fechaConsultaEntregas === fechaLocalISO() ? "(HOY)" : `(${fechaConsultaEntregas.slice(8, 10)}/${fechaConsultaEntregas.slice(5, 7)})`, entregasFecha.length, "Todas las entregas de la fecha seleccionada"],
+              ["futuras", "📅 ENTREGAS", "FUTURAS", entregasFuturas.length, "Entregas futuras, desde mañana"],
+              ["no_entregadas", "❌ ENTREGAS NO CONCRETADAS", "AL CLIENTE", totalNoEntregadas, "Historial de visitas sin entrega al cliente, incluso si la mercadería ya regresó al depósito"],
+              ["pendientes_devolver", "🚚 RECHAZOS POR REGRESAR", "A DEPÓSITO", totalPendientesDevolver, "Mercadería que todavía tiene el chofer y debe regresar al depósito"],
+              ["retiradas", "📚 HISTORIAL DE ENTREGAS", "QUITADAS DE PENDIENTES", retiradasEnFecha.length, "Retiradas en la fecha seleccionada. Al abrir, consultás todo el historial con filtros."],
+              ["devoluciones_pendientes", "📦 RECHAZOS INFORMADOS", "AL DEPÓSITO", cuenta("devolucion_informada"), "El chofer informó que regresó la mercadería; Depósito todavía no registró su recepción física"],
+              ["volvieron_hoy", "✅ RECHAZOS RECIBIDOS", "EN DEPÓSITO", cuenta("vuelto_deposito"), "Mercadería cuyo regreso físico fue registrado por Depósito"],
+            ].map(([id, linea1, linea2, n, descripcion]) => (
+              <button key={id} type="button" title={descripcion}
+                onClick={() => { setBandeja(id); setFiltroRepartidor(["pendientes", "preparados"].includes(id) ? "sin_asignar" : "todos"); }}
+                style={{ padding: "5px 5px", minWidth: 0, textAlign: "center", background: bandeja === id ? "#dbeafe" : "white", border: bandeja === id ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
+                <div style={{ color: "#111111", fontSize: 11, fontWeight: 900, lineHeight: 1.15, textAlign: "center" }}>
+                  <div style={{ overflowWrap: "anywhere" }}>{linea1}</div>
+                  <div style={{ overflowWrap: "anywhere" }}>{linea2}</div>
+                </div>
+                <div style={{ fontSize: 21, fontWeight: 900, color: "#111111", marginTop: 0 }}>{n}</div>
+              </button>
+            ))}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:12}}>
+            <label htmlFor="fecha-entregas-repartos" style={{fontWeight:800,fontSize:13}}>📅 Fecha de entregas:</label>
+            <input id="fecha-entregas-repartos" type="date" value={fechaConsultaEntregas}
+              onChange={e => {setFechaConsultaEntregas(e.target.value || fechaLocalISO());setBandeja("todos");setFiltroRepartidor("todos");}}
+              style={{padding:"9px 11px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",color:"#0f172a"}} />
+            <button type="button" onClick={() => {setFechaConsultaEntregas(fechaLocalISO());setBandeja("todos");setFiltroRepartidor("todos");}}
+              style={{padding:"9px 12px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",cursor:"pointer"}}>Hoy</button>
+            <span style={{fontSize:12,color:"#64748b"}}>La fecha filtra «Todas». «Entregas futuras» muestra todas las programadas desde mañana, ordenadas por fecha.</span>
+          </div>
+          {bandeja === "retiradas" && <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"9px 12px",background:"#e2e8f0",borderRadius:8,marginBottom:10}}>
+            <strong style={{fontSize:13}}>📚 Historial completo · {historicasRetiradas.length} registros</strong>
+            <label htmlFor="fecha-historial-retiradas" style={{fontSize:13}}>Fecha en que se quitó:</label>
+            <input id="fecha-historial-retiradas" type="date" value={fechaHistorialRetiradas}
+              onChange={e => setFechaHistorialRetiradas(e.target.value)}
+              style={{padding:7,border:"1px solid #cbd5e1",borderRadius:7}} />
+            <button type="button" onClick={() => setFechaHistorialRetiradas("")}
+              style={{padding:8,border:"1px solid #94a3b8",borderRadius:7,background:"white",cursor:"pointer"}}>Ver todas las fechas</button>
+            <span style={{fontSize:12,color:"#475569"}}>Usá el buscador de abajo para filtrar por cliente y el filtro de repartidor si lo necesitás.</span>
+          </div>}
+          <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:10}}>
+            <select aria-label="Entrega para geolocalizar" value={geoEntregaId} onChange={e=>setGeoEntregaId(e.target.value)}
+              style={{padding:"10px 8px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",maxWidth:"100%",minWidth:180}}>
+              <option value="">Elegir entrega sin ubicación...</option>
+              {pendientesGeo.map(e=><option key={e.id} value={e.id}>{e.destinatario || "Sin nombre"} · {e.direccion}</option>)}
+            </select>
+            <button type="button" disabled={ubicandoDestinos || !pendientesGeo.length} onClick={ubicarUnaDireccion}
+              style={{padding:"10px 14px",border:"1px solid #2563eb",borderRadius:8,background:"#dbeafe",color:"#1d4ed8",fontWeight:900,opacity:pendientesGeo.length?1:.5}}>
+              📍 GEOLOCALIZAR UNA
+            </button>
+            <button type="button" disabled={ubicandoDestinos || !pendientesGeo.length} onClick={ubicarTodasDirecciones}
+              style={{padding:"10px 14px",border:"1px solid #166534",borderRadius:8,background:"#dcfce7",color:"#166534",fontWeight:900,opacity:pendientesGeo.length?1:.5}}>
+              📍 GEOLOCALIZAR TODAS ({pendientesGeo.length})
+            </button>
+          </div>
+          {geoProgreso && <div style={{fontSize:12,color:"#1d4ed8",marginBottom:10}}>⏳ {geoProgreso}</div>}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><input placeholder="🔎 Destinatario, dirección, remito o factura..." value={busqueda} onChange={e => setBusqueda(e.target.value)} style={inputStyle} />
+            <button onClick={cargarDatos} style={{ padding: "0 14px" }}>↻</button></div>
+          <AvisosRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
+          {/* Dos columnas en escritorio: entregas a la izquierda y gestión de repartos a la derecha. */}
+          <style>{`@media (max-width: 740px) { .repartos-paneles-independiente { grid-template-columns: minmax(0, 1fr) !important; } }`}</style>
+          <div className="repartos-paneles-independiente" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, alignItems: "stretch", marginBottom: 14 }}>
+            <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+          {cargando ? <p>Cargando entregas...</p> : errorCarga ? <p style={{ color: "#b91c1c" }}>❌ {errorCarga}</p> : filtradas.length === 0 ?
+            <div style={{ background: "white", padding: 25, borderRadius: 9, textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 80 }}>No hay entregas en esta bandeja.</div> :
+            <div style={{ display: "grid", gap: 8 }}>{filtradas.map(e => {
+              const aviso = avisoFecha(e);
+              const referenciaHistorial = bandeja === "retiradas" ? datosRepartoHistorial(e) : null;
+              return <button key={e.id} onClick={() => { setEntregaManualActiva(e); setEditandoDomicilio(false); setNuevaEntregaAbierta(false); setRepartidorSeleccionado(e.repartidor_id || ""); }}
+                style={{ textAlign: "left", padding: 14, background: "white", color: "#111111", border: "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", color: "#111111" }}><strong>📦 {e.destinatario || "Sin destinatario"}</strong><strong>{e.estado === "asignado" ? (e.repartidor_id ? `🚚 ASIGNADO A: ${repartidores.find(r => String(r.id) === String(e.repartidor_id))?.nombre || repartidores.find(r => String(r.id) === String(e.repartidor_id))?.email || "Repartidor"}` : "🚚 SIN REPARTIDOR") : e.estado === "en_reparto" ? `🚚 EN REPARTO · ${repartidores.find(r => String(r.id) === String(e.repartidor_id))?.nombre || repartidores.find(r => String(r.id) === String(e.repartidor_id))?.email || "Repartidor"}` : (ESTADO_LABEL[e.estado] || e.estado)}</strong></div>
+                <div style={{ marginTop: 9, padding: "9px 12px", borderRadius: 8, background: aviso.fondo, border: `2px solid ${aviso.borde}`, color: "#111111", fontSize: 17, fontWeight: 900, lineHeight: 1.35 }}>
+                  {aviso.texto}
+                </div>
+                {referenciaHistorial ?
+                  <div style={{fontSize:13,color:"#111111",marginTop:7,display:"flex",flexWrap:"wrap",columnGap:9,rowGap:2}}>
+                    <span>🚚 {referenciaHistorial.numero}</span>
+                    <span>👤 {referenciaHistorial.chofer}</span>
+                    <span>📍 {[e.direccion,e.localidad,e.partido,e.provincia].filter(Boolean).join(", ")}</span>
+                    <span>📦 {e.bultos || "—"} bulto/s · {e.numero_remito ? `Remito ${e.numero_remito}` : "Sin remito"}</span>
+                  </div> : <>
+                    <div style={{ fontSize: 13, color: "#111111", marginTop: 7 }}>📍 {[e.direccion, e.localidad, e.partido, e.provincia].filter(Boolean).join(", ")}</div>
+                    <div style={{ fontSize: 13, color: "#111111", marginTop: 4 }}>{e.bultos || "—"} bulto/s · {e.numero_remito ? `Remito ${e.numero_remito}` : "Sin remito"}</div>
+                  </>}
+              </button>;
+            })}</div>}
+              <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <GestionRepartos ordenesCompartidas={ordenesCompartidas} codigoRepartosCompartido={codigoRepartosCompartido} consultarOrdenesCompartidas={consultarOrdenesCompartidas} errorOrdenesCompartidas={errorOrdenesCompartidas} modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
+            </div>
+          </div>
+          <RutasEnviadasSupervisor ordenesCompartidas={ordenesCompartidas} codigoRepartosCompartido={codigoRepartosCompartido} empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
+          {seleccionUbicacion && <div style={{position:"fixed",inset:0,zIndex:3000,background:"#000a",padding:16,overflowY:"auto"}}>
+            <div style={{maxWidth:680,margin:"25px auto",padding:20,background:"white",borderRadius:12}}>
+              <h3>📍 Elegir ubicación — {seleccionUbicacion.entrega.destinatario}</h3>
+              <p style={{fontSize:13}}>Dirección solicitada: {seleccionUbicacion.texto}</p>
+              <p style={{fontSize:12,color:"#92400e"}}>Revisá la calle, la altura y la provincia. Si Geoapify usa otro nombre para la localidad o partido, podrás confirmar el domicilio antes de guardarlo.</p>
+              <div style={{display:"grid",gap:9,maxHeight:300,overflowY:"auto"}}>
+                {seleccionUbicacion.candidatos.length===0 && <p>Geoapify no encontró alternativas.</p>}
+                {seleccionUbicacion.candidatos.map((r,i)=><label key={i} style={{display:"flex",gap:10,padding:10,border:"1px solid #cbd5e1",borderRadius:8,cursor:"pointer"}}>
+                  <input type="radio" name="ubicacion-candidata" checked={indiceUbicacion===String(i)} onChange={()=>setIndiceUbicacion(String(i))}/>
+                  <span>{r.formatted || "Ubicación sin dirección detallada"}</span>
+                </label>)}
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:16}}>
+                <button type="button" disabled={indiceUbicacion==="" || ubicandoDestinos} onClick={guardarCandidato}>✅ GUARDAR UBICACIÓN ELEGIDA</button>
+                <button type="button" onClick={()=>{setEntregaManualActiva(seleccionUbicacion.entrega);setCorrigiendoPunto(true);setPuntoElegido(null);setSeleccionUbicacion(null);}}>🗺️ ELEGIR EN EL MAPA MANUALMENTE</button>
+                <button type="button" onClick={()=>setSeleccionUbicacion(null)}>CANCELAR</button>
+              </div>
+            </div>
+          </div>}
+          {nuevaEntregaAbierta && <div style={{ position: "fixed", inset: 0, background: "#0009", zIndex: 2000, overflowY: "auto", padding: 16 }}>
+            <form onSubmit={e => { e.preventDefault(); crearEntregaManual(); }} style={{ maxWidth: 650, margin: "30px auto", background: "white", padding: 20, borderRadius: 12 }}>
+              <h3>＋ Nueva entrega</h3><p style={{ fontSize: 12, color: "#64748b" }}>No requiere NVI ni pedido de Ventas.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+                {campo("destinatario", "Destinatario *", "text", true)}
+                {campo("direccion", "Dirección *", "text", true)}
+                {!esProvinciaCABA(manual.provincia) && campo("localidad", "Localidad *", "text", true)}
+                <label style={{display:"block",fontSize:12,fontWeight:800}}>Provincia *
+                  <select required value={manual.provincia} onChange={e=>setManual(m=>({...m,provincia:e.target.value,partido:"",localidad:esProvinciaCABA(e.target.value) ? "" : m.localidad}))} style={{...inputStyle,marginTop:5}}>
+                    <option value="">Seleccionar provincia...</option>{PROVINCIAS_ARGENTINAS.map(p=><option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
+                {!esProvinciaCABA(manual.provincia) && <label style={{display:"block",fontSize:12,fontWeight:800}}>Partido / Departamento *
+                  <input
+                    required
+                    type="text"
+                    list="repartos-lista-municipios"
+                    autoComplete="off"
+                    disabled={!manual.provincia}
+                    placeholder={!manual.provincia ? "Primero elegí la provincia" : cargandoMunicipios ? "Cargando partidos..." : "Escribí para buscar, ej.: Quilmes"}
+                    value={manual.partido}
+                    onChange={e=>setManual(m=>({...m,partido:e.target.value}))}
+                    style={{...inputStyle,marginTop:5}}
+                  />
+                  <datalist id="repartos-lista-municipios">
+                    {municipios.map(x=><option key={x} value={x}/>)}
+                  </datalist>
+                  {municipiosError && <span style={{fontSize:11,color:"#92400e"}}>{municipiosError}</span>}
+                  <span style={{display:"block",fontSize:11,color:"#64748b",marginTop:4}}>Podés buscar por nombre o escribirlo manualmente.</span>
+                </label>}
+                {esProvinciaCABA(manual.provincia) && <div style={{gridColumn:"1 / -1",fontSize:12,color:"#166534",background:"#f0fdf4",padding:9,borderRadius:7}}>Para CABA no hace falta indicar barrio ni comuna. Geoapify buscará la calle y altura dentro de la Ciudad Autónoma de Buenos Aires.</div>}
+                {campo("telefono", "Teléfono", "tel")}
+                {campo("referencia_domicilio", "Referencia del domicilio")}{campo("bultos", "Cantidad de bultos *", "number", true)}
+                {campo("fecha_programada", "Fecha programada", "date")}{campo("numero_remito", "Nº remito")}{campo("numero_factura", "Nº factura")}
+              </div>
+              <label style={{ display: "block", marginTop: 12, fontWeight: 800, fontSize: 12 }}>Observaciones<textarea value={manual.observaciones} onChange={e => setManual(m => ({ ...m, observaciones: e.target.value }))} style={{ ...inputStyle, marginTop: 5 }} rows={3} /></label>
+              <div style={{ display: "flex", gap: 10, marginTop: 16 }}><button type="button" onClick={() => setNuevaEntregaAbierta(false)} disabled={guardandoManual}>CANCELAR</button>
+                <button type="submit" disabled={guardandoManual} style={{ background: "#16a34a", color: "white", border: 0, borderRadius: 8, padding: 12, fontWeight: 900 }}>{guardandoManual ? "GUARDANDO..." : "💾 GUARDAR ENTREGA"}</button></div>
+            </form></div>}
+          {entregaManualActiva && <div style={{ position: "fixed", inset: 0, background: "#0009", zIndex: 2000, overflowY: "auto", padding: 16 }}>
+            <div style={{ maxWidth: 600, margin: "40px auto", background: "white", padding: 20, borderRadius: 12 }}>
+              <h3>📦 {entregaManualActiva.destinatario}</h3>
+              <p>📍 {[entregaManualActiva.direccion, entregaManualActiva.localidad, entregaManualActiva.partido, entregaManualActiva.provincia].filter(Boolean).join(", ")}</p>
+              {!entregaManualActiva.pedido_id && !entregaManualActiva.repartidor_id && !entregaManualActiva.reparto_orden_id && ["pendiente_preparacion","preparado"].includes(entregaManualActiva.estado) && <div style={{marginBottom:12}}>
+                <button type="button" onClick={()=>{setEditandoDomicilio(v=>!v);setDomicilioEditado({direccion:entregaManualActiva.direccion||"",localidad:entregaManualActiva.localidad||"",provincia:entregaManualActiva.provincia||"",partido:entregaManualActiva.partido||""});}} style={{padding:10,fontWeight:800}}>✏️ EDITAR DOMICILIO</button>
+                {editandoDomicilio && <div style={{padding:12,marginTop:8,border:"1px solid #cbd5e1",borderRadius:9,display:"grid",gap:9}}>
+                  <label>Dirección *<input value={domicilioEditado.direccion} onChange={ev=>setDomicilioEditado(d=>({...d,direccion:ev.target.value}))} style={{width:"100%",padding:9,boxSizing:"border-box"}} /></label>
+                  <label>Provincia *<select value={domicilioEditado.provincia} onChange={ev=>setDomicilioEditado(d=>({...d,provincia:ev.target.value,localidad:"",partido:""}))} style={{width:"100%",padding:9}}><option value="">Seleccionar provincia</option>{PROVINCIAS_ARGENTINAS.map(p=><option key={p} value={p}>{p}</option>)}</select></label>
+                  {!esProvinciaCABA(domicilioEditado.provincia) && <>
+                    <label>Localidad *<input value={domicilioEditado.localidad} onChange={ev=>setDomicilioEditado(d=>({...d,localidad:ev.target.value}))} style={{width:"100%",padding:9,boxSizing:"border-box"}} /></label>
+                    <label>Partido *<input value={domicilioEditado.partido} onChange={ev=>setDomicilioEditado(d=>({...d,partido:ev.target.value}))} style={{width:"100%",padding:9,boxSizing:"border-box"}} /></label>
+                  </>}
+                  {esProvinciaCABA(domicilioEditado.provincia) && <small>En CABA no se exige barrio ni comuna.</small>}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button type="button" disabled={guardandoManual} onClick={guardarDomicilioEditado} style={{padding:10,background:"#166534",color:"white",border:0,borderRadius:7}}>💾 GUARDAR DOMICILIO</button><button type="button" onClick={()=>setEditandoDomicilio(false)}>CANCELAR</button></div>
+                </div>}
+              </div>}
+              {puntoValido(entregaManualActiva.latitud, entregaManualActiva.longitud) && <button type="button" disabled={corrigiendoUbicacion} onClick={async()=>{
+                if (!window.confirm("¿Quitar la ubicación guardada de esta entrega para poder ubicarla nuevamente? No se borra la entrega.")) return;
+                setCorrigiendoUbicacion(true);
+                try { const {error}=await supabase.from("repartos_entregas").update({latitud:null,longitud:null}).eq("id",entregaManualActiva.id).eq("empresa_id",empresaId); if(error) throw error; setEntregaManualActiva(null); await cargarDatos(); alert("Ubicación quitada. Revisá el domicilio antes de volver a ubicarla."); }
+                catch(e){alert("No se pudo quitar la ubicación: "+(e.message||e));} finally {setCorrigiendoUbicacion(false);}
+              }} style={{padding:8,marginBottom:10}}>📍 CORREGIR UBICACIÓN DEL MAPA</button>}
+              <button type="button" onClick={() => { setCorrigiendoPunto(v => !v); setPuntoElegido(null); }} style={{padding:9,marginBottom:10}}>📍 ELEGIR PUNTO MANUALMENTE</button>
+              {corrigiendoPunto && <div style={{marginBottom:12}}>
+                <p style={{fontSize:12}}>Tocá el domicilio correcto en el mapa. No se guarda hasta que confirmes.</p>
+                <div style={{height:310,overflow:"hidden",borderRadius:9}}>
+                  <MapContainer key={`${entregaManualActiva.id}-${entregaManualActiva.provincia || ""}`} center={puntoValido(entregaManualActiva.latitud, entregaManualActiva.longitud) ? [Number(entregaManualActiva.latitud),Number(entregaManualActiva.longitud)] : esProvinciaCABA(entregaManualActiva.provincia) ? [-34.6037,-58.3816] : [-34.724,-58.254]} zoom={13} style={{height:"100%",width:"100%"}}>
+                    <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
+                    <ElegirPuntoMapa onElegir={setPuntoElegido}/>
+                    {puntoElegido && <Marker position={puntoElegido}/>}
+                  </MapContainer>
+                </div>
+                <button type="button" disabled={!puntoElegido || guardandoManual} onClick={guardarPuntoManual} style={{padding:10,marginTop:8,background:"#16a34a",color:"white",border:0,borderRadius:8}}>✅ GUARDAR PUNTO ELEGIDO</button>
+              </div>}
+              <p>☎ {entregaManualActiva.telefono || "Sin teléfono"} · {entregaManualActiva.bultos || "—"} bultos</p>
+              <p><strong>{ESTADO_LABEL[entregaManualActiva.estado] || entregaManualActiva.estado}</strong></p>
+              {entregaManualActiva.observaciones && <p>📝 {entregaManualActiva.observaciones}</p>}
+              {entregaManualActiva.cancelada_operativamente_at && <div style={{background:"#e2e8f0",padding:12,borderRadius:9,marginTop:10}}>
+                <strong>📚 RETIRADA DE PENDIENTES</strong>
+                <div>Motivo: {entregaManualActiva.motivo_cancelacion_operativa || "Sin motivo"}</div>
+                <div>La visita y la obligación de devolución siguen registradas.</div>
+              </div>}
+              {entregaManualActiva.estado === "no_entregado" && !entregaManualActiva.cancelada_operativamente_at && <div style={{display:"flex",flexWrap:"wrap",gap:9,marginTop:12}}>
+                <button type="button" disabled={guardandoManual} onClick={() => resolverEntregaFallidaIndependiente("reprogramar")} style={{padding:12,border:0,borderRadius:8,background:"#2563eb",color:"white",fontWeight:900}}>📅 REPROGRAMAR</button>
+                <button type="button" disabled={guardandoManual} onClick={() => resolverEntregaFallidaIndependiente("eliminar")} style={{padding:12,border:"1px solid #b91c1c",borderRadius:8,background:"#fee2e2",color:"#991b1b",fontWeight:900}}>🗑️ ELIMINAR DE PENDIENTES</button>
+              </div>}
+              {entregaManualActiva.estado === "no_entregado" && <div style={{background:"#fef2f2",border:"2px solid #fca5a5",borderRadius:9,padding:12,color:"#111111",fontWeight:800,marginTop:10}}>
+                ❌ ENTREGA NO CONCRETADA AL CLIENTE · 🚚 RECHAZO POR REGRESAR A DEPÓSITO
+                <div style={{fontSize:13,fontWeight:500,marginTop:5}}>El recorrido puede estar finalizado, pero falta que el repartidor informe el regreso de la mercadería.</div>
+              </div>}
+              {entregaManualActiva.estado === "devolucion_informada" && <div style={{background:"#fff7ed",border:"2px solid #fb923c",borderRadius:9,padding:12,marginTop:10,color:"#111111"}}>
+                <strong>📦 RECHAZO INFORMADO AL DEPÓSITO · RECEPCIÓN FÍSICA PENDIENTE</strong>
+                <div style={{fontSize:13,margin:"8px 0"}}>Confirmá únicamente cuando los bultos estén físicamente en Depósito.</div>
+                <button type="button" disabled={guardandoManual} onClick={recibirDevolucionManual} style={{padding:12,width:"100%",background:"#0f766e",color:"white",border:0,borderRadius:8,fontWeight:900}}>
+                  {guardandoManual ? "REGISTRANDO..." : "📥 CONFIRMAR MERCADERÍA RECIBIDA"}
+                </button>
+              </div>}
+              {entregaManualActiva.estado === "vuelto_deposito" && <div style={{background:"#dcfce7",border:"2px solid #16a34a",borderRadius:9,padding:12,marginTop:10,color:"#111111",fontWeight:900}}>
+                ✅ RECHAZO RECIBIDO EN DEPÓSITO
+                {!entregaManualActiva.pedido_id && !entregaManualActiva.cancelada_operativamente_at && <div style={{display:"flex",flexWrap:"wrap",gap:9,marginTop:12}}>
+                  <button type="button" disabled={guardandoManual} onClick={() => resolverEntregaFallidaIndependiente("reprogramar")} style={{padding:12,border:0,borderRadius:8,background:"#2563eb",color:"white",fontWeight:900}}>📅 REPROGRAMAR ENTREGA</button>
+                  <button type="button" disabled={guardandoManual} onClick={() => resolverEntregaFallidaIndependiente("eliminar")} style={{padding:12,border:"1px solid #b91c1c",borderRadius:8,background:"#fee2e2",color:"#991b1b",fontWeight:900}}>🗑️ ELIMINAR DE PENDIENTES</button>
+                </div>}
+              </div>}
+              {entregaManualActiva.estado === "pendiente_preparacion" && <button disabled={guardandoManual} onClick={() => actualizarEntregaManual("preparado")} style={{ padding: 12, background: "#16a34a", color: "white", border: 0, borderRadius: 8, fontWeight: 800 }}>✅ MARCAR PREPARADA</button>}
+              {["pendiente_preparacion", "preparado"].includes(entregaManualActiva.estado) && !entregaManualActiva.repartidor_id && !entregaManualActiva.pedido_id && (
+                <div style={{ marginTop: 16 }}>
+                  <button type="button" disabled={guardandoManual} onClick={eliminarEntregaSinAsignar}
+                    style={{padding:11,background:"#fee2e2",color:"#991b1b",border:"1px solid #fca5a5",borderRadius:8,fontWeight:800}}>
+                    🗑️ ELIMINAR ENTREGA
+                  </button>
+                </div>
+              )}
+              {entregaManualActiva.estado === "asignado" && <button type="button" disabled={guardandoManual} onClick={desasignarManual} style={{padding:11,background:"#f59e0b",border:0,borderRadius:8,fontWeight:800}}>↩️ DESASIGNAR REPARTIDOR</button>}
+              {entregaManualActiva.repartidor_id && <p style={{ fontSize: 12 }}>Repartidor: {repartidores.find(r => r.id === entregaManualActiva.repartidor_id)?.nombre || "Asignado"}</p>}
+              <div style={{ marginTop: 16 }}><button onClick={() => setEntregaManualActiva(null)}>← CERRAR</button></div>
+            </div></div>}
+        </main>
+      </div>
+    );
+  }
+
+  if (pedidoActivo) {
+    const existentes = entregasPorPedido.get(String(pedidoActivo.id)) || [];
+
+    return (
+      <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "Arial, sans-serif", color: "#0f172a" }}>
+        <header style={{ background: "#0f172a", color: "#fff", padding: "12px 14px" }}>
+          <div style={{ maxWidth: "900px", margin: "0 auto", display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: "11px", color: "#93c5fd", fontWeight: "900" }}>📦 DESPACHO · PREPARACIÓN</div>
+              <div style={{ fontSize: "19px", fontWeight: "900" }}>NVI #{pedidoActivo.numeroVisible}</div>
+            </div>
+            <button onClick={() => setPedidoActivo(null)} style={{ padding: "8px 10px", borderRadius: "8px", border: "1px solid #64748b", background: "#1e293b", color: "#fff", fontWeight: "800", cursor: "pointer" }}>
+              ← VOLVER
+            </button>
+          </div>
+        </header>
+
+        <main style={{ maxWidth: "900px", margin: "0 auto", padding: "14px" }}>
+          <div style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "14px", marginBottom: "12px" }}>
+            <div style={{ fontSize: "20px", fontWeight: "900" }}>{pedidoActivo.cliente}</div>
+            <div style={{ marginTop: "4px", color: "#475569", fontSize: "13px" }}>📍 {pedidoActivo.direccion || "Sin dirección cargada"}</div>
+            <div style={{ marginTop: "4px", color: "#475569", fontSize: "12px" }}>
+              Vendedor: <strong>{pedidoActivo.preventista || "—"}</strong> · Total NVI: <strong>${Number(pedidoActivo.total || 0).toLocaleString("es-AR")}</strong>
+            </div>
+          </div>
+
+          <div style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "14px", marginBottom: "12px" }}>
+            <div style={{ fontSize: "13px", fontWeight: "900", marginBottom: "9px" }}>ARTÍCULOS A PREPARAR</div>
+            <div style={{ display: "grid", gap: "7px" }}>
+              {(pedidoActivo.items || []).map((it, i) => (
+                <div key={`${it.producto_id || it.codigo || i}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: "10px", borderBottom: "1px solid #e2e8f0", paddingBottom: "7px" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: "800", fontSize: "13px" }}>{it.descripcion}</div>
+                    <div style={{ color: "#64748b", fontSize: "11px" }}>
+                      {[it.codigo, it.color && `Color ${it.color}`, it.talle && `Talle ${it.talle}`].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: "900", whiteSpace: "nowrap" }}>x {Number(it.cantidad || 0)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {existentes.length > 0 ? (
+            <div style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "14px" }}>
+              <div style={{ fontWeight: "900", marginBottom: "10px" }}>
+                {ESTADO_LABEL[existentes[0]?.estado] || existentes[0]?.estado}
+              </div>
+
+              <div style={{ fontSize: "12px", color: "#475569", marginBottom: "12px" }}>
+                {existentes[0]?.numero_remito ? `Remito ${existentes[0].numero_remito}` : "Sin remito"}
+                {" · "}
+                {existentes[0]?.numero_factura ? `Factura ${existentes[0].numero_factura}` : "Sin factura"}
+                {existentes[0]?.bultos !== null && existentes[0]?.bultos !== undefined ? ` · ${existentes[0].bultos} bulto/s` : ""}
+              </div>
+
+              {["preparado", "asignado"].includes(existentes[0]?.estado) && (
+                <div style={{ background:"#f8fafc", border:"1px solid #cbd5e1", borderRadius:"10px", padding:"12px", marginBottom:"14px" }}>
+                  <div style={{ fontSize:"14px", fontWeight:"900", marginBottom:"10px" }}>📦 DATOS REALES DE LOGÍSTICA</div>
+                  <div style={{ fontSize:"11px", color:"#64748b", marginBottom:"10px" }}>
+                    Depósito y Repartos puede corregir estos datos hasta que la mercadería salga a reparto.
+                  </div>
+
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))", gap:"10px" }}>
+                    <label style={{ fontSize:"11px", fontWeight:"900", color:"#475569" }}>
+                      📦 BULTOS REALES
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={form.bultos}
+                        onChange={e => setForm(f => ({ ...f, bultos:e.target.value }))}
+                        style={{ ...inputStyle, marginTop:"5px" }}
+                      />
+                    </label>
+
+                    <label style={{ fontSize:"11px", fontWeight:"900", color:"#475569" }}>
+                      🧾 REMITO
+                      <input
+                        value={form.numero_remito}
+                        onChange={e => setForm(f => ({ ...f, numero_remito:e.target.value }))}
+                        style={{ ...inputStyle, marginTop:"5px" }}
+                      />
+                    </label>
+
+                    <label style={{ fontSize:"11px", fontWeight:"900", color:"#475569" }}>
+                      🧾 FACTURA
+                      <input
+                        value={form.numero_factura}
+                        onChange={e => setForm(f => ({ ...f, numero_factura:e.target.value }))}
+                        style={{ ...inputStyle, marginTop:"5px" }}
+                      />
+                    </label>
+
+                    <label style={{ fontSize:"11px", fontWeight:"900", color:"#475569" }}>
+                      📅 FECHA DE REPARTO
+                      <input
+                        type="date"
+                        value={form.fecha_programada}
+                        onChange={e => setForm(f => ({ ...f, fecha_programada:e.target.value }))}
+                        style={{ ...inputStyle, marginTop:"5px" }}
+                      />
+                    </label>
+                  </div>
+
+                  <label style={{ display:"block", fontSize:"11px", fontWeight:"900", color:"#475569", marginTop:"10px" }}>
+                    📝 OBSERVACIONES DE LOGÍSTICA
+                    <textarea
+                      value={form.observaciones}
+                      onChange={e => setForm(f => ({ ...f, observaciones:e.target.value }))}
+                      rows="2"
+                      style={{ ...inputStyle, marginTop:"5px", resize:"vertical" }}
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={guardarDatosLogisticos}
+                    disabled={guardandoDatos}
+                    style={{
+                      width:"100%", marginTop:"10px", minHeight:"46px", border:"none",
+                      borderRadius:"9px", background:guardandoDatos ? "#94a3b8" : "#0f766e",
+                      color:"#fff", fontSize:"13px", fontWeight:"900", cursor:guardandoDatos ? "wait" : "pointer"
+                    }}
+                  >
+                    {guardandoDatos ? "⏳ GUARDANDO..." : "💾 GUARDAR DATOS DE LOGÍSTICA"}
+                  </button>
+                </div>
+              )}
+
+              {existentes[0]?.estado === "devolucion_informada" ? (
+                <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:"10px", padding:"12px" }}>
+                  <div style={{ fontWeight:"900", color:"#9a3412", marginBottom:"6px" }}>❌ ENTREGA NO REALIZADA</div>
+                  <div style={{ fontSize:"12px", color:"#7c2d12", marginBottom:"10px" }}>
+                    Motivo: <strong>{existentes[0]?.motivo_no_entrega || "No informado"}</strong>
+                  </div>
+                  <div style={{ fontSize:"11px", color:"#475569", marginBottom:"10px" }}>
+                    Confirmá únicamente cuando los bultos hayan regresado físicamente al depósito.
+                  </div>
+                  <button type="button" onClick={recibirMercaderiaDevuelta} disabled={procesandoDevolucion}
+                    style={{ width:"100%", minHeight:"50px", border:"none", borderRadius:"9px", background:procesandoDevolucion?"#94a3b8":"#0f766e", color:"#fff", fontWeight:"900", cursor:procesandoDevolucion?"wait":"pointer" }}>
+                    {procesandoDevolucion ? "⏳ REGISTRANDO..." : "📥 RECIBIR MERCADERÍA DEVUELTA"}
+                  </button>
+                </div>
+              ) : existentes[0]?.estado === "vuelto_deposito" ? (
+                <div style={{ background:"#f0fdfa", border:"1px solid #5eead4", borderRadius:"10px", padding:"12px" }}>
+                  <div style={{ fontWeight:"900", color:"#115e59", marginBottom:"6px" }}>🔄 MERCADERÍA RECIBIDA EN DEPÓSITO</div>
+                  <div style={{ fontSize:"11px", color:"#475569", marginBottom:"12px" }}>
+                    La NVI sigue vigente. Elegí reenvío o solicitá su anulación al Supervisor.
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(210px, 1fr))", gap:"10px", marginBottom:"10px" }}>
+                    <label style={{ fontSize:"11px", fontWeight:"900", color:"#475569" }}>
+                      👤 REPARTIDOR PARA REENVÍO
+                      <select value={repartidorSeleccionado} onChange={e=>setRepartidorSeleccionado(e.target.value)} style={{...inputStyle,marginTop:"5px"}}>
+                        <option value="">Elegir repartidor...</option>
+                        {repartidores.map(r=><option key={r.id} value={r.id}>{r.nombre || r.email}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ fontSize:"11px", fontWeight:"900", color:"#475569" }}>
+                      📅 NUEVA FECHA
+                      <input type="date" value={form.fecha_programada} onChange={e=>setForm(f=>({...f,fecha_programada:e.target.value}))} style={{...inputStyle,marginTop:"5px"}} />
+                    </label>
+                  </div>
+                  <button type="button" onClick={reenviarDevolucion} disabled={procesandoDevolucion}
+                    style={{ width:"100%", minHeight:"48px", border:"none", borderRadius:"9px", background:procesandoDevolucion?"#94a3b8":"#2563eb", color:"#fff", fontWeight:"900", cursor:procesandoDevolucion?"wait":"pointer", marginBottom:"8px" }}>
+                    🚚 REENVIAR / REPROGRAMAR
+                  </button>
+                  <button type="button" onClick={solicitarAnulacionNvi} disabled={procesandoDevolucion}
+                    style={{ width:"100%", minHeight:"48px", border:"none", borderRadius:"9px", background:procesandoDevolucion?"#94a3b8":"#b91c1c", color:"#fff", fontWeight:"900", cursor:procesandoDevolucion?"wait":"pointer" }}>
+                    ❌ SOLICITAR ANULACIÓN DE NVI
+                  </button>
+                </div>
+              ) : existentes[0]?.estado === "anulacion_solicitada" ? (
+                <div style={{ background:"#fff7ed", border:"1px solid #fdba74", borderRadius:"10px", padding:"12px", color:"#9a3412" }}>
+                  <div style={{ fontWeight:"900" }}>⏳ ANULACIÓN PENDIENTE DE SUPERVISOR</div>
+                  <div style={{ fontSize:"12px", marginTop:"6px" }}>Motivo: {existentes[0]?.motivo_solicitud_anulacion || "—"}</div>
+                  <div style={{ fontSize:"11px", marginTop:"7px", color:"#475569" }}>La NVI continúa vigente y el stock no fue revertido.</div>
+                </div>
+              ) : existentes[0]?.estado === "preparado" ? (
+                <>
+                  <div style={{ fontSize: "14px", fontWeight: "900", marginBottom: "10px" }}>🚚 ASIGNAR REPARTO</div>
+
+                  {repartidores.length === 0 ? (
+                    <div style={{ padding: "10px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: "8px", color: "#9a3412", fontSize: "12px" }}>
+                      No hay repartidores habilitados para esta empresa.
+                    </div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "900", color: "#475569" }}>
+                        👤 REPARTIDOR
+                        <select
+                          value={repartidorSeleccionado}
+                          onChange={e => setRepartidorSeleccionado(e.target.value)}
+                          style={{ ...inputStyle, marginTop: "5px" }}
+                        >
+                          <option value="">Elegir repartidor...</option>
+                          {repartidores.map(r => (
+                            <option key={r.id} value={r.id}>
+                              {r.nombre || r.email}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label style={{ fontSize: "11px", fontWeight: "900", color: "#475569" }}>
+                        📅 FECHA DE REPARTO
+                        <input
+                          type="date"
+                          value={form.fecha_programada}
+                          onChange={e => setForm(f => ({ ...f, fecha_programada: e.target.value }))}
+                          style={{ ...inputStyle, marginTop: "5px" }}
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={asignarReparto}
+                    disabled={asignando || repartidores.length === 0}
+                    style={{
+                      width: "100%",
+                      marginTop: "12px",
+                      minHeight: "50px",
+                      border: "none",
+                      borderRadius: "9px",
+                      background: asignando || repartidores.length === 0 ? "#94a3b8" : "#2563eb",
+                      color: "#fff",
+                      fontSize: "14px",
+                      fontWeight: "900",
+                      cursor: asignando ? "wait" : "pointer",
+                    }}
+                  >
+                    {asignando ? "⏳ ASIGNANDO..." : "🚚 ASIGNAR REPARTO"}
+                  </button>
+                </>
+              ) : (
+                <div style={{ padding: "10px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", fontSize: "12px", color: "#1e3a8a" }}>
+                  Esta entrega ya fue asignada.
+                  {(() => {
+                    const rep = repartidores.find(r => String(r.id) === String(existentes[0]?.repartidor_id));
+                    return rep ? ` Repartidor: ${rep.nombre || rep.email}.` : "";
+                  })()}
+                  {existentes[0]?.fecha_programada ? ` Fecha: ${existentes[0].fecha_programada}.` : ""}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "14px" }}>
+              <div style={{ fontSize: "14px", fontWeight: "900", marginBottom: "12px" }}>DATOS DE PREPARACIÓN</div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "10px" }}>
+                <label style={{ fontSize: "11px", fontWeight: "900", color: "#475569" }}>
+                  📦 BULTOS
+                  <input type="number" min="1" step="1" value={form.bultos} onChange={e => setForm(f => ({ ...f, bultos: e.target.value }))} style={{ ...inputStyle, marginTop: "5px" }} placeholder="Ej.: 3" />
+                </label>
+
+                <label style={{ fontSize: "11px", fontWeight: "900", color: "#475569" }}>
+                  📄 Nº REMITO
+                  <input value={form.numero_remito} onChange={e => setForm(f => ({ ...f, numero_remito: e.target.value }))} style={{ ...inputStyle, marginTop: "5px" }} placeholder="Opcional" />
+                </label>
+
+                <label style={{ fontSize: "11px", fontWeight: "900", color: "#475569" }}>
+                  🧾 Nº FACTURA
+                  <input value={form.numero_factura} onChange={e => setForm(f => ({ ...f, numero_factura: e.target.value }))} style={{ ...inputStyle, marginTop: "5px" }} placeholder="Opcional" />
+                </label>
+
+                <label style={{ fontSize: "11px", fontWeight: "900", color: "#475569" }}>
+                  📅 FECHA PREVISTA
+                  <input type="date" value={form.fecha_programada} onChange={e => setForm(f => ({ ...f, fecha_programada: e.target.value }))} style={{ ...inputStyle, marginTop: "5px" }} />
+                </label>
+              </div>
+
+              <label style={{ display: "block", marginTop: "10px", fontSize: "11px", fontWeight: "900", color: "#475569" }}>
+                📝 OBSERVACIONES
+                <textarea value={form.observaciones} onChange={e => setForm(f => ({ ...f, observaciones: e.target.value }))} rows={3} style={{ ...inputStyle, marginTop: "5px", resize: "vertical" }} placeholder="Opcional" />
+              </label>
+
+              <div style={{ marginTop: "10px", padding: "9px 10px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", color: "#1e3a8a", fontSize: "11px" }}>
+                Esta primera versión prepara la <strong>entrega completa</strong>. La división de una NVI en varios remitos/entregas se habilitará sobre esta misma estructura.
+              </div>
+
+              <button
+                type="button"
+                onClick={prepararEntregaCompleta}
+                disabled={guardando}
+                style={{
+                  width: "100%",
+                  marginTop: "12px",
+                  minHeight: "50px",
+                  border: "none",
+                  borderRadius: "9px",
+                  background: guardando ? "#94a3b8" : "#16a34a",
+                  color: "#fff",
+                  fontSize: "14px",
+                  fontWeight: "900",
+                  cursor: guardando ? "wait" : "pointer",
+                }}
+              >
+                {guardando ? "⏳ PREPARANDO..." : "✅ PEDIDO PREPARADO"}
+              </button>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "Arial, sans-serif", color: "#0f172a" }}>
+      <header style={{ background: "#0f172a", color: "#fff", padding: "12px 14px" }}>
+        <div style={{ maxWidth: "1000px", margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+          <div>
+            <div style={{ fontSize: "20px", fontWeight: "950" }}>📦 RutaComercio · Depósito y Repartos</div>
+            <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "2px" }}>
+              {empresaNombre || "Empresa"} · Preparación de entregas
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "7px" }}>
+            {typeof onVolver === "function" && (
+              <button onClick={onVolver} style={{ padding: "8px 10px", border: "1px solid #64748b", borderRadius: "8px", background: "#1e293b", color: "#fff", fontWeight: "800", cursor: "pointer" }}>
+                ← VOLVER
+              </button>
+            )}
+            <button onClick={cerrarSesion} style={{ padding: "8px 10px", border: "1px solid #64748b", borderRadius: "8px", background: "#1e293b", color: "#fff", fontWeight: "800", cursor: "pointer" }}>
+              SALIR
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: "1000px", margin: "0 auto", padding: "14px" }}>
+          <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
+          <GestionRepartos ordenesCompartidas={ordenesCompartidas} codigoRepartosCompartido={codigoRepartosCompartido} consultarOrdenesCompartidas={consultarOrdenesCompartidas} errorOrdenesCompartidas={errorOrdenesCompartidas} modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
+          <RutasEnviadasSupervisor ordenesCompartidas={ordenesCompartidas} codigoRepartosCompartido={codigoRepartosCompartido} empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "12px" }}>
+          {[
+            ["hoy", "📥 NVIs RECIBIDAS HOY", resumenHoy.recibidas],
+            ["sin_preparar_hoy", "📦 SIN PREPARAR", resumenHoy.sinPreparar],
+            ["asignadas_hoy", "🚚 ASIGNADAS", `${resumenHoy.asignadas}/${resumenHoy.recibidas}`],
+            ["devoluciones_pendientes", "📦 RECHAZOS INFORMADOS AL DEPÓSITO", resumenHoy.devolucionesPendientes],
+            ["volvieron_hoy", "✅ RECHAZOS RECIBIDOS EN DEPÓSITO", resumenHoy.volvieron],
+          ].map(([clave, texto, cantidad]) => {
+            const activa = bandeja === clave;
+            return (
+              <button
+                key={clave}
+                type="button"
+                onClick={() => setBandeja(clave)}
+                style={{
+                  background: activa ? "#dbeafe" : "#fff",
+                  border: activa ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                  borderRadius: "10px",
+                  padding: "10px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  color: activa ? "#1d4ed8" : "#0f172a",
+                }}
+              >
+                <div style={{ fontSize: "10px", color: activa ? "#1d4ed8" : "#64748b", fontWeight: "900" }}>{texto}</div>
+                <div style={{ fontSize: "24px", fontWeight: "950" }}>{cantidad}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "7px", marginBottom: "12px" }}>
+          {[
+            ["pendientes", "📦 PENDIENTES", contadoresBandeja.pendientes],
+            ["preparados", "✅ PREPARADOS", contadoresBandeja.preparados],
+            ["asignados", "🚚 ASIGNADOS", contadoresBandeja.asignados],
+            ["todos", "📋 TODOS", contadoresBandeja.todos],
+          ].map(([clave, texto, cantidad]) => {
+            const activa = bandeja === clave;
+            return (
+              <button
+                key={clave}
+                type="button"
+                onClick={() => setBandeja(clave)}
+                style={{
+                  minHeight: "48px",
+                  border: activa ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                  borderRadius: "9px",
+                  background: activa ? "#dbeafe" : "#fff",
+                  color: activa ? "#1d4ed8" : "#334155",
+                  fontSize: "11px",
+                  fontWeight: "950",
+                  cursor: "pointer",
+                  padding: "7px 5px",
+                }}
+              >
+                <div>{texto}</div>
+                <div style={{ fontSize: "17px", marginTop: "2px" }}>{cantidad}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+          <input
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            placeholder="🔎 NVI, cliente, dirección o vendedor..."
+            style={{ ...inputStyle, flex: 1 }}
+          />
+          <button onClick={cargarDatos} style={{ border: "1px solid #94a3b8", borderRadius: "8px", background: "#fff", padding: "8px 12px", fontWeight: "900", cursor: "pointer" }}>
+            ↻
+          </button>
+        </div>
+
+        {cargando ? (
+          <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>⏳ Cargando Depósito y Repartos...</div>
+        ) : errorCarga ? (
+          <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", color: "#991b1b", borderRadius: "10px", padding: "14px" }}>
+            ❌ {errorCarga}
+          </div>
+        ) : pedidosFiltrados.length === 0 ? (
+          <div style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "28px", textAlign: "center", color: "#64748b" }}>
+            {bandeja === "hoy" && "No hay NVI recibidas hoy."}
+            {bandeja === "sin_preparar_hoy" && "No hay NVI recibidas hoy pendientes de preparación."}
+            {bandeja === "asignadas_hoy" && "No hay NVI recibidas hoy que hayan sido asignadas."}
+            {bandeja === "devoluciones_pendientes" && "No hay mercadería pendiente de recepción por devolución."}
+            {bandeja === "volvieron_hoy" && "No hay NVI recibidas hoy que hayan vuelto al depósito."}
+            {bandeja === "pendientes" && "No hay NVI pendientes de preparación."}
+            {bandeja === "preparados" && "No hay entregas preparadas esperando asignación."}
+            {bandeja === "asignados" && "No hay entregas asignadas a repartidores."}
+            {bandeja === "todos" && "No hay NVI pasadas a Depósito para mostrar."}
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: "8px" }}>
+            {pedidosFiltrados.map(p => {
+              const creadas = entregasPorPedido.get(String(p.id)) || [];
+              const ultima = creadas[0] || null;
+
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => abrirPedido(p)}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    background: "#fff",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "10px",
+                    padding: "11px 12px",
+                    cursor: "pointer",
+                    color: "#0f172a",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: "14px", fontWeight: "950" }}>🧾 NVI #{p.numeroVisible} · {p.cliente}</div>
+                      <div style={{ marginTop: "3px", color: "#64748b", fontSize: "11px" }}>📍 {p.direccion || "Sin dirección cargada"}</div>
+                      <div style={{ marginTop: "3px", color: "#64748b", fontSize: "11px" }}>
+                        {p.items.length} renglón/es · ${Number(p.total || 0).toLocaleString("es-AR")} · {p.preventista || "Sin vendedor"}
+                      </div>
+                    </div>
+                    <div style={{
+                      flexShrink: 0,
+                      padding: "4px 7px",
+                      borderRadius: "999px",
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      background: ultima ? "#dcfce7" : "#ffedd5",
+                      color: ultima ? "#166534" : "#9a3412",
+                    }}>
+                      {ultima ? (ESTADO_LABEL[ultima.estado] || ultima.estado) : "📦 PENDIENTE"}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}

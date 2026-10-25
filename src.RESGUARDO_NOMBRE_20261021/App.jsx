@@ -1,0 +1,4207 @@
+/* v2.4.9-logo-ok */
+import TomaPedidos from "./TomaPedidos";
+import HistorialCliente from "./HistorialCliente";
+const obtenerDiaActual = () => {
+  const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  const d = dias[new Date().getDay()];
+  return d;
+};
+
+import Supervisor from './Supervisor';
+import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from './supabase';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+const Marcar = () => null;
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+const iconoAuto = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      font-size: 30px;
+      line-height: 30px;
+      filter: drop-shadow(0 2px 3px rgba(0,0,0,0.7));
+    ">
+      🚗
+    </div>
+  `,
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
+});
+const iconoAzul = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #2563eb;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
+
+const iconoVerde = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #16a34a;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
+
+const iconoAmarillo = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #facc15;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
+const iconoRojo = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #dc2626;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
+const iconoNegro = L.divIcon({
+  className: '',
+  html: `
+    <div style="
+      width: 22px;
+      height: 22px;
+      background: #111111;
+      border: 3px solid white;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.7);
+    "></div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+});
+function MarcadorArrastrable({ posicion, setPosicion }) {
+  useMapEvents({
+    click(e) {
+      setPosicion([e.latlng.lat, e.latlng.lng]);
+    },
+  });
+  return posicion ? (
+    <Marker
+      position={posicion}
+      draggable={true}
+      eventHandlers={{
+        dragend(e) {
+          const m = e.target;
+          setPosicion([m.getLatLng().lat, m.getLatLng().lng]);
+        },
+      }}
+    />
+  ) : null;
+}
+
+
+// Función de cálculo de distancia en metros (Haversine)
+function calcularMetrosGPS(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+  const R = 6371000; // Radio de la Tierra en metros
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const cDist = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * cDist);
+}
+
+
+// 🗺️ Auto-centrado suave de Leaflet para Modo Manejo
+function AutoCentradoMapa({ puntos, puntoActivo }) {
+  const map = typeof useMap === 'function' ? useMap() : null;
+  useEffect(() => {
+    if (!map) return;
+    if (puntoActivo && puntoActivo[0] && puntoActivo[1]) {
+      try {
+        map.setView([puntoActivo[0], puntoActivo[1]], map.getZoom() || 16, { animate: true });
+      } catch(e) {}
+    } else if (puntos && puntos.length > 0 && puntos[0] && puntos[0][0]) {
+      try {
+        map.setView([puntos[0][0], puntos[0][1]], map.getZoom() || 16, { animate: true });
+      } catch(e) {}
+    }
+  }, [puntoActivo, puntos, map]);
+  return null;
+}
+
+
+function SeguirAuto({ posicion }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!posicion || !Number.isFinite(Number(posicion[0])) || !Number.isFinite(Number(posicion[1]))) return;
+    map.panTo([Number(posicion[0]), Number(posicion[1])], {
+      animate: true,
+      duration: 0.5,
+    });
+  }, [posicion, map]);
+
+  return null;
+}
+
+export default function App({ sesion: sesionProp, perfil: perfilProp }) {
+console.log("🚗 APP SE ESTÁ RENDERIZANDO");
+  // 💾 Guardar edición de datos del comercio en Supabase
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+
+  const guardarEdicion = async (e) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    try {
+      if (!comercioSeleccionado?.id) return;
+      setGuardandoEdicion(true);
+
+      const actualizacion = {
+        nombre: comercioSeleccionado.nombre || ('Comercio #' + comercioSeleccionado.id),
+        direccion: comercioSeleccionado.direccion || '',
+        localidad: comercioSeleccionado.localidad || '',
+        partido: comercioSeleccionado.partido || '',
+        provincia: comercioSeleccionado.provincia || '',
+        pais: comercioSeleccionado.pais || '',
+        rubro: comercioSeleccionado.rubro || 'General',
+        codigo_cliente: comercioSeleccionado.codigo_cliente || '',
+        razon_social: comercioSeleccionado.razon_social || '',
+        cuit: comercioSeleccionado.cuit || '',
+        condicion_fiscal: comercioSeleccionado.condicion_fiscal || '',
+        domicilio_fiscal: comercioSeleccionado.domicilio_fiscal || '',
+        codigo_postal: comercioSeleccionado.codigo_postal || '',
+        contacto: comercioSeleccionado.contacto || '',
+        email: comercioSeleccionado.email || '',
+        telefono: comercioSeleccionado.telefono || '',
+        whatsapp: comercioSeleccionado.whatsapp || '',
+        codigo_pais: comercioSeleccionado.codigo_pais || '+54',
+        notas: comercioSeleccionado.notas || '',
+        dia_visita: comercioSeleccionado.dia_visita || 'Lunes'
+      };
+
+      if (comercioSeleccionado.ubicacion_exacta_latitud) {
+        actualizacion.ubicacion_exacta_latitud = comercioSeleccionado.ubicacion_exacta_latitud;
+      }
+      if (comercioSeleccionado.ubicacion_exacta_longitud) {
+        actualizacion.ubicacion_exacta_longitud = comercioSeleccionado.ubicacion_exacta_longitud;
+      }
+
+      const { error } = await supabase
+        .from('comercios')
+        .update(actualizacion)
+        .eq('id', comercioSeleccionado.id);
+
+      if (error) throw error;
+
+      const comercioActualizado = { ...comercioSeleccionado, ...actualizacion };
+
+      // 🧠 Recordar la última zona cargada para ahorrar escritura al preventista.
+      try {
+        localStorage.setItem("rutacomercio_ultima_zona", JSON.stringify({
+          localidad: actualizacion.localidad || "",
+          partido: actualizacion.partido || "",
+          provincia: actualizacion.provincia || "",
+          pais: actualizacion.pais || "Argentina",
+        }));
+      } catch (e) {}
+
+      setComercioSeleccionado(comercioActualizado);
+      setComercios(prev => prev.map(c => c.id === comercioSeleccionado.id ? comercioActualizado : c));
+      alert('Comercio guardado con éxito');
+    } catch (err) {
+      console.error('Error al guardar comercio:', err);
+
+      const mensajeError = String(err?.message || err || '').toLowerCase();
+      const pareceFallaConexion =
+        mensajeError.includes('load failed') ||
+        mensajeError.includes('failed to fetch') ||
+        mensajeError.includes('network') ||
+        mensajeError.includes('fetch');
+
+      if (pareceFallaConexion) {
+        alert(
+          '⚠️ No se pudo sincronizar con RutaComercio.\n\n' +
+          'Tus datos siguen en pantalla. Revisá la conexión e intentá “💾 Guardar Cambios” nuevamente.'
+        );
+      } else {
+        alert(
+          '❌ No se pudo guardar en RutaComercio.\n\n' +
+          (err?.message || 'Revisá la conexión e intentá nuevamente.')
+        );
+      }
+    } finally {
+      setGuardandoEdicion(false);
+    }
+  };
+
+
+
+  // Función oficial de cierre de sesión
+  const handleCerrarSesion = async () => {
+    // Solo registra una desconexión cuando el usuario la solicita explícitamente.
+    const usuario = sesion?.user?.id || sesionProp?.user?.id;
+    const perfilActual = perfil || perfilProp;
+    if (usuario && perfilActual?.empresa_id && perfilActual?.rol === "preventista") {
+      try {
+        const { error } = await supabase.from("preventistas_actividad").insert({
+          empresa_id: perfilActual.empresa_id,
+          preventista_id: usuario,
+          tipo_evento: "desconexion"
+        });
+        if (error) console.warn("Historial: no se pudo guardar la desconexión:", error.message);
+      } catch (e) { console.warn("Historial: desconexión:", e); }
+    }
+    try {
+      if (typeof supabase !== 'undefined' && supabase.auth) {
+        await supabase.auth.signOut();
+      }
+    } catch (err) {}
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (e) {}
+    if (typeof setSesion === 'function') setSesion(null);
+    if (typeof setPerfil === 'function') setPerfil(null);
+    window.location.replace('/');
+  }; 
+
+  // 📸 Subida de foto de fachada a Supabase Storage
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+
+  const subirFotoFachada = async (e) => {
+    try {
+      const archivo = e.target.files?.[0];
+      if (!archivo || !comercioSeleccionado) return;
+      setSubiendoFoto(true);
+
+      const extension = archivo.name.split('.').pop() || 'jpg';
+      const rutaArchivo = `comercio_${comercioSeleccionado.id}_${Date.now()}.${extension}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('fotos_comercios')
+        .upload(rutaArchivo, archivo, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage
+        .from('fotos_comercios')
+        .getPublicUrl(rutaArchivo);
+
+      const urlFotoFinal = urlData.publicUrl;
+
+      // Actualizamos en Supabase la columna foto_url
+      await supabase
+        .from('comercios')
+        .update({ foto_url: urlFotoFinal })
+        .eq('id', comercioSeleccionado.id);
+
+            // Actualizamos en el estado local
+      const comercioActualizadoFoto = { ...comercioSeleccionado, foto_url: urlFotoFinal };
+      setComercioSeleccionado(comercioActualizadoFoto);
+      setComercios(prev => prev.map(c => c.id === comercioSeleccionado.id ? comercioActualizadoFoto : c));
+      alert('Foto guardada correctamente');
+    } catch (err) {
+      console.error('Error al subir foto:', err);
+      alert('Error al subir foto: ' + (err.message || 'Verifique conexión'));
+    } finally {
+      setSubiendoFoto(false);
+    }
+  };
+
+
+  const [sesion, setSesion] = useState(null);
+
+  
+  const [comercioCercano, setComercioCercano] = useState(null);
+  const [distanciaCercano, setDistanciaCercano] = useState(null);
+  const [textoBotonAgregar, setTextoBotonAgregar] = useState("➕ AGREGAR COMERCIO");
+  const [posicionActual, setPosicionActual] = useState(null);
+  const [visitasMapa, setVisitasMapa] = useState([]);
+  // 📍 OBTENER UBICACIÓN UNA VEZ AL ABRIR LA APP
+useEffect(() => {
+  if (!navigator.geolocation) return;
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      setPosicionActual([
+        position.coords.latitude,
+        position.coords.longitude,
+      ]);
+    },
+    (error) => {
+      console.log("No se pudo obtener la ubicación inicial:", error);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 60000,
+    }
+  );
+}, []);
+  
+
+  // 📡 EMISIÓN DE GPS EN VIVO DEL PREVENTISTA AL PERFIL
+  useEffect(() => {
+    
+    if (Boolean(sesion) && Boolean(sesion.user) && Boolean(posicionActual)) {
+      supabase.from("perfiles").update({
+        latitud: posicionActual[0],
+        longitud: posicionActual[1],
+        ultima_posicion_at: new Date().toISOString()
+      }).eq("id", sesion.user.id).then(() => {}).catch(() => {});
+    }
+  }, [posicionActual, sesion]);
+
+
+  // Jornada activa durante 9 horas seguidas (32400000 ms)
+  const NUEVE_HORAS_MS = 9 * 60 * 60 * 1000;
+  const iniciarJornadaNueveHoras = () => {
+    try {
+      const ahora = Date.now();
+      localStorage.setItem("jornada_inicio_ts", String(ahora));
+      localStorage.setItem("jornada_activa", "true");
+      setJornadaActiva(true);
+    } catch(e) {}
+  };
+
+  const verificarJornadaActiva = () => {
+    try {
+      const inicio = localStorage.getItem("jornada_inicio_ts");
+      if (!inicio) return false;
+      const transcurrido = Date.now() - parseInt(inicio, 10);
+      if (transcurrido < NUEVE_HORAS_MS) {
+        return true;
+      } else {
+        localStorage.removeItem("jornada_inicio_ts");
+        localStorage.removeItem("jornada_activa");
+        return false;
+      }
+    } catch(e) {
+      return false;
+    }
+  };
+
+
+  const emitirPosicionGPS = async (lat, lng) => {
+    try {
+      if (!lat || !lng || !sesion?.user?.id) return;
+      await supabase.from("perfiles").update({
+        latitud: lat,
+        longitud: lng,
+        ultima_posicion_at: new Date().toISOString(),
+        activo_hoy: true
+      }).eq("id", sesion.user.id);
+    } catch(e) {}
+  };
+
+
+  // Transmisión continua de posición en vivo a Supabase
+  const transmitirUbicacionEnVivo = async (lat, lng) => {
+    try {
+      if (!lat || !lng || !sesion?.user?.id) return;
+      await supabase.from("perfiles").update({
+        latitud: lat,
+        longitud: lng,
+        ultima_posicion_at: new Date().toISOString(),
+        ultima_conexion: new Date().toISOString(),
+        activo_hoy: true
+      }).eq("id", sesion.user.id);
+    } catch (e) {
+      console.warn("Error enviando telemetria:", e.message);
+    }
+  };
+
+
+  // 📍 Pide una coordenada REALMENTE nueva.
+  // Se usa en acciones que deben quedar georreferenciadas (capturas, visitas, etc.).
+  const obtenerUbicacionFresca = () => new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocalización no disponible"));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setPosicionActual([lat, lng]);
+        await transmitirUbicacionEnVivo(lat, lng);
+        resolve({ lat, lng, accuracy: position.coords.accuracy });
+      },
+      (error) => reject(error),
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      }
+    );
+  });
+
+
+  const emitirActividadEnVivo = async () => {
+    try {
+      const email = sesion?.user?.email || perfil?.email;
+      const prevNombre = perfil?.nombre || "";
+      const emp = perfil?.empresa || "";
+      if (!email) return;
+      
+      // Actualiza perfiles
+      await supabase.from("perfiles").update({ 
+        ultima_conexion: new Date().toISOString(),
+        activo_hoy: true,
+        // La actividad no "fabrica" una posición nueva. El GPS vivo actualiza coordenadas y hora. 
+      }).eq("email", email);
+
+      // Registra en visitas para que el Supervisor lo tome como actividad hoy
+      await supabase.from("visitas").insert([{
+        preventista: prevNombre,
+        empresa: emp,
+        fecha: new Date().toISOString().slice(0, 10),
+        hora: new Date().toLocaleTimeString(),
+        tipo: "actividad_app"
+      }]);
+    } catch(err) {
+      console.warn("Actividad en vivo:", err.message);
+    }
+  };
+  
+
+  const registrarActividadEnVivo = async () => {
+    try {
+      const emailUsuario = sesion?.user?.email || perfil?.email;
+      if (!emailUsuario) return;
+      await supabase
+        .from("perfiles")
+        .update({ 
+          ultima_conexion: new Date().toISOString(),
+        activo_hoy: true,
+        // La actividad no "fabrica" una posición nueva. El GPS vivo actualiza coordenadas y hora.
+        })
+        .eq("email", emailUsuario);
+    } catch (e) {
+      console.warn("Aviso actividad:", e.message);
+    }
+  };
+
+
+  // Estados para notas de voz en Ficha de Comercio
+  const [grabandoAudio, setGrabandoAudio] = useState(false);
+  const [tiempoGrabacion, setTiempoGrabacion] = useState(0);
+  const [mediaRecorderObj, setMediaRecorderObj] = useState(null);
+  const timerGrabacionRef = useRef(null);
+  const audioChunksRef = React.useRef([]);
+  const timerAudioRef = React.useRef(null);
+
+  const iniciarGrabacionVoz = async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Tu navegador no soporta grabación de voz o faltan permisos de micrófono.");
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Detección del tipo MIME óptimo compatible con iOS y Android
+      let mimeType = "";
+      if (typeof MediaRecorder.isTypeSupported === "function") {
+        if (MediaRecorder.isTypeSupported("audio/mp4")) {
+          mimeType = "audio/mp4";
+        } else if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+          mimeType = "audio/webm;codecs=opus";
+        } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+          mimeType = "audio/webm";
+        } else if (MediaRecorder.isTypeSupported("audio/ogg")) {
+          mimeType = "audio/ogg";
+        }
+      }
+
+      const opciones = mimeType ? { mimeType } : {};
+      const mr = new MediaRecorder(stream, opciones);
+      const pedazos = [];
+
+      mr.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          pedazos.push(e.data);
+        }
+      };
+
+      mr.onstop = () => {
+        try {
+          const tipoFinal = mimeType || "audio/mp4";
+          const blob = new Blob(pedazos, { type: tipoFinal });
+          
+          // Convertimos a base64 DataURL: 100% compatible con iPhone Safari y sin errores de reproducción
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            try {
+              const base64Audio = reader.result;
+              const nuevaNota = {
+                id: Date.now(),
+                fecha: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                audio: base64Audio
+              };
+              
+              let notasActualizadas = [nuevaNota];
+              setComercioSeleccionado((prev) => {
+                if (!prev) return prev;
+                const actual = Array.isArray(prev.notas_audio) ? prev.notas_audio : [];
+                notasActualizadas = [nuevaNota, ...actual];
+                return { ...prev, notas_audio: notasActualizadas, audio_url: base64Audio };
+              });
+
+              // Guardado inmediato y persistente en Supabase
+              if (comercioSeleccionado && comercioSeleccionado.id) {
+                const { error: errAudio } = await supabase
+                  .from('comercios')
+                  .update({ 
+                    notas_audio: notasActualizadas,
+                    audio_url: base64Audio 
+                  })
+                  .eq('id', comercioSeleccionado.id);
+
+                if (errAudio) {
+                  console.error("Error al persistir audio en Supabase:", errAudio);
+                } else {
+                  console.log("🎉 Nota de voz guardada a fuego en Supabase para el comercio:", comercioSeleccionado.id);
+                  // Sincronizamos la lista general en memoria
+                  setComercios(prevLista => prevLista.map(item => 
+                    item.id === comercioSeleccionado.id 
+                      ? { ...item, notas_audio: notasActualizadas, audio_url: base64Audio } 
+                      : item
+                  ));
+                }
+              }
+            } catch (errPersist) {
+              console.error("Error en reader.onloadend:", errPersist);
+            }
+          };
+          reader.readAsDataURL(blob);
+
+          // Apagamos los tracks del micrófono
+          stream.getTracks().forEach((track) => track.stop());
+        } catch (errBlob) {
+          console.error("Error al procesar audio:", errBlob);
+        }
+      };
+
+      mr.start(250); // Recolecta pedacitos cada 250ms
+      setMediaRecorderObj(mr);
+      setGrabandoAudio(true);
+      setTiempoGrabacion(0);
+
+      // Cronómetro en vivo
+      if (timerGrabacionRef.current) clearInterval(timerGrabacionRef.current);
+      timerGrabacionRef.current = setInterval(() => {
+        setTiempoGrabacion((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Error al iniciar micrófono:", err);
+      alert("No se pudo acceder al micrófono: " + (err.message || "Permiso denegado"));
+    }
+  };
+
+  const detenerGrabacionVoz = () => {
+    try {
+      if (mediaRecorderObj && mediaRecorderObj.state !== "inactive") {
+        mediaRecorderObj.stop();
+      }
+      setGrabandoAudio(false);
+    
+      if (timerGrabacionRef.current) {
+        clearInterval(timerGrabacionRef.current);
+        timerGrabacionRef.current = null;
+      }
+    } catch (err) {
+      console.error("Error al detener grabación:", err);
+      setGrabandoAudio(false);
+    }
+  };
+
+  const borrarNotaAudio = (notaId) => {
+    setComercioSeleccionado(prev => {
+      if (!prev) return prev;
+      const notasPrevias = Array.isArray(prev.notas_audio) ? prev.notas_audio : [];
+      return { ...prev, notas_audio: notasPrevias.filter(n => n.id !== notaId) };
+    });
+  };
+
+  
+
+
+
+   const [perfil, setPerfil] = useState(null);
+   const [ventasHoy, setVentasHoy] = useState(0);
+
+  // 📒 HISTORIAL DE ACTIVIDAD: eventos de aplicación, independientes del GPS.
+  // Una conexión por sesión de pestaña; señales cada 5 minutos mientras está visible.
+  const ultimaSenalHistorialRef = useRef(0);
+  useEffect(() => {
+    const usuario = sesion?.user?.id || sesionProp?.user?.id;
+    const perfilActual = perfil || perfilProp;
+    if (!usuario || !perfilActual?.empresa_id || perfilActual?.rol !== "preventista") return;
+
+    let cancelado = false;
+    const claveBase = `rutac_hist_${perfilActual.empresa_id}_${usuario}`;
+    const claveConexion = `${claveBase}_conexion_sesion`;
+    const claveSenal = `${claveBase}_ultima_senal`;
+
+    const registrar = async (tipo_evento) => {
+      if (cancelado) return false;
+      try {
+        const { error } = await supabase.from("preventistas_actividad").insert({
+          empresa_id: perfilActual.empresa_id,
+          preventista_id: usuario,
+          tipo_evento
+        });
+        if (error) {
+          console.warn("Historial preventista:", error.message);
+          return false;
+        }
+        return true;
+      } catch (e) {
+        console.warn("Historial preventista:", e);
+        return false;
+      }
+    };
+
+    // sessionStorage sobrevive a recargas, pero se reinicia en una pestaña nueva.
+    // Marcamos antes de enviar para evitar duplicados por montajes simultáneos.
+    // Si falla el envío, liberamos la marca para permitir otro intento.
+    try {
+      if (!sessionStorage.getItem(claveConexion)) {
+        sessionStorage.setItem(claveConexion, "pendiente");
+        registrar("conexion").then((ok) => {
+          if (ok) {
+            try { sessionStorage.setItem(claveConexion, "registrada"); } catch (e) {}
+          } else {
+            try {
+              if (sessionStorage.getItem(claveConexion) === "pendiente") {
+                sessionStorage.removeItem(claveConexion);
+              }
+            } catch (e) {}
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Historial: almacenamiento de sesión no disponible:", e);
+    }
+
+    // Una señal representa actividad de la app, NO una posición GPS certificada.
+    // Guardamos la última hora en la pestaña para evitar duplicados por recargas.
+    const enviarSenal = async () => {
+      if (cancelado || document.visibilityState !== "visible") return;
+      const ahora = Date.now();
+      let anterior = ultimaSenalHistorialRef.current;
+      try { anterior = Math.max(anterior, Number(sessionStorage.getItem(claveSenal)) || 0); } catch (e) {}
+      if (ahora - anterior < 5 * 60 * 1000) return;
+      ultimaSenalHistorialRef.current = ahora;
+      try { sessionStorage.setItem(claveSenal, String(ahora)); } catch (e) {}
+      const ok = await registrar("senal");
+      if (!ok && !cancelado) {
+        ultimaSenalHistorialRef.current = anterior;
+        try {
+          if (sessionStorage.getItem(claveSenal) === String(ahora)) {
+            if (anterior) sessionStorage.setItem(claveSenal, String(anterior));
+            else sessionStorage.removeItem(claveSenal);
+          }
+        } catch (e) {}
+      }
+    };
+    enviarSenal();
+    const intervalo = window.setInterval(enviarSenal, 5 * 60 * 1000);
+    const alVolver = () => enviarSenal();
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("focus", alVolver);
+    return () => {
+      cancelado = true;
+      window.clearInterval(intervalo);
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("focus", alVolver);
+    };
+  }, [sesion?.user?.id, sesionProp?.user?.id, perfil?.empresa_id, perfil?.rol, perfilProp?.empresa_id, perfilProp?.rol]);
+
+
+   // 📊 MÉTRICAS REALES DEL PREVENTISTA
+   // Venta hoy se calcula por la fecha real de la NVI, sin importar el día de visita del cliente.
+   const cargarVentasHoy = async (perfilOverride = null) => {
+     try {
+       const pActivo = perfilOverride || perfil || perfilProp || null;
+       if (!pActivo?.nombre) {
+         setVentasHoy(0);
+         return;
+       }
+
+       const ahora = new Date();
+       const inicioHoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+       const inicioManana = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() + 1);
+
+       let query = supabase
+         .from("pedidos")
+         .select("id, total, fecha, estado")
+         .gte("fecha", inicioHoy.toISOString())
+         .lt("fecha", inicioManana.toISOString())
+         .eq("preventista", pActivo.nombre);
+
+       if (pActivo.empresa_id) {
+         query = query.eq("empresa_id", pActivo.empresa_id);
+       } else if (pActivo.empresa) {
+         query = query.ilike("empresa", pActivo.empresa.trim());
+       }
+
+       const { data, error } = await query;
+       if (error) throw error;
+
+       // Una NVI guardada es una venta realizada por el preventista,
+       // aunque Depósito todavía no haya asignado stock o preparado la entrega.
+       // Las NVI anuladas o canceladas no integran el total vendido.
+       const ventasValidas = (data || []).filter((pedido) => {
+         const estado = String(pedido?.estado || "").trim().toLowerCase();
+         return !["anulado", "anulada", "cancelado", "cancelada"].includes(estado);
+       });
+
+       const totalHoy = ventasValidas.reduce(
+         (acum, pedido) => acum + Number(pedido.total || 0),
+         0
+       );
+       setVentasHoy(totalHoy);
+     } catch (error) {
+       console.error("Error cargando ventas de hoy:", error);
+       setVentasHoy(0);
+     }
+   };
+   // 🔔 Anulaciones comunicadas al preventista desde Repartos.
+   // Se consultan siempre dentro de la empresa y para el vendedor conectado.
+   const [avisosAnulacion, setAvisosAnulacion] = useState([]);
+   const [avisosLeidos, setAvisosLeidos] = useState([]);
+   const [avisosAbiertos, setAvisosAbiertos] = useState(false);
+    const [serviciosAbiertos, setServiciosAbiertos] = useState(false);
+    const [rutaChatAbierto, setRutaChatAbierto] = useState(false);
+   const claveAvisos = `rutacomercio_anulaciones_leidas_${perfil?.empresa_id || perfilProp?.empresa_id || ""}_${sesion?.user?.id || sesionProp?.user?.id || ""}`;
+
+   useEffect(() => {
+     try { setAvisosLeidos(JSON.parse(localStorage.getItem(claveAvisos) || "[]")); }
+     catch { setAvisosLeidos([]); }
+   }, [claveAvisos]);
+
+   useEffect(() => {
+     const pActivo = perfil || perfilProp;
+     if (!pActivo?.empresa_id || !pActivo?.nombre) return;
+     let cancelado = false;
+     const cargarAvisos = async () => {
+       try {
+         const { data: ventas, error: errorVentas } = await supabase.from("pedidos")
+           .select("id,numero_pedido,comercio_nombre,preventista,total,estado")
+           .eq("empresa_id", pActivo.empresa_id)
+           .eq("preventista", pActivo.nombre)
+           .ilike("estado", "anulado")
+           .order("created_at", { ascending: false })
+           .limit(100);
+         if (errorVentas) throw errorVentas;
+         if (!ventas?.length) { if (!cancelado) setAvisosAnulacion([]); return; }
+         const { data: entregas, error: errorEntregas } = await supabase.from("repartos_entregas")
+           .select("pedido_id,estado,motivo_solicitud_anulacion,decision_anulacion_at")
+           .eq("empresa_id", pActivo.empresa_id)
+           .eq("estado", "anulacion_aprobada")
+           .in("pedido_id", ventas.map(v => v.id));
+         if (errorEntregas) throw errorEntregas;
+         const porPedido = new Map((entregas || []).map(e => [String(e.pedido_id), e]));
+         const avisos = ventas.filter(v => porPedido.has(String(v.id))).map(v => ({
+           ...v, entrega: porPedido.get(String(v.id)), clave: String(v.id)
+         }));
+         if (!cancelado) setAvisosAnulacion(avisos);
+       } catch (error) { console.warn("No se pudieron consultar avisos de anulación:", error); }
+     };
+     cargarAvisos();
+     const intervalo = setInterval(cargarAvisos, 30000);
+     return () => { cancelado = true; clearInterval(intervalo); };
+   }, [perfil?.empresa_id, perfil?.nombre, perfilProp?.empresa_id, perfilProp?.nombre]);
+
+   const marcarAvisosLeidos = () => {
+     const nuevos = [...new Set([...avisosLeidos, ...avisosAnulacion.map(a => a.clave)])];
+     setAvisosLeidos(nuevos);
+     localStorage.setItem(claveAvisos, JSON.stringify(nuevos));
+   };
+   const avisosSinLeer = avisosAnulacion.filter(a => !avisosLeidos.includes(a.clave));
+  // Mensajes operativos persistentes. El servidor limita acceso por empresa y usuario.
+  const [mensajesOperativos, setMensajesOperativos] = useState([]);
+  const [respuestaRutaChat, setRespuestaRutaChat] = useState("");
+  const [enviandoRespuestaRutaChat, setEnviandoRespuestaRutaChat] = useState(false);
+  useEffect(() => {
+    const usuarioId = sesion?.user?.id || sesionProp?.user?.id;
+    const empresaId = perfil?.empresa_id || perfilProp?.empresa_id;
+    if (!usuarioId || !empresaId) return;
+    let activo = true;
+    const cargar = async () => {
+      const { data, error } = await supabase.from('mensajes_operativos')
+        .select('id,contenido,creado_at,leido_at,remitente_id,destinatario_id')
+        .eq('empresa_id', empresaId).or(`destinatario_id.eq.${usuarioId},remitente_id.eq.${usuarioId}`)
+        .order('creado_at', { ascending: false }).limit(100);
+      if (!error && activo) setMensajesOperativos(prev => {
+        const pendientes = prev.filter(m => String(m.id).startsWith('local-') && !(data || []).some(d => d.remitente_id === m.remitente_id && d.contenido === m.contenido && Math.abs(new Date(d.creado_at) - new Date(m.creado_at)) < 60000));
+        return [...(data || []), ...pendientes];
+      });
+      else if (error) console.warn('Mensajes operativos:', error.message);
+    };
+    cargar();
+    const intervalo = setInterval(cargar, 30000);
+    return () => { activo = false; clearInterval(intervalo); };
+  }, [sesion?.user?.id, sesionProp?.user?.id, perfil?.empresa_id, perfilProp?.empresa_id]);
+
+  const leerMensajeOperativo = async (mensaje) => {
+    if (mensaje.leido_at) return;
+    // Solo registramos posición si está disponible; no pedimos permisos nuevos.
+    const lat = Array.isArray(posicionActual) ? Number(posicionActual[0]) : null;
+    const lng = Array.isArray(posicionActual) ? Number(posicionActual[1]) : null;
+    const gpsValido = Number.isFinite(lat) && Number.isFinite(lng);
+    const { error } = await supabase.rpc('leer_mensaje_operativo', {
+      p_mensaje_id: mensaje.id,
+      p_lat: gpsValido ? lat : null,
+      p_lng: gpsValido ? lng : null,
+      // Sin marca de tiempo fiable para la coordenada, no atribuimos hora de lectura al GPS.
+      p_gps_at: null
+    });
+    if (error) { alert('No se pudo marcar como leído: ' + error.message); return; }
+    setMensajesOperativos(prev => prev.map(m => m.id === mensaje.id ? { ...m, leido_at: new Date().toISOString() } : m));
+  };
+  const miIdRutaChat = sesion?.user?.id || sesionProp?.user?.id;
+  const mensajesSinLeer = mensajesOperativos.filter(m => m.destinatario_id === miIdRutaChat && !m.leido_at);
+  // Resolver al Supervisor de Ventas de la misma empresa para permitir
+  // que el preventista inicie una conversación sin mensaje previo.
+  const [supervisorVentasId, setSupervisorVentasId] = useState(null);
+  const [errorDestinoRutaChat, setErrorDestinoRutaChat] = useState("");
+  useEffect(() => {
+    const empresaId = perfil?.empresa_id || perfilProp?.empresa_id;
+    let vigente = true;
+    setSupervisorVentasId(null);
+    setErrorDestinoRutaChat("");
+    if (!empresaId) return;
+    (async () => {
+      const { data, error } = await supabase.from("perfiles")
+        .select("id,rol")
+        .eq("empresa_id", empresaId)
+        .in("rol", ["supervisorv", "supervisor"]);
+      if (!vigente) return;
+      if (error) {
+        setErrorDestinoRutaChat("No se pudo encontrar al Supervisor de Ventas: " + error.message);
+        return;
+      }
+      const elegido = (data || []).find(p => p.rol === "supervisorv") || (data || [])[0];
+      if (elegido?.id) setSupervisorVentasId(elegido.id);
+      else setErrorDestinoRutaChat("No hay un Supervisor de Ventas disponible en esta empresa.");
+    })();
+    return () => { vigente = false; };
+  }, [perfil?.empresa_id, perfilProp?.empresa_id]);
+  const supervisorRutaChatId = supervisorVentasId ||
+    [...mensajesOperativos].reverse().find(m => m.remitente_id && m.remitente_id !== miIdRutaChat)?.remitente_id;
+  const enviarRespuestaRutaChat = async () => {
+    const contenido = respuestaRutaChat.trim();
+    if (!contenido || enviandoRespuestaRutaChat) return;
+    if (!supervisorRutaChatId) { alert(errorDestinoRutaChat || "No se encontró un Supervisor de Ventas para esta empresa."); return; }
+    setEnviandoRespuestaRutaChat(true);
+    try {
+      const { error } = await supabase.rpc('enviar_mensaje_operativo', {
+        p_destinatario: supervisorRutaChatId, p_contenido: contenido
+      });
+      if (error) throw error;
+      setMensajesOperativos(prev => [...prev, {
+        id: `local-${Date.now()}`, remitente_id: miIdRutaChat,
+        destinatario_id: supervisorRutaChatId, contenido,
+        creado_at: new Date().toISOString(), leido_at: null
+      }]);
+      setRespuestaRutaChat("");
+    } catch (e) {
+      alert("No se pudo enviar la respuesta. Hay que verificar los permisos de RutaChat en Supabase: " + e.message);
+    } finally { setEnviandoRespuestaRutaChat(false); }
+  };
+
+
+  const cargarComercios = async (perfilOverride) => {
+    try {
+      setCargando(true);
+      const pActivo = perfilOverride || perfil || perfilProp;
+      const empresaIdFiltro = pActivo?.empresa_id || null;
+      const empFiltro = pActivo?.empresa || "DEMO S.A.";
+      const nomFiltro = pActivo?.nombre || (sesion?.user?.email ? sesion.user.email.split("@")[0] : "");
+
+      let query = supabase.from("comercios").select("*");
+      if (empresaIdFiltro) {
+      query = query.eq("empresa_id", empresaIdFiltro);
+      } else if (empFiltro) {
+      query = query.ilike("empresa", empFiltro.trim());
+      }
+      if (nomFiltro) {
+        query = query.ilike("preventista", nomFiltro.trim());
+      }
+
+      const { data, error } = await query.order("id", { ascending: false });
+      if (error) throw error;
+      setComercios(data || []);
+    } catch (err) {
+      console.error("Error al cargar comercios:", err);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    if (sesionProp) setSesion(sesionProp);
+    if (perfilProp) {
+      setPerfil(perfilProp);
+      cargarComercios(perfilProp);
+    }
+  }, [sesionProp, perfilProp]);
+
+  useEffect(() => {
+    const pActivo = perfil || perfilProp || null;
+    if (!pActivo?.nombre) return;
+
+    cargarVentasHoy(pActivo);
+
+    const refrescarMetricas = () => cargarVentasHoy(pActivo);
+    window.addEventListener("focus", refrescarMetricas);
+    document.addEventListener("visibilitychange", refrescarMetricas);
+
+    return () => {
+      window.removeEventListener("focus", refrescarMetricas);
+      document.removeEventListener("visibilitychange", refrescarMetricas);
+    };
+  }, [perfil, perfilProp]);
+
+
+  const cargarPerfil = async (session) => {
+    if (!session?.user) {
+      setPerfil(null);
+      return;
+    }
+    try {
+      let { data } = await supabase.from("perfiles").select("*").eq("id", session.user.id).maybeSingle();
+      if (!data && session?.user?.email) {
+        const r = await supabase.from("perfiles").select("*").ilike("email", session.user.email).maybeSingle();
+        data = r.data;
+      }
+      if (data) {
+        setPerfil(data);
+        cargarComercios(data);
+      } else {
+        setPerfil({
+          nombre: session.user.email?.split("@")[0] || "Usuario",
+          empresa: "General"
+        });
+      }
+    } catch (e) {
+      console.warn("Error cargando perfil:", e);
+    }
+  };
+ const [emailLogin, setEmailLogin] = useState('');
+ const [passwordLogin, setPasswordLogin] = useState('');
+ const [errorLogin, setErrorLogin] = useState(null);
+ const [recordarSesion, setRecordarSesion] = useState(true);
+ const [comercios, setComercios] = useState([]);
+
+  const [resultadoVisita, setResultadoVisita] = useState('Tomó Pedido');
+  const [observacionVisita, setObservacionVisita] = useState('');
+  const [guardandoVisita, setGuardandoVisita] = useState(false);
+  const [visitaRegistradaHoy, setVisitaRegistradaHoy] = useState(false);
+
+  const registrarVisitaCheckIn = async (comercio, resultadoDirecto = null, observacionDirecta = null) => {
+    if (!comercio) return;
+    setGuardandoVisita(true);
+    try {
+      const ahora = new Date().toISOString();
+      const prevNombre = (typeof perfil !== 'undefined' && perfil?.nombre) ? perfil.nombre : 'Alex';
+      const empNombre = (typeof perfil !== "undefined" && perfil?.empresa) ? perfil.empresa : "";
+
+      if (!jornadaActiva) {
+        setJornadaActiva(true); emitirActividadEnVivo(); registrarActividadEnVivo();
+        // setHoraInicioJornada(ahora);
+        localStorage.setItem('jornada_activa', 'true');
+        localStorage.setItem('hora_inicio_jornada', ahora);
+      }
+
+      // Para una visita NO usamos una posición vieja: pedimos GPS fresco en este instante.
+      let coordsVisita = null;
+      try {
+        coordsVisita = await obtenerUbicacionFresca();
+      } catch (gpsError) {
+        console.warn("No se pudo obtener GPS fresco para la visita:", gpsError);
+      }
+
+      const nuevaVisita = {
+        comercio_id: comercio.id,
+        comercio_nombre: comercio.nombre || ('Comercio #' + comercio.id),
+        preventista: prevNombre,
+        empresa: empNombre,
+        empresa_id: perfil?.empresa_id || null,
+        resultado: resultadoDirecto || resultadoVisita,
+        observacion: observacionDirecta || observacionVisita || 'Visita registrada en campo',
+        latitud: coordsVisita?.lat ?? (posicionActual ? posicionActual[0] : (comercio.latitud || null)),
+        longitud: coordsVisita?.lng ?? (posicionActual ? posicionActual[1] : (comercio.longitud || null)),
+        fecha: ahora
+      };
+
+      const { error } = await supabase.from('visitas').insert([nuevaVisita]);
+
+      if (error) throw error;
+
+      setVisitasMapa((prev) => [nuevaVisita, ...(prev || [])]);
+      setVisitaRegistradaHoy(true);
+      alert('✅ ¡Visita registrada con éxito! (' + (resultadoDirecto || resultadoVisita) + ')');
+
+      // 🧭 Al terminar la visita volvemos a HOY.
+      // Como visitasMapa ya se actualizó, PRÓXIMO DESTINO salta solo
+      // a la siguiente parada pendiente de la ruta sugerida.
+      setObservacionVisita('');
+      setComercioSeleccionado(null);
+      setVistaComercios("HOY");
+    } catch (err) {
+      console.error('Error al registrar visita:', err);
+      alert('Aviso: Visita guardada localmente');
+      setVisitaRegistradaHoy(true);
+    } finally {
+      setGuardandoVisita(false);
+    }
+  };
+    const marcarNoVisitar = async (comercio) => {
+  if (!comercio) return;
+
+  const confirmar = window.confirm(
+    `⚫ ¿Marcar "${comercio.nombre || "este comercio"}" como NO VISITAR MÁS?\n\nSeguirá marcado aunque cambie la jornada.`
+  );
+
+  if (!confirmar) return;
+
+  try {
+    const { error } = await supabase
+      .from("comercios")
+      .update({ no_visitar: true })
+      .eq("id", comercio.id);
+
+    if (error) throw error;
+
+    setComercioSeleccionado({
+      ...comercio,
+      no_visitar: true,
+    });
+
+    setComercios((prev) =>
+      prev.map((c) =>
+        c.id === comercio.id
+          ? { ...c, no_visitar: true }
+          : c
+      )
+    );
+
+    alert("⚫ Comercio marcado como NO VISITAR MÁS");
+  } catch (error) {
+    console.error("Error marcando comercio como no visitar:", error);
+    alert("❌ No se pudo guardar el cambio.");
+  }
+};
+const eliminarCapturaVirgen = async (comercio) => {
+  if (!comercio?.id) return;
+
+  try {
+    // Una captura deja de ser "virgen" en cuanto tiene una visita o un pedido.
+    const [visitasResp, pedidosResp] = await Promise.all([
+      supabase
+        .from("visitas")
+        .select("id", { count: "exact", head: true })
+        .eq("comercio_id", comercio.id),
+      supabase
+        .from("pedidos")
+        .select("id", { count: "exact", head: true })
+        .eq("comercio_id", comercio.id),
+    ]);
+
+    if (visitasResp.error) throw visitasResp.error;
+    if (pedidosResp.error) throw pedidosResp.error;
+
+    const cantidadVisitas = visitasResp.count || 0;
+    const cantidadPedidos = pedidosResp.count || 0;
+
+    if (cantidadVisitas > 0 || cantidadPedidos > 0) {
+      alert(
+        "⚠️ Este registro ya es un cliente con movimientos.\n\n" +
+        "No se puede eliminar como captura. Si no debe visitarse más, usá la solicitud al supervisor."
+      );
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `🗑️ ¿Eliminar la captura "${comercio.nombre || "sin nombre"}"?\n\n` +
+      "No tiene visitas ni pedidos. Esta acción eliminará solamente esta captura."
+    );
+
+    if (!confirmar) return;
+
+    const { error } = await supabase
+      .from("comercios")
+      .delete()
+      .eq("id", comercio.id);
+
+    if (error) throw error;
+
+    setComercios((prev) =>
+      (prev || []).filter((c) => String(c.id) !== String(comercio.id))
+    );
+    setEditandoUbicacion(false);
+    setPosicionEdicionUbicacion(null);
+    setComercioSeleccionado(null);
+
+    alert("✅ Captura eliminada.");
+  } catch (error) {
+    console.error("Error eliminando captura:", error);
+    alert("❌ No se pudo eliminar la captura: " + (error.message || "error desconocido"));
+  }
+};
+
+const solicitarNoVisitar = async (comercio) => {
+  if (!comercio) return;
+
+  const motivo = window.prompt(
+    `🚫 ¿Por qué solicitás NO VISITAR MÁS a "${comercio.nombre || "este comercio"}"?`
+  );
+
+  if (motivo === null) return;
+
+  if (!motivo.trim()) {
+    alert("⚠️ Escribí un motivo para enviar la solicitud.");
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from("solicitudes_no_visitar")
+      .insert([
+        {
+          comercio_id: comercio.id,
+          comercio_nombre: comercio.nombre || "Comercio",
+          preventista: perfil?.nombre || "",
+          empresa: perfil?.empresa || "",
+          empresa_id: perfil?.empresa_id || null,
+          motivo: motivo.trim(),
+          estado: "pendiente",
+        },
+      ]);
+
+    if (error) throw error;
+
+    alert("✅ Solicitud enviada al supervisor.");
+  } catch (error) {
+    console.error("Error enviando solicitud de no visitar:", error);
+    alert("❌ No se pudo enviar la solicitud.");
+  }
+};
+  const [cargando, setCargando] = useState(true);
+  const [comercioSeleccionado, setComercioSeleccionado] = useState(null);
+  const [editandoUbicacion, setEditandoUbicacion] = useState(false);
+  const [posicionEdicionUbicacion, setPosicionEdicionUbicacion] = useState(null);
+  const [jornadaActiva, setJornadaActiva] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
+  const [vistaComercios, setVistaComercios] = useState("HOY");
+  const [ordenComerciosHoy, setOrdenComerciosHoy] = useState("CERCANIA");
+  const [consultandoPrecios, setConsultandoPrecios] = useState(false);
+  const [busquedaPrecio, setBusquedaPrecio] = useState("");
+  const [productosPrecio, setProductosPrecio] = useState([]);
+  const [cargandoPrecios, setCargandoPrecios] = useState(false);
+  const [destinoMapa, setDestinoMapa] = useState(null);
+  const [llegueDestino, setLlegueDestino] = useState(null);
+  const [tieneStockDestino, setTieneStockDestino] = useState(null);
+  const [confirmarSaltoVisita, setConfirmarSaltoVisita] = useState(false);
+  const [fechaRevisitaManual, setFechaRevisitaManual] = useState("");
+  const [motivoRevisita, setMotivoRevisita] = useState("");
+  const [datosClienteAbiertos, setDatosClienteAbiertos] = useState(false);
+
+  // 📍 Cada comercio empieza su corrección de ubicación desde SU propio punto.
+  // Evita que quede visible la posición usada al editar el comercio anterior.
+  useEffect(() => {
+    setEditandoUbicacion(false);
+    setPosicionEdicionUbicacion(null);
+    setDatosClienteAbiertos(false);
+  }, [comercioSeleccionado?.id]);
+
+  // Lista filtrada de comercios por búsqueda y orden
+  
+  // 🔊 Confirmación sonora fuerte al capturar un comercio
+  const reproducirAlerta = () => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+
+      const ctx = new AudioContext();
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0.95, ctx.currentTime);
+      master.connect(ctx.destination);
+
+      const beep = (frecuencia, inicio, duracion) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(frecuencia, ctx.currentTime + inicio);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + inicio);
+        gain.gain.exponentialRampToValueAtTime(0.9, ctx.currentTime + inicio + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + inicio + duracion);
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(ctx.currentTime + inicio);
+        osc.stop(ctx.currentTime + inicio + duracion + 0.02);
+      };
+
+      beep(1100, 0, 0.16);
+      beep(850, 0.22, 0.18);
+      setTimeout(() => ctx.close().catch(() => {}), 700);
+    } catch (e) {
+      console.warn("No se pudo reproducir el sonido de captura:", e);
+    }
+  };
+
+  // Función para agregar comercio inmediato capturando GPS actual
+  const agregarComercioInmediato = () => {
+    setTextoBotonAgregar("⏳ Capturando GPS...");
+    
+    const guardarConCoords = async (lat, lng) => {
+      try {
+        await supabase
+  .from("perfiles")
+  .update({
+    latitud: lat,
+    longitud: lng,
+    ultima_posicion_at: new Date().toISOString(),
+    ultima_conexion: new Date().toISOString(),
+    activo_hoy: true
+  })
+  .eq("id", sesion?.user?.id);
+        const idTemp = Date.now();
+
+        let ultimaZona = { localidad: "", partido: "", provincia: "", pais: "Argentina" };
+        try {
+          const guardada = localStorage.getItem("rutacomercio_ultima_zona");
+          if (guardada) ultimaZona = { ...ultimaZona, ...JSON.parse(guardada) };
+        } catch (e) {}
+
+        const nuevo = {
+          nombre: "Comercio #" + String(idTemp).slice(-4),
+          localidad: ultimaZona.localidad || "",
+          partido: ultimaZona.partido || "",
+          provincia: ultimaZona.provincia || "",
+          pais: ultimaZona.pais || "Argentina",
+          latitud: lat,
+          longitud: lng,
+          ubicacion_exacta_latitud: lat,
+          ubicacion_exacta_longitud: lng,
+          fecha: new Date().toISOString(),
+          notas: "Registrado en Modo Manejo",
+          dia_visita: new Intl.DateTimeFormat("es-AR", { weekday: "long" })
+            .format(new Date())
+            .replace(/^./, (letra) => letra.toUpperCase()),
+          empresa: perfil?.empresa || "DEMO S.A.",
+          empresa_id: perfil?.empresa_id || null,
+          preventista: perfil?.nombre || "demo02",
+          estado_alta: "provisorio",
+          creado_por_preventista: true
+        };
+        
+        setComercios(prev => [nuevo, ...prev]);
+        setTextoBotonAgregar("✓ ¡REGISTRADO!");
+        setRenovarWakeLock((n) => n + 1);
+        try { if (typeof reproducirAlerta === "function") reproducirAlerta(); } catch(e){}
+        
+        const { data: comercioCreado, error: errorComercio } = await supabase
+          .from("comercios")
+          .insert([nuevo])
+          .select("*")
+          .single();
+
+        if (errorComercio) throw errorComercio;
+
+        // Reemplazamos la captura temporal por el comercio real de Supabase.
+        setComercios(prev => [
+          comercioCreado,
+          ...prev.filter(c => c !== nuevo)
+        ]);
+
+        // RutaComercio usa un único precio base de la empresa.
+        // Un comercio nuevo no necesita ninguna asignación de lista.
+
+        // En Modo Manejo no mostramos ventanas que obliguen al preventista a tocar la pantalla.
+        if (!modoManejo) {
+          alert(
+            "✅ Cliente registrado\n\n" +
+            "Ya podés cargar sus datos y tomar pedidos inmediatamente.\n\n" +
+            "🟡 La validación administrativa del cliente queda pendiente para el supervisor.\n" +
+            "Los pedidos NO necesitan aprobación."
+          );
+        }
+
+        setTimeout(() => setTextoBotonAgregar("➕ AGREGAR COMERCIO"), 1800);
+      } catch (err) {
+        console.error("Error al registrar en Supabase:", err);
+        setTextoBotonAgregar("➕ AGREGAR COMERCIO");
+      }
+    };
+
+   // Una captura SIEMPRE pide una coordenada fresca.
+// Nunca reutilizamos posicionActual, porque podría pertenecer a otro lugar.
+obtenerUbicacionFresca()
+  .then(({ lat, lng }) => guardarConCoords(lat, lng))
+  .catch((err) => {
+    console.warn("No se pudo obtener ubicación fresca:", err);
+    alert("No pude confirmar tu ubicación actual. Esperá unos segundos y volvé a intentar.");
+    setTextoBotonAgregar("➕ AGREGAR COMERCIO");
+  });
+  };
+
+  // 📊 MÉTRICA REAL DE VISITAS DE HOY
+  const normalizarDia = (valor) =>
+    String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+
+  const diaActualNormalizado = normalizarDia(obtenerDiaActual());
+
+  const fechaLocalISO = (fecha = new Date()) => {
+    const y = fecha.getFullYear();
+    const m = String(fecha.getMonth() + 1).padStart(2, "0");
+    const d = String(fecha.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const fechaHoyLocal = fechaLocalISO();
+
+  const comerciosProgramadosHoy = (comercios || []).filter((c) => {
+    const esDiaHabitual = normalizarDia(c.dia_visita) === diaActualNormalizado;
+    const esRevisitaExcepcional = c.revisita_fecha === fechaHoyLocal;
+    return (
+      (esDiaHabitual || esRevisitaExcepcional) &&
+      c.no_visitar !== true &&
+      c.omitir_visita_fecha !== fechaHoyLocal
+    );
+  });
+
+  const inicioHoyMetricas = new Date();
+  inicioHoyMetricas.setHours(0, 0, 0, 0);
+
+  const idsProgramadosHoy = new Set(
+    comerciosProgramadosHoy.map((c) => String(c.id))
+  );
+
+  const idsVisitadosHoy = new Set(
+    (visitasMapa || [])
+      .filter((v) =>
+        v?.fecha &&
+        new Date(v.fecha) >= inicioHoyMetricas &&
+        idsProgramadosHoy.has(String(v.comercio_id))
+      )
+      .map((v) => String(v.comercio_id))
+  );
+
+  const visitasRealizadasHoy = idsVisitadosHoy.size;
+  const visitasProgramadasHoy = comerciosProgramadosHoy.length;
+
+  // Efectividad real: comercios visitados hoy que terminaron en Venta/Pedido
+  // dividido por los comercios efectivamente visitados hoy.
+  const visitasRealesHoy = (visitasMapa || []).filter(
+    (v) =>
+      v?.fecha &&
+      new Date(v.fecha) >= inicioHoyMetricas &&
+      v?.comercio_id
+  );
+  const comerciosVisitadosRealesHoy = new Set(
+    visitasRealesHoy.map((v) => String(v.comercio_id))
+  );
+  const comerciosConVentaHoy = new Set(
+    visitasRealesHoy
+      .filter((v) => {
+        const resultado = String(v?.resultado || "").toLowerCase();
+        return resultado.includes("venta") || resultado.includes("pedido");
+      })
+      .map((v) => String(v.comercio_id))
+  );
+  const efectividadHoy = comerciosVisitadosRealesHoy.size > 0
+    ? Math.round((comerciosConVentaHoy.size / comerciosVisitadosRealesHoy.size) * 100)
+    : 0;
+
+  const ventaHoyTexto = `$ ${Number(ventasHoy || 0).toLocaleString("es-AR", {
+    maximumFractionDigits: 0,
+  })}`;
+
+  // 🧭 PRÓXIMO DESTINO SEGÚN LA HOJA DE RUTA DEL SUPERVISOR
+  // El listado general sigue ordenado por cercanía. Esta tarjeta usa orden_visita.
+  const rutaSugeridaHoy = [...comerciosProgramadosHoy]
+    .filter((c) => Number.isFinite(Number(c.orden_visita)))
+    .sort((a, b) => Number(a.orden_visita) - Number(b.orden_visita));
+
+  const proximoDestino = rutaSugeridaHoy.find(
+    (c) => !idsVisitadosHoy.has(String(c.id))
+  ) || null;
+
+  const indiceProximoDestino = proximoDestino
+    ? rutaSugeridaHoy.findIndex((c) => String(c.id) === String(proximoDestino.id))
+    : -1;
+
+  const latProximo = proximoDestino
+    ? Number(proximoDestino.ubicacion_exacta_latitud || proximoDestino.latitud)
+    : null;
+  const lngProximo = proximoDestino
+    ? Number(proximoDestino.ubicacion_exacta_longitud || proximoDestino.longitud)
+    : null;
+
+  const distanciaProximoDestino =
+    proximoDestino &&
+    posicionActual &&
+    Number.isFinite(latProximo) &&
+    Number.isFinite(lngProximo)
+      ? calcularMetrosGPS(
+          posicionActual[0],
+          posicionActual[1],
+          latProximo,
+          lngProximo
+        )
+      : null;
+
+  const listaFiltrada = (comercios || [])
+  .filter(c => {
+    // ⚫ Los comercios dados de baja no aparecen como clientes activos
+    // en HOY, TODOS ni en búsquedas. Siguen existiendo para historial
+    // y pueden seguir mostrándose en el mapa con marcador negro.
+    if (c.no_visitar === true) return false;
+
+    if (vistaComercios === "HOY") {
+      const diaHoy = obtenerDiaActual().toLowerCase().trim();
+      const diaComercio = String(c.dia_visita || "").toLowerCase().trim();
+      const esRevisitaExcepcional = c.revisita_fecha === fechaHoyLocal;
+
+      if (diaComercio !== diaHoy && !esRevisitaExcepcional) return false;
+      if (c.omitir_visita_fecha === fechaHoyLocal) return false;
+    }
+    if (!busqueda || busqueda.trim() === "") return true;
+
+    const q = busqueda.toLowerCase().trim();
+
+    const nom = String(c.nombre || "").toLowerCase();
+    const dir = String(c.direccion || "").toLowerCase();
+    const rub = String(c.rubro || "").toLowerCase();
+    const idStr = String(c.id || "");
+
+    return (
+      nom.includes(q) ||
+      dir.includes(q) ||
+      rub.includes(q) ||
+      idStr.includes(q)
+    );
+  })
+  .map(c => {
+    const latComercio =
+      Number(c.ubicacion_exacta_latitud) || Number(c.latitud);
+
+    const lngComercio =
+      Number(c.ubicacion_exacta_longitud) || Number(c.longitud);
+
+    const distancia =
+      posicionActual && latComercio && lngComercio
+        ? calcularMetrosGPS(
+            posicionActual[0],
+            posicionActual[1],
+            latComercio,
+            lngComercio
+          )
+        : null;
+
+    return {
+      ...c,
+      distancia_actual: distancia,
+    };
+  })
+  .sort((a, b) => {
+    // En COMERCIOS DE HOY el preventista puede elegir entre
+    // cercanía GPS y el orden de ruta definido por el Supervisor.
+    if (vistaComercios === "HOY" && ordenComerciosHoy === "RUTA") {
+      const ordenA = Number(a.orden_visita);
+      const ordenB = Number(b.orden_visita);
+      const tieneOrdenA = Number.isFinite(ordenA);
+      const tieneOrdenB = Number.isFinite(ordenB);
+
+      if (tieneOrdenA && tieneOrdenB) return ordenA - ordenB;
+      if (tieneOrdenA) return -1;
+      if (tieneOrdenB) return 1;
+      return 0;
+    }
+
+    if (a.distancia_actual === null && b.distancia_actual === null) return 0;
+    if (a.distancia_actual === null) return 1;
+    if (b.distancia_actual === null) return -1;
+
+    return a.distancia_actual - b.distancia_actual;
+  });
+
+  const cargarProductosParaConsulta = async () => {
+    const pActivo = perfil || perfilProp || null;
+    if (!pActivo?.empresa_id) {
+      alert("⚠️ No pude identificar la empresa del preventista.");
+      return;
+    }
+
+    setCargandoPrecios(true);
+    try {
+      // La estructura interna de listas se conserva por compatibilidad,
+      // pero para el preventista se usa un único precio base de la empresa.
+      const { data: listas, error: errorListas } = await supabase
+        .from("listas_precios")
+        .select("id,predeterminada")
+        .eq("empresa_id", pActivo.empresa_id)
+        .eq("activo", true)
+        .order("predeterminada", { ascending: false });
+
+      if (errorListas) throw errorListas;
+
+      const listaBase = (listas || []).find(l => l.predeterminada) || (listas || [])[0];
+      if (!listaBase?.id) {
+        setProductosPrecio([]);
+        return;
+      }
+
+      const { data: precios, error: errorPrecios } = await supabase
+        .from("lista_productos")
+        .select("id,producto_id,codigo_lista,detalle_en_lista,precio,productos(id,codigo_cge,nombre,descripcion,marca,gtin)")
+        .eq("lista_id", listaBase.id)
+        .eq("activo", true);
+
+      if (errorPrecios) throw errorPrecios;
+
+      const productoIds = [...new Set((precios || []).map(x => x.producto_id).filter(Boolean))];
+      let stockPorProducto = new Map();
+
+      if (productoIds.length > 0) {
+        const { data: stocks, error: errorStock } = await supabase
+          .from("stock_informado")
+          .select("producto_id,stock,actualizado_at")
+          .eq("empresa_id", pActivo.empresa_id)
+          .in("producto_id", productoIds)
+          .order("actualizado_at", { ascending: false });
+
+        if (errorStock) {
+          console.warn("Consulta de precios: no se pudo cargar stock:", errorStock);
+        } else {
+          (stocks || []).forEach(s => {
+            const clave = String(s.producto_id);
+            if (!stockPorProducto.has(clave)) stockPorProducto.set(clave, s.stock);
+          });
+        }
+      }
+
+      setProductosPrecio((precios || []).map(x => ({
+        id: x.producto_id || x.id,
+        codigo: x.codigo_lista || x.productos?.codigo_cge || "",
+        cge: x.productos?.codigo_cge || "",
+        nombre: x.productos?.nombre || x.detalle_en_lista || "Producto",
+        descripcion: x.productos?.descripcion || "",
+        marca: x.productos?.marca || "",
+        gtin: x.productos?.gtin || "",
+        precio: Number(x.precio || 0),
+        stock: stockPorProducto.has(String(x.producto_id))
+          ? Number(stockPorProducto.get(String(x.producto_id)))
+          : null,
+      })));
+    } catch (error) {
+      console.error("Error consultando precios:", error);
+      setProductosPrecio([]);
+      alert("❌ No pude cargar precios y stock: " + (error?.message || "error desconocido"));
+    } finally {
+      setCargandoPrecios(false);
+    }
+  };
+
+  const abrirConsultaPrecios = async () => {
+    setBusquedaPrecio("");
+    setConsultandoPrecios(true);
+    await cargarProductosParaConsulta();
+  };
+
+  const [tomandoPedido, setTomandoPedido] = useState(false);
+  const [viendoHistorialCliente, setViendoHistorialCliente] = useState(false);
+  const [resumenComprasCliente, setResumenComprasCliente] = useState({
+    cargando: false, cantidad: 0, total: 0, ultimaFecha: null, ultimaTotal: 0,
+  });
+
+  // 🛒 Resumen rápido de compras del comercio seleccionado
+  useEffect(() => {
+    let cancelado = false;
+    const cargarResumenComprasCliente = async () => {
+      if (!comercioSeleccionado?.id) {
+        setResumenComprasCliente({ cargando: false, cantidad: 0, total: 0, ultimaFecha: null, ultimaTotal: 0 });
+        return;
+      }
+      setResumenComprasCliente((prev) => ({ ...prev, cargando: true }));
+      try {
+        const { data, error } = await supabase
+          .from("pedidos")
+          .select("fecha, total, estado")
+          .eq("comercio_id", String(comercioSeleccionado.id))
+          .order("fecha", { ascending: false });
+        if (error) throw error;
+        if (cancelado) return;
+        const ventas = (data || []).filter(v => !["anulado", "anulada", "cancelado", "cancelada", "pendiente de stock"].includes(String(v.estado || "").trim().toLowerCase()));
+        setResumenComprasCliente({
+          cargando: false,
+          cantidad: ventas.length,
+          total: ventas.reduce((acc, p) => acc + Number(p.total || 0), 0),
+          ultimaFecha: ventas[0]?.fecha || null,
+          ultimaTotal: Number(ventas[0]?.total || 0),
+        });
+      } catch (error) {
+        console.error("Error cargando resumen de compras:", error);
+        if (!cancelado) setResumenComprasCliente({ cargando: false, cantidad: 0, total: 0, ultimaFecha: null, ultimaTotal: 0 });
+      }
+    };
+    cargarResumenComprasCliente();
+    return () => { cancelado = true; };
+  }, [comercioSeleccionado?.id]);
+  
+  const [posicionBotonManejo, setPosicionBotonManejo] = useState(() => {
+    try {
+      const guardada = localStorage.getItem("rutacomercio_pos_boton_manejo");
+      if (guardada) {
+        const parsed = JSON.parse(guardada);
+        if (typeof parsed.x === "number" && typeof parsed.y === "number") return parsed;
+      }
+    } catch(e) {}
+    return { x: 16, y: typeof window !== "undefined" ? Math.max(120, window.innerHeight - 160) : 500 };
+  });
+  const [arrastrandoBoton, setArrastrandoBoton] = useState(false);
+  const dragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0, moved: false });
+
+  const [modoManejo, setModoManejo] = useState(false);
+  const [renovarWakeLock, setRenovarWakeLock] = useState(0);
+// 📍 GPS EN VIVO MIENTRAS RUTACOMERCIO ESTÁ ABIERTO
+// No depende de Jornada ni de Modo Manejo.
+// Con sesión iniciada, mantiene la posición actualizada en HOY, ficha, pedidos, edición, etc.
+useEffect(() => {
+  if (!sesion?.user?.id) return;
+
+  if (!navigator.geolocation) {
+    console.log("Geolocalización no disponible");
+    return;
+  }
+
+  const recibirPosicion = (position) => {
+    const lat = position.coords.latitude;
+    const lng = position.coords.longitude;
+    setPosicionActual([lat, lng]);
+    transmitirUbicacionEnVivo(lat, lng);
+  };
+
+  const watchId = navigator.geolocation.watchPosition(
+    recibirPosicion,
+    (error) => console.error("Error GPS durante la jornada:", error),
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
+    }
+  );
+
+  // Refuerzo mientras la app está visible: solicita una lectura fresca periódicamente.
+  // Así el Supervisor no depende únicamente de que watchPosition dispare un cambio.
+  const refrescarSiVisible = () => {
+    if (document.visibilityState !== "visible") return;
+    navigator.geolocation.getCurrentPosition(
+      recibirPosicion,
+      (error) => console.warn("Refresco GPS:", error.message),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+  refrescarSiVisible();
+  const intervaloGPS = window.setInterval(refrescarSiVisible, 30000);
+  const alVolverApp = () => refrescarSiVisible();
+  document.addEventListener("visibilitychange", alVolverApp);
+  window.addEventListener("focus", alVolverApp);
+
+  return () => {
+    navigator.geolocation.clearWatch(watchId);
+    window.clearInterval(intervaloGPS);
+    document.removeEventListener("visibilitychange", alVolverApp);
+    window.removeEventListener("focus", alVolverApp);
+  };
+}, [sesion?.user?.id]);
+// 📋 CARGAR VISITAS PARA EL MAPA
+useEffect(() => {
+  if (!sesion?.user) return;
+
+  const cargarVisitasMapa = async () => {
+    try {
+      const pActivo = perfil || perfilProp || null;
+
+      if (!pActivo) return;
+
+      let query = supabase
+        .from("visitas")
+        .select("comercio_id, resultado, observacion, fecha, empresa_id, preventista")
+        .order("fecha", { ascending: false });
+
+      if (pActivo.empresa_id) {
+        query = query.eq("empresa_id", pActivo.empresa_id);
+      }
+
+      if (pActivo.nombre) {
+        query = query.eq("preventista", pActivo.nombre);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      setVisitasMapa(data || []);
+
+      console.log("🗺️ VISITAS PARA EL MAPA:", data);
+    } catch (error) {
+      console.error("Error cargando visitas para el mapa:", error);
+    }
+  };
+
+  cargarVisitasMapa();
+}, [modoManejo, perfil, perfilProp]);
+  // 💡 WAKE LOCK INTELIGENTE: mantiene la pantalla despierta 90 segundos
+  // al entrar en Modo Manejo. Después deja que el teléfono use su bloqueo normal.
+  useEffect(() => {
+    if (!modoManejo) return;
+
+    let wl = null;
+    let timer = null;
+    let cancelado = false;
+
+    const pedirLockTemporal = async () => {
+      try {
+        if ("wakeLock" in navigator) {
+          wl = await navigator.wakeLock.request("screen");
+
+          timer = setTimeout(() => {
+            if (wl) {
+              wl.release().catch(() => {});
+              wl = null;
+            }
+          }, 90 * 1000);
+        }
+      } catch (e) {
+        console.log("Wake Lock no disponible:", e);
+      }
+    };
+
+    pedirLockTemporal();
+
+    return () => {
+      cancelado = true;
+      if (timer) clearTimeout(timer);
+      if (wl) {
+        wl.release().catch(() => {});
+      }
+    };
+  }, [modoManejo, renovarWakeLock]);
+
+
+
+  if (tieneStockDestino) {
+    const diasSemana = {
+      domingo: 0, lunes: 1, martes: 2, miercoles: 3,
+      jueves: 4, viernes: 5, sabado: 6,
+    };
+
+    const diaHabitualNormalizado = normalizarDia(tieneStockDestino.dia_visita);
+    const numeroDiaHabitual = diasSemana[diaHabitualNormalizado];
+
+    const proximaFecha = new Date();
+    proximaFecha.setHours(12, 0, 0, 0);
+
+    if (Number.isInteger(numeroDiaHabitual)) {
+      let diferencia = (numeroDiaHabitual - proximaFecha.getDay() + 7) % 7;
+      if (diferencia === 0) diferencia = 7;
+      proximaFecha.setDate(proximaFecha.getDate() + diferencia);
+    } else {
+      proximaFecha.setDate(proximaFecha.getDate() + 7);
+    }
+
+    const proximaFechaISO = fechaLocalISO(proximaFecha);
+    const proximaFechaTexto = new Intl.DateTimeFormat("es-AR", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    }).format(proximaFecha);
+
+    const fechaManualTexto = fechaRevisitaManual
+      ? new Intl.DateTimeFormat("es-AR", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+        }).format(new Date(fechaRevisitaManual + "T12:00:00"))
+      : "";
+
+    const finalizarTieneStock = async (saltarProxima, fechaManual = "") => {
+      const comercio = tieneStockDestino;
+
+      if (saltarProxima) {
+        if (!fechaManual) {
+          alert("📅 Elegí el día en que querés volver a visitar al cliente.");
+          return;
+        }
+
+        if (fechaManual <= fechaHoyLocal) {
+          alert("⚠️ La fecha de re-visita tiene que ser posterior a hoy.");
+          return;
+        }
+
+        const actualizacion = {
+          omitir_visita_fecha: proximaFechaISO,
+          revisita_fecha: fechaManual,
+          revisita_motivo: motivoRevisita.trim() || null,
+        };
+
+        const { error } = await supabase
+          .from("comercios")
+          .update(actualizacion)
+          .eq("id", comercio.id)
+          .eq("empresa_id", perfil?.empresa_id || comercio.empresa_id);
+
+        if (error) {
+          console.error("Error guardando cambio excepcional de visita:", error);
+          alert(
+            "No pude guardar el cambio de visita.\n\n" +
+            "Si todavía no agregamos las columnas nuevas en Supabase, primero hay que hacerlo."
+          );
+          return;
+        }
+
+        setComercios((prev) =>
+          (prev || []).map((c) =>
+            String(c.id) === String(comercio.id)
+              ? { ...c, ...actualizacion }
+              : c
+          )
+        );
+      }
+
+      const observacionCambio = saltarProxima
+        ? `Visita realizada con éxito. Próxima visita habitual saltada: ${proximaFechaTexto}. Re-visitar el día: ${fechaManualTexto}.${motivoRevisita.trim() ? " Motivo: " + motivoRevisita.trim() : ""}`
+        : "Visita realizada con éxito. Mantiene su próxima visita habitual.";
+
+      setConfirmarSaltoVisita(false);
+      setFechaRevisitaManual("");
+      setMotivoRevisita("");
+      setTieneStockDestino(null);
+      setResultadoVisita("Tiene stock");
+      setObservacionVisita("");
+      await registrarVisitaCheckIn(comercio, "Tiene stock", observacionCambio);
+    };
+
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", padding: "18px", boxSizing: "border-box" }}>
+        <div style={{ maxWidth: "520px", margin: "0 auto", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "14px", padding: "18px" }}>
+          <div style={{ fontSize: "13px", color: "#facc15", fontWeight: "900" }}>
+            📦 TIENE STOCK
+          </div>
+
+          <div style={{ fontSize: "21px", fontWeight: "900", marginTop: "5px" }}>
+            {tieneStockDestino.nombre || "Comercio"}
+          </div>
+
+          <div style={{ color: "#cbd5e1", fontSize: "13px", margin: "12px 0 18px" }}>
+            ¿La próxima visita se hace normalmente o el cliente pidió cambiarla?
+          </div>
+
+          <button
+            type="button"
+            onClick={() => finalizarTieneStock(false)}
+            style={{
+              width: "100%", minHeight: "50px", marginBottom: "10px",
+              border: "1px solid #4ade80", borderRadius: "10px",
+              backgroundColor: "#166534", color: "#fff",
+              fontSize: "13px", fontWeight: "900", cursor: "pointer",
+            }}
+          >
+            ✓ FINALIZAR VISITA · MANTENER RUTA NORMAL
+          </button>
+
+          {!confirmarSaltoVisita ? (
+            <button
+              type="button"
+              onClick={() => setConfirmarSaltoVisita(true)}
+              style={{
+                width: "100%", minHeight: "66px", marginBottom: "10px",
+                border: "2px solid #facc15", borderRadius: "10px",
+                backgroundColor: "#713f12", color: "#fff",
+                fontSize: "14px", fontWeight: "900", cursor: "pointer",
+              }}
+            >
+              ⏭️ SALTAR PRÓXIMA VISITA / CAMBIAR FECHA
+              <div style={{ fontSize: "11px", fontWeight: "800", marginTop: "4px", color: "#fde68a" }}>
+                ⚠️ Visita habitual: {proximaFechaTexto}
+              </div>
+            </button>
+          ) : (
+            <div
+              style={{
+                marginBottom: "10px", padding: "14px",
+                border: "3px solid #facc15", borderRadius: "12px",
+                backgroundColor: "#451a03",
+                boxShadow: "0 0 0 3px rgba(250,204,21,0.12)",
+              }}
+            >
+              <div style={{ fontSize: "17px", fontWeight: "900", color: "#fef08a", textAlign: "center" }}>
+                ⚠️ CAMBIO EXCEPCIONAL DE VISITA
+              </div>
+
+              <div style={{ marginTop: "10px", padding: "9px", backgroundColor: "#7c2d12", borderRadius: "8px", textAlign: "center" }}>
+                <div style={{ fontSize: "11px", color: "#fed7aa", fontWeight: "800" }}>⏭️ SE SALTARÁ LA VISITA HABITUAL</div>
+                <div style={{ fontSize: "15px", color: "#fff", fontWeight: "900", marginTop: "3px" }}>
+                  {proximaFechaTexto}
+                </div>
+              </div>
+
+              <label style={{ display: "block", marginTop: "13px", fontSize: "12px", color: "#fde68a", fontWeight: "900" }}>
+                📅 RE-VISITAR EL DÍA:
+              </label>
+              <input
+                type="date"
+                value={fechaRevisitaManual}
+                min={fechaHoyLocal}
+                onChange={(e) => setFechaRevisitaManual(e.target.value)}
+                style={{
+                  width: "100%", boxSizing: "border-box", marginTop: "6px",
+                  minHeight: "48px", borderRadius: "9px", border: "2px solid #facc15",
+                  padding: "8px 10px", fontSize: "16px", fontWeight: "800",
+                  backgroundColor: "#fff", color: "#111827",
+                }}
+              />
+
+              {fechaManualTexto && (
+                <div style={{ marginTop: "7px", color: "#86efac", fontSize: "13px", fontWeight: "900", textAlign: "center" }}>
+                  ✓ Volver: {fechaManualTexto}
+                </div>
+              )}
+
+              <label style={{ display: "block", marginTop: "12px", fontSize: "12px", color: "#fde68a", fontWeight: "900" }}>
+                📝 MOTIVO / INDICACIÓN DEL CLIENTE (opcional)
+              </label>
+              <input
+                type="text"
+                value={motivoRevisita}
+                onChange={(e) => setMotivoRevisita(e.target.value)}
+                placeholder="Ej.: Cliente viaja; pidió que pase el lunes"
+                style={{
+                  width: "100%", boxSizing: "border-box", marginTop: "6px",
+                  minHeight: "44px", borderRadius: "9px", border: "1px solid #d97706",
+                  padding: "8px 10px", fontSize: "13px",
+                  backgroundColor: "#fff", color: "#111827",
+                }}
+              />
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "13px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmarSaltoVisita(false);
+                    setFechaRevisitaManual("");
+                    setMotivoRevisita("");
+                  }}
+                  style={{
+                    minHeight: "48px", border: "1px solid #94a3b8",
+                    borderRadius: "9px", backgroundColor: "#334155",
+                    color: "#fff", fontSize: "12px", fontWeight: "900", cursor: "pointer",
+                  }}
+                >
+                  ← NO, VOLVER
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => finalizarTieneStock(true, fechaRevisitaManual)}
+                  disabled={!fechaRevisitaManual}
+                  style={{
+                    minHeight: "48px",
+                    border: "2px solid #facc15", borderRadius: "9px",
+                    backgroundColor: fechaRevisitaManual ? "#a16207" : "#475569",
+                    color: "#fff", fontSize: "12px", fontWeight: "900",
+                    cursor: fechaRevisitaManual ? "pointer" : "not-allowed",
+                    opacity: fechaRevisitaManual ? 1 : 0.65,
+                  }}
+                >
+                  ✓ CONFIRMAR CAMBIO
+                </button>
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmarSaltoVisita(false);
+              setFechaRevisitaManual("");
+              setMotivoRevisita("");
+              setTieneStockDestino(null);
+              setLlegueDestino(tieneStockDestino);
+            }}
+            style={{
+              width: "100%", minHeight: "44px",
+              border: "1px solid #64748b", borderRadius: "10px",
+              backgroundColor: "#0f172a", color: "#cbd5e1",
+              fontWeight: "800", cursor: "pointer",
+            }}
+          >
+            ← VOLVER
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (llegueDestino) {
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#fff", padding: "18px", boxSizing: "border-box" }}>
+        <div style={{ maxWidth: "520px", margin: "0 auto", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "14px", padding: "18px" }}>
+          <div style={{ fontSize: "13px", color: "#86efac", fontWeight: "900" }}>
+            ✓ RESULTADO DE LA VISITA
+          </div>
+
+          <div style={{ fontSize: "21px", fontWeight: "900", marginTop: "5px", marginBottom: "18px" }}>
+            {llegueDestino.nombre || "Comercio"}
+          </div>
+
+          <div style={{ fontSize: "14px", color: "#cbd5e1", marginBottom: "10px" }}>
+            ¿Qué pasó?
+          </div>
+
+          {[
+            ["💰 VENTA / CARGAR PEDIDO", "#2563eb"],
+            ["📦 TIENE STOCK", "#334155"],
+            ["🚪 NO ESTABA", "#334155"],
+            ["🔒 CERRADO", "#334155"],
+            ["❌ NO INTERESADO", "#334155"],
+          ].map(([texto, fondo]) => (
+            <button
+              key={texto}
+              type="button"
+              onClick={async () => {
+                if (texto.startsWith("💰")) {
+                  setComercioSeleccionado(llegueDestino);
+                  setLlegueDestino(null);
+                  setTomandoPedido(true);
+                  return;
+                }
+
+                if (texto.startsWith("❌")) {
+                  const comercioNoInteresado = llegueDestino;
+                  const solicitarBaja = window.confirm(
+                    `❌ ${comercioNoInteresado.nombre || "Este comercio"} indicó que no está interesado.\n\n` +
+                    `Aceptar = solicitar NO VISITAR MÁS al supervisor.\n` +
+                    `Cancelar = registrar solamente esta visita.`
+                  );
+
+                  if (solicitarBaja) {
+                    await solicitarNoVisitar(comercioNoInteresado);
+                  }
+
+                  setResultadoVisita("No interesado");
+                  setObservacionVisita("");
+                  setLlegueDestino(null);
+                  await registrarVisitaCheckIn(comercioNoInteresado, "No interesado");
+                  return;
+                }
+
+                if (texto.startsWith("📦")) {
+                  setTieneStockDestino(llegueDestino);
+                  setLlegueDestino(null);
+                  return;
+                }
+
+                const resultado =
+                  texto.startsWith("🚪") ? "No estaba" :
+                  texto.startsWith("🔒") ? "Cerrado" :
+                  "Visitado";
+
+                setResultadoVisita(resultado);
+                setObservacionVisita("");
+                setLlegueDestino(null);
+
+                await registrarVisitaCheckIn(llegueDestino, resultado);
+              }}
+              style={{
+                width: "100%",
+                minHeight: "50px",
+                marginBottom: "9px",
+                padding: "10px 12px",
+                border: texto.startsWith("💰") ? "1px solid #60a5fa" : "1px solid #475569",
+                borderRadius: "10px",
+                backgroundColor: fondo,
+                color: "#fff",
+                fontSize: "14px",
+                fontWeight: "900",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              {texto}
+            </button>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => setLlegueDestino(null)}
+            style={{
+              width: "100%",
+              minHeight: "46px",
+              marginTop: "5px",
+              border: "1px solid #64748b",
+              borderRadius: "10px",
+              backgroundColor: "#0f172a",
+              color: "#cbd5e1",
+              fontWeight: "800",
+              cursor: "pointer",
+            }}
+          >
+            ← CANCELAR
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (destinoMapa) {
+    const latDestino = Number(destinoMapa.ubicacion_exacta_latitud || destinoMapa.latitud);
+    const lngDestino = Number(destinoMapa.ubicacion_exacta_longitud || destinoMapa.longitud);
+    const centroDestino =
+      Number.isFinite(latDestino) && Number.isFinite(lngDestino)
+        ? [latDestino, lngDestino]
+        : posicionActual;
+
+    return (
+      <div
+        style={{
+          height: "100vh",
+          backgroundColor: "#111827",
+          color: "#fff",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            minHeight: "62px",
+            padding: "10px 12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "10px",
+            backgroundColor: "#0f172a",
+            borderBottom: "1px solid #334155",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: "11px", fontWeight: "900", color: "#93c5fd" }}>
+              🧭 PRÓXIMO DESTINO
+            </div>
+            <div
+              style={{
+                fontSize: "13px",
+                fontWeight: "900",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {destinoMapa.nombre || `Comercio #${destinoMapa.id}`}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "7px", flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (!Number.isFinite(latDestino) || !Number.isFinite(lngDestino)) {
+                  alert("Este comercio no tiene una ubicación válida para navegar.");
+                  return;
+                }
+
+                const destino = `${latDestino},${lngDestino}`;
+                const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destino)}&travelmode=driving`;
+                window.open(url, "_blank");
+              }}
+              style={{
+                padding: "9px 11px",
+                border: "1px solid #60a5fa",
+                borderRadius: "9px",
+                backgroundColor: "#2563eb",
+                color: "#fff",
+                fontWeight: "900",
+                cursor: "pointer",
+              }}
+            >
+              🧭 NAVEGAR
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDestinoMapa(null)}
+              style={{
+                padding: "9px 11px",
+                border: "1px solid #64748b",
+                borderRadius: "9px",
+                backgroundColor: "#1e293b",
+                color: "#fff",
+                fontWeight: "800",
+                cursor: "pointer",
+              }}
+            >
+              ← VOLVER
+            </button>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {centroDestino ? (
+            <MapContainer
+              center={centroDestino}
+              zoom={17}
+              style={{ width: "100%", height: "100%" }}
+            >
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+              {posicionActual && (
+                <Marker position={posicionActual} icon={iconoAuto}>
+                  <Popup><strong>🚗 Mi ubicación</strong></Popup>
+                </Marker>
+              )}
+
+              {Number.isFinite(latDestino) && Number.isFinite(lngDestino) && (
+                <Marker position={[latDestino, lngDestino]} icon={iconoAzul}>
+                  <Popup>
+                    <strong>{destinoMapa.nombre || `Comercio #${destinoMapa.id}`}</strong>
+                    <br />
+                    {destinoMapa.direccion || "Sin dirección cargada"}
+                  </Popup>
+                </Marker>
+              )}
+            </MapContainer>
+          ) : (
+            <div
+              style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "20px",
+                textAlign: "center",
+                color: "#cbd5e1",
+              }}
+            >
+              Este comercio no tiene una ubicación válida para mostrar.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (consultandoPrecios) {
+    const q = busquedaPrecio.trim().toLowerCase();
+    const resultados = q
+      ? productosPrecio.filter(p =>
+          [p.codigo, p.cge, p.nombre, p.descripcion, p.marca, p.gtin]
+            .some(v => String(v || "").toLowerCase().includes(q))
+        )
+      : [];
+
+    return (
+      <div style={{ minHeight:"100vh", background:"#0f172a", color:"#fff", fontFamily:"sans-serif" }}>
+        <header style={{
+          padding:"10px 12px", background:"#1e293b", display:"flex",
+          alignItems:"center", justifyContent:"space-between", borderBottom:"1px solid #334155"
+        }}>
+          <button type="button" onClick={()=>setConsultandoPrecios(false)} style={{
+            border:"1px solid #64748b", background:"#0f172a", color:"#fff",
+            borderRadius:"8px", padding:"8px 10px", fontWeight:"800", cursor:"pointer"
+          }}>← VOLVER</button>
+          <div style={{fontSize:"13px",fontWeight:"900"}}>🔎 CONSULTAR PRECIOS</div>
+          <div style={{width:"72px"}} />
+        </header>
+
+        <main style={{padding:"14px",maxWidth:"720px",margin:"0 auto"}}>
+          <div style={{fontSize:"12px",color:"#94a3b8",marginBottom:"10px"}}>
+            Precio y stock disponibles sin iniciar una NVI.
+          </div>
+
+          <input
+            autoFocus
+            type="text"
+            value={busquedaPrecio}
+            onChange={e=>setBusquedaPrecio(e.target.value)}
+            placeholder="🔎 Código, producto o marca..."
+            style={{
+              width:"100%", boxSizing:"border-box", padding:"13px 14px",
+              background:"#0b1329", border:"2px solid #38bdf8", borderRadius:"10px",
+              color:"#fff", fontSize:"16px", outline:"none", marginBottom:"12px"
+            }}
+          />
+
+          {cargandoPrecios ? (
+            <div style={{padding:"20px",textAlign:"center",color:"#cbd5e1"}}>⏳ Cargando precios y stock...</div>
+          ) : !q ? (
+            <div style={{padding:"20px",textAlign:"center",color:"#94a3b8"}}>Escribí algo para buscar.</div>
+          ) : resultados.length === 0 ? (
+            <div style={{padding:"20px",textAlign:"center",color:"#94a3b8"}}>No encontré productos.</div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+              {resultados.slice(0,100).map(p=>(
+                <div key={p.id} style={{
+                  background:"#1e293b", border:"1px solid #334155",
+                  borderRadius:"9px", padding:"7px 9px"
+                }}>
+                  <div style={{fontWeight:"900",fontSize:"12px",lineHeight:1.15}}>{p.nombre}</div>
+                  <div style={{fontSize:"9px",color:"#94a3b8",marginTop:"2px"}}>
+                    {[p.codigo,p.marca].filter(Boolean).join(" · ")}
+                  </div>
+                  <div style={{
+                    display:"flex",justifyContent:"space-between",alignItems:"end",
+                    gap:"8px",marginTop:"5px",borderTop:"1px solid #334155",paddingTop:"5px"
+                  }}>
+                    <div>
+                      <div style={{fontSize:"9px",color:"#94a3b8",fontWeight:"800"}}>STOCK</div>
+                      <div style={{
+                        fontSize:"12px",fontWeight:"900",
+                        color:p.stock === null ? "#cbd5e1" : p.stock === 0 ? "#fca5a5" : "#93c5fd"
+                      }}>
+                        {p.stock === null ? "No informado" : p.stock}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:"9px",color:"#94a3b8",fontWeight:"800"}}>PRECIO</div>
+                      <div style={{fontSize:"18px",fontWeight:"950",color:"#86efac"}}>
+                        ${Number(p.precio || 0).toLocaleString("es-AR")}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  if (viendoHistorialCliente && comercioSeleccionado) {
+    return (
+      <HistorialCliente
+        comercio={comercioSeleccionado}
+        onVolver={() => setViendoHistorialCliente(false)}
+      />
+    );
+  }
+
+  if (tomandoPedido && comercioSeleccionado) {
+  return (
+    <TomaPedidos
+      comercio={comercioSeleccionado}
+      usuario={perfil || perfilProp}
+      onVolver={() => setTomandoPedido(false)}
+      onPedidoGuardado={async () => {
+        setTomandoPedido(false);
+        setResultadoVisita("Venta");
+        setObservacionVisita("");
+        alert(
+          comercioSeleccionado?.estado_alta === "provisorio"
+            ? "🚀 Pedido enviado correctamente.\n\nNo requiere aprobación del supervisor.\nEl alta del cliente continúa en validación administrativa."
+            : "🚀 Pedido enviado correctamente.\n\nNo requiere aprobación del supervisor."
+        );
+        await registrarVisitaCheckIn(comercioSeleccionado, "Venta");
+        await cargarVentasHoy(perfil || perfilProp || null);
+      }}
+    />
+  );
+}
+if (modoManejo) {
+  const moverBotonFlotante = (clientX, clientY) => {
+    const ancho = 220;
+    const alto = 92;
+    const margen = 12;
+    const maxX = Math.max(margen, window.innerWidth - ancho - margen);
+    const maxY = Math.max(90, window.innerHeight - alto - 90);
+
+    const x = Math.min(Math.max(margen, clientX - dragRef.current.startX), maxX);
+    const y = Math.min(Math.max(90, clientY - dragRef.current.startY), maxY);
+
+    if (
+      Math.abs(x - dragRef.current.initialX) > 6 ||
+      Math.abs(y - dragRef.current.initialY) > 6
+    ) {
+      dragRef.current.moved = true;
+    }
+
+    setPosicionBotonManejo({ x, y });
+  };
+
+  const iniciarArrastreBoton = (clientX, clientY) => {
+    dragRef.current = {
+      startX: clientX - posicionBotonManejo.x,
+      startY: clientY - posicionBotonManejo.y,
+      initialX: posicionBotonManejo.x,
+      initialY: posicionBotonManejo.y,
+      moved: false,
+    };
+    setArrastrandoBoton(true);
+  };
+
+  const terminarArrastreBoton = () => {
+    setArrastrandoBoton(false);
+    try {
+      localStorage.setItem(
+        "rutacomercio_pos_boton_manejo",
+        JSON.stringify(posicionBotonManejo)
+      );
+    } catch (e) {}
+  };
+
+  return (
+    <div
+      style={{
+        height: "100vh",
+        backgroundColor: "#111",
+        color: "#fff",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        boxSizing: "border-box",
+        fontFamily: "sans-serif",
+      }}
+    >
+      <div
+        style={{
+          height: "64px",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "8px 12px",
+          backgroundColor: "#111827",
+          borderBottom: "1px solid #334155",
+          boxSizing: "border-box",
+        }}
+      >
+        <div style={{ textAlign: "left" }}>
+          <div style={{ fontSize: "17px", fontWeight: "900" }}>🚗 MODO MANEJO</div>
+          <div style={{ fontSize: "11px", color: posicionActual ? "#86efac" : "#facc15" }}>
+            {posicionActual ? "● GPS activo" : "● Buscando GPS..."}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setModoManejo(false)}
+          style={{
+            backgroundColor: "#334155",
+            color: "#fff",
+            border: "1px solid #64748b",
+            borderRadius: "9px",
+            padding: "9px 11px",
+            fontSize: "12px",
+            fontWeight: "800",
+            cursor: "pointer",
+          }}
+        >
+          ← SALIR
+        </button>
+      </div>
+
+      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+        {posicionActual ? (
+          <MapContainer
+            center={posicionActual}
+            zoom={17}
+            style={{ width: "100%", height: "100%" }}
+          >
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+
+            <SeguirAuto posicion={posicionActual} />
+
+            <Marker position={posicionActual} icon={iconoAuto}>
+              <Popup>
+                <strong>🚗 Mi ubicación</strong>
+              </Popup>
+            </Marker>
+
+            {(comercios || []).map((comercio) => {
+              const lat = Number(
+                comercio.ubicacion_exacta_latitud || comercio.latitud
+              );
+              const lng = Number(
+                comercio.ubicacion_exacta_longitud || comercio.longitud
+              );
+
+              if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+              const ahora = new Date();
+              const inicioHoy = new Date(
+                ahora.getFullYear(),
+                ahora.getMonth(),
+                ahora.getDate()
+              );
+
+              const visitaHoy = (visitasMapa || []).find((visita) => {
+                if (String(visita.comercio_id) !== String(comercio.id)) return false;
+                return new Date(visita.fecha) >= inicioHoy;
+              });
+
+              let iconoComercio = iconoAzul;
+
+              if (comercio.no_visitar === true) {
+                iconoComercio = iconoNegro;
+              } else if (visitaHoy) {
+                const resultado = (visitaHoy.resultado || "").toLowerCase();
+                if (resultado.includes("no interesado")) {
+                  iconoComercio = iconoRojo;
+                } else if (
+                  resultado.includes("venta") ||
+                  resultado.includes("pedido")
+                ) {
+                  iconoComercio = iconoVerde;
+                } else {
+                  iconoComercio = iconoAmarillo;
+                }
+              }
+
+              return (
+                <Marker
+                  key={comercio.id}
+                  position={[lat, lng]}
+                  icon={iconoComercio}
+                >
+                  <Popup>
+                    <strong>{comercio.nombre || "Comercio"}</strong>
+                    <br />
+                    {comercio.direccion || "Sin dirección cargada"}
+                    <br />
+                    {visitaHoy ? `Hoy: ${visitaHoy.resultado}` : "Pendiente de visita"}
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MapContainer>
+        ) : (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#cbd5e1",
+              fontWeight: "700",
+            }}
+          >
+            📍 Buscando ubicación GPS...
+          </div>
+        )}
+
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            iniciarArrastreBoton(e.clientX, e.clientY);
+          }}
+          onPointerMove={(e) => {
+            if (!arrastrandoBoton) return;
+            moverBotonFlotante(e.clientX, e.clientY);
+          }}
+          onPointerUp={(e) => {
+            if (!arrastrandoBoton) return;
+            const fueArrastre = dragRef.current.moved;
+            terminarArrastreBoton();
+            if (!fueArrastre) agregarComercioInmediato();
+          }}
+          onPointerCancel={() => {
+            if (arrastrandoBoton) terminarArrastreBoton();
+          }}
+          style={{
+            position: "fixed",
+            left: `${posicionBotonManejo.x}px`,
+            top: `${posicionBotonManejo.y}px`,
+            width: "220px",
+            minHeight: "92px",
+            zIndex: 1000,
+            backgroundColor: "#16a34a",
+            color: "#fff",
+            border: "3px solid rgba(255,255,255,0.9)",
+            borderRadius: "18px",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+            fontSize: "19px",
+            fontWeight: "900",
+            lineHeight: 1.15,
+            cursor: arrastrandoBoton ? "grabbing" : "grab",
+            touchAction: "none",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            padding: "12px",
+          }}
+        >
+          {textoBotonAgregar === "➕ AGREGAR COMERCIO"
+            ? "📍 GUARDAR UBICACIÓN"
+            : textoBotonAgregar}
+          <div
+            style={{
+              marginTop: "5px",
+              fontSize: "10px",
+              fontWeight: "700",
+              opacity: 0.85,
+            }}
+          >
+            Tocá para guardar · arrastrá para mover
+          </div>
+        </button>
+      </div>
+
+      {/* Salida permanente, fuera del mapa y del botón arrastrable. */}
+      <div style={{
+        flexShrink: 0,
+        position: "relative",
+        zIndex: 1100,
+        backgroundColor: "#111827",
+        borderTop: "1px solid #334155",
+        padding: "10px 12px calc(10px + env(safe-area-inset-bottom, 0px))",
+      }}>
+        <button
+          type="button"
+          onClick={() => setModoManejo(false)}
+          style={{
+            display: "block",
+            width: "100%",
+            minHeight: "54px",
+            backgroundColor: "#334155",
+            color: "#ffffff",
+            border: "2px solid #94a3b8",
+            borderRadius: "12px",
+            fontSize: "16px",
+            fontWeight: "900",
+            cursor: "pointer",
+            touchAction: "manipulation",
+          }}
+        >
+          ⬅ VOLVER AL MODO NORMAL
+        </button>
+      </div>
+    </div>
+  );
+}
+
+if (comercioSeleccionado) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#090d16",
+        color: "#fff",
+        fontFamily: "sans-serif",
+        paddingBottom: "40px",
+      }}
+    >
+      <header
+        style={{
+          padding: "14px 16px",
+          backgroundColor: "#0f172a",
+          borderBottom: "1px solid #1e293b",
+          position: "relative",
+          top: 0,
+          zIndex: 10,
+        }}
+      >
+        <button
+          onClick={() => {
+            setEditandoUbicacion(false);
+            setPosicionEdicionUbicacion(null);
+            setComercioSeleccionado(null);
+          }}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "#94a3b8",
+            fontSize: "15px",
+            fontWeight: "bold",
+            cursor: "pointer",
+          }}
+        >
+          ← Volver al listado
+        </button>
+      </header>
+
+      <div
+        style={{
+          padding: "16px",
+          maxWidth: "600px",
+          margin: "0 auto",
+        }}
+      >
+        <h2 style={{ marginTop: 0, marginBottom: "8px", color: "#ffffff", WebkitTextFillColor: "#ffffff" }}>
+          {comercioSeleccionado.nombre || "Comercio"}
+        </h2>
+
+        <div
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            padding: "11px 12px",
+            marginBottom: "14px",
+            borderRadius: "9px",
+            backgroundColor: Number(comercioSeleccionado.deuda || 0) > 0 ? "#7f1d1d" : "#1e3a8a",
+            border: Number(comercioSeleccionado.deuda || 0) > 0 ? "1px solid #ef4444" : "1px solid #60a5fa",
+            color: "#fff",
+            fontSize: "14px",
+            fontWeight: "900",
+            textAlign: "center",
+          }}
+        >
+          {Number(comercioSeleccionado.deuda || 0) > 0
+            ? `🔴 CON DEUDA $${Number(comercioSeleccionado.deuda || 0).toLocaleString("es-AR")}`
+            : "🔵 SIN DEUDA"}
+        </div>
+
+              <div style={{
+          width: "100%", boxSizing: "border-box", marginBottom: "12px",
+          padding: "10px 12px", borderRadius: "9px",
+          backgroundColor: "#0f172a", border: "1px solid #334155", color: "#ffffff",
+        }}>
+          {resumenComprasCliente.cargando ? (
+            <div style={{ fontSize: "13px", fontWeight: "800", color: "#cbd5e1" }}>⏳ Cargando compras...</div>
+          ) : resumenComprasCliente.cantidad > 0 ? (
+            <>
+              <div style={{ fontSize: "13px", fontWeight: "900", marginBottom: "4px" }}>
+                🛒 Última compra: {new Date(resumenComprasCliente.ultimaFecha).toLocaleDateString("es-AR")} · ${Number(resumenComprasCliente.ultimaTotal || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+              </div>
+              <div style={{ fontSize: "12px", color: "#cbd5e1", fontWeight: "800" }}>
+                📦 Compras: {resumenComprasCliente.cantidad} · 💰 Total histórico: ${Number(resumenComprasCliente.total || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: "13px", fontWeight: "800", color: "#94a3b8" }}>🛒 Sin compras registradas</div>
+          )}
+        </div>
+
+<button
+   type="button"
+      onClick={() => setTomandoPedido(true)}
+   style={{
+    width: "100%",
+    padding: "14px",
+    marginBottom: "16px",
+    backgroundColor: "#2563eb",
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "16px",
+    fontWeight: "bold",
+    cursor: "pointer",
+  }}
+        >
+  📦 TOMAR PEDIDO
+    </button>
+
+    <button
+      type="button"
+      onClick={() => setViendoHistorialCliente(true)}
+      style={{
+        width: "100%",
+        padding: "14px",
+        marginBottom: "16px",
+        backgroundColor: "#0f766e",
+        color: "#fff",
+        border: "none",
+        borderRadius: "8px",
+        fontSize: "16px",
+        fontWeight: "bold",
+        cursor: "pointer",
+      }}
+    >
+      🧾 HISTORIAL DE COMPRAS
+    </button>
+    <div
+  style={{
+    backgroundColor: "#1e293b",
+    padding: "14px",
+    borderRadius: "10px",
+    marginBottom: "16px",
+  }}
+>
+  <div
+    style={{
+      fontWeight: "bold",
+      marginBottom: "10px",
+    }}
+  >
+    📍 Registrar visita
+  </div>
+
+  <select
+    value={resultadoVisita}
+    onChange={(e) => setResultadoVisita(e.target.value)}
+    style={{
+      width: "100%",
+      padding: "10px",
+      marginBottom: "10px",
+      boxSizing: "border-box",
+    }}
+  >
+    <option value="Visitado">Visitado</option>
+    <option value="Venta">Venta realizada</option>
+    <option value="No estaba">No estaba</option>
+    <option value="Cerrado">Cerrado</option>
+    <option value="No interesado">No interesado</option>
+  </select>
+
+  <textarea
+    value={observacionVisita}
+    onChange={(e) => setObservacionVisita(e.target.value)}
+    placeholder="Observación de la visita..."
+    rows="3"
+    style={{
+      width: "100%",
+      padding: "10px",
+      marginBottom: "10px",
+      boxSizing: "border-box",
+      resize: "vertical",
+    }}
+  />
+
+          {/* 🎙️ Notas de voz del comercio */}
+          <div
+            style={{
+              marginBottom: "16px",
+              padding: "12px",
+              backgroundColor: "#111827",
+              border: "1px solid #334155",
+              borderRadius: "10px",
+            }}
+          >
+            <div
+              style={{
+                fontWeight: "bold",
+                marginBottom: "8px",
+              }}
+            >
+              🎙️ Notas de voz
+            </div>
+
+            <button
+              type="button"
+              onClick={grabandoAudio ? detenerGrabacionVoz : iniciarGrabacionVoz}
+              style={{
+                width: "100%",
+                padding: "13px",
+                backgroundColor: grabandoAudio ? "#dc2626" : "#7c3aed",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                fontSize: "15px",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              {grabandoAudio
+                ? `⏹ DETENER · ${String(Math.floor(tiempoGrabacion / 60)).padStart(2, "0")}:${String(tiempoGrabacion % 60).padStart(2, "0")}`
+                : "🎙️ GRABAR NOTA DE VOZ"}
+            </button>
+
+            {Array.isArray(comercioSeleccionado.notas_audio) &&
+              comercioSeleccionado.notas_audio.length > 0 && (
+                <div style={{ marginTop: "10px" }}>
+                  {comercioSeleccionado.notas_audio.map((nota, index) => (
+                    <div
+                      key={nota.id || index}
+                      style={{
+                        padding: "8px",
+                        marginTop: index === 0 ? 0 : "8px",
+                        backgroundColor: "#1e293b",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "11px",
+                          color: "#94a3b8",
+                          marginBottom: "5px",
+                        }}
+                      >
+                        Nota de voz {nota.fecha ? `· ${nota.fecha}` : ""}
+                      </div>
+                      <audio
+                        controls
+                        src={nota.audio}
+                        style={{
+                          width: "100%",
+                          height: "36px",
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+          </div>
+
+
+
+  <button
+    type="button"
+    onClick={() => registrarVisitaCheckIn(comercioSeleccionado)}
+    disabled={guardandoVisita}
+    style={{
+      width: "100%",
+      padding: "13px",
+      backgroundColor: guardandoVisita ? "#64748b" : "#16a34a",
+      color: "#fff",
+      border: "none",
+      borderRadius: "8px",
+      fontSize: "15px",
+      fontWeight: "bold",
+      cursor: guardandoVisita ? "default" : "pointer",
+    }}
+  >
+    {guardandoVisita ? "⏳ REGISTRANDO..." : "✅ REGISTRAR VISITA"}
+  </button>
+</div>
+       
+     <div
+  style={{
+    marginBottom: "16px",
+  }}
+>
+  <button
+  type="button"
+  onClick={() => {
+  if (comercioSeleccionado.no_visitar === true) {
+    alert(
+      "⚫ Este comercio está marcado como NO VISITAR MÁS.\n\nSolo un supervisor puede reactivarlo."
+    );
+    return;
+  }
+
+  solicitarNoVisitar(comercioSeleccionado);
+}}
+  style={{
+    width: "100%",
+    padding: "13px",
+    backgroundColor:
+      comercioSeleccionado.no_visitar === true
+        ? "#111827"
+        : "#374151",
+    color: "#fff",
+    border: "2px solid #000",
+    borderRadius: "8px",
+    fontSize: "15px",
+    fontWeight: "bold",
+    cursor: "pointer",
+  }}
+>
+  {comercioSeleccionado.no_visitar === true
+    ? "⚫ NO VISITAR MÁS"
+    : "🚫 SOLICITAR NO VISITAR MÁS"}
+</button>
+</div>  
+       
+        <button
+          type="button"
+          onClick={() => setDatosClienteAbiertos((v) => !v)}
+          style={{
+            width: "100%", padding: "13px", marginBottom: "12px",
+            backgroundColor: "#1d4ed8", color: "#fff", border: "none",
+            borderRadius: "8px", fontSize: "15px", fontWeight: "bold", cursor: "pointer",
+          }}
+        >
+          📋 DATOS DEL CLIENTE {datosClienteAbiertos ? "▲" : "▼"}
+        </button>
+
+        {datosClienteAbiertos && (
+        <div
+          style={{
+            backgroundColor: "#0f172a",
+            padding: "16px",
+            borderRadius: "12px",
+            border: "1px solid #1e293b",
+          }}
+        >
+          <div style={{fontSize:"12px", color:"#94a3b8", marginBottom:"14px"}}>
+            Completá o corregí solamente los datos que conozcas. No es obligatorio llenar todos los campos.
+          </div>
+
+          <label>Código de cliente (opcional)</label>
+          <input type="text" value={comercioSeleccionado.codigo_cliente || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, codigo_cliente:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Razón social</label>
+          <input type="text" value={comercioSeleccionado.razon_social || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, razon_social:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Nombre del comercio</label>
+
+          <input
+            type="text"
+            value={comercioSeleccionado.nombre || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                nombre: e.target.value,
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              marginTop: "6px",
+              marginBottom: "15px",
+              boxSizing: "border-box",
+            }}
+          />
+
+          <label>Dirección</label>
+
+          <input
+            type="text"
+            value={comercioSeleccionado.direccion || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                direccion: e.target.value,
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              marginTop: "6px",
+              marginBottom: "15px",
+              boxSizing: "border-box",
+            }}
+          />
+
+          <label>Localidad</label>
+          <input
+            type="text"
+            value={comercioSeleccionado.localidad || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                localidad: e.target.value,
+              })
+            }
+            placeholder="Ej.: Bernal"
+            style={{
+              width: "100%", padding: "10px", marginTop: "6px",
+              marginBottom: "15px", boxSizing: "border-box",
+            }}
+          />
+
+          <label>Partido / Departamento</label>
+          <input
+            type="text"
+            value={comercioSeleccionado.partido || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                partido: e.target.value,
+              })
+            }
+            placeholder="Ej.: Quilmes"
+            style={{
+              width: "100%", padding: "10px", marginTop: "6px",
+              marginBottom: "15px", boxSizing: "border-box",
+            }}
+          />
+
+          <label>Provincia / Estado</label>
+          <input
+            type="text"
+            list="provincias-rutacomercio"
+            value={comercioSeleccionado.provincia || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                provincia: e.target.value,
+              })
+            }
+            placeholder="Ej.: Buenos Aires"
+            style={{
+              width: "100%", padding: "10px", marginTop: "6px",
+              marginBottom: "15px", boxSizing: "border-box",
+            }}
+          />
+          <datalist id="provincias-rutacomercio">
+            <option value="Buenos Aires" />
+            <option value="CABA" />
+            <option value="Catamarca" />
+            <option value="Chaco" />
+            <option value="Chubut" />
+            <option value="Córdoba" />
+            <option value="Corrientes" />
+            <option value="Entre Ríos" />
+            <option value="Formosa" />
+            <option value="Jujuy" />
+            <option value="La Pampa" />
+            <option value="La Rioja" />
+            <option value="Mendoza" />
+            <option value="Misiones" />
+            <option value="Neuquén" />
+            <option value="Río Negro" />
+            <option value="Salta" />
+            <option value="San Juan" />
+            <option value="San Luis" />
+            <option value="Santa Cruz" />
+            <option value="Santa Fe" />
+            <option value="Santiago del Estero" />
+            <option value="Tierra del Fuego" />
+            <option value="Tucumán" />
+          </datalist>
+
+          <label>País</label>
+          <input
+            type="text"
+            list="paises-rutacomercio"
+            value={comercioSeleccionado.pais || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                pais: e.target.value,
+              })
+            }
+            placeholder="Argentina"
+            style={{
+              width: "100%", padding: "10px", marginTop: "6px",
+              marginBottom: "15px", boxSizing: "border-box",
+            }}
+          />
+          <datalist id="paises-rutacomercio">
+            <option value="Argentina" />
+            <option value="Uruguay" />
+            <option value="Paraguay" />
+            <option value="Chile" />
+            <option value="Brasil" />
+            <option value="Bolivia" />
+          </datalist>
+
+          <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "-8px", marginBottom: "15px" }}>
+            🧠 Localidad, partido, provincia y país se recuerdan para el próximo cliente.
+          </div>
+
+          <label>Código postal</label>
+          <input type="text" value={comercioSeleccionado.codigo_postal || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, codigo_postal:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Domicilio fiscal</label>
+          <input type="text" value={comercioSeleccionado.domicilio_fiscal || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, domicilio_fiscal:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Nombre de contacto</label>
+          <input type="text" value={comercioSeleccionado.contacto || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, contacto:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>CUIT</label>
+          <input type="text" value={comercioSeleccionado.cuit || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, cuit:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Condición fiscal</label>
+          <input type="text" value={comercioSeleccionado.condicion_fiscal || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, condicion_fiscal:e.target.value})} placeholder="Ej.: Responsable Inscripto / Monotributo" style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Email</label>
+          <input type="email" value={comercioSeleccionado.email || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, email:e.target.value})} style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box"}} />
+
+          <label>Notas</label>
+          <textarea value={comercioSeleccionado.notas || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, notas:e.target.value})} rows="3" style={{width:"100%",padding:"10px",marginTop:"6px",marginBottom:"15px",boxSizing:"border-box",resize:"vertical"}} />
+
+          <label>Rubro</label>
+
+          <input
+            type="text"
+            value={comercioSeleccionado.rubro || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                rubro: e.target.value,
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              marginTop: "6px",
+              marginBottom: "20px",
+              boxSizing: "border-box",
+            }}
+          />
+
+          <label>Día de visita</label>
+
+          <select
+            value={comercioSeleccionado.dia_visita || ""}
+            onChange={(e) =>
+              setComercioSeleccionado({
+                ...comercioSeleccionado,
+                dia_visita: e.target.value,
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              marginTop: "6px",
+              marginBottom: "20px",
+              boxSizing: "border-box",
+            }}
+          >
+            <option value="">Sin día asignado</option>
+            <option value="Lunes">Lunes</option>
+            <option value="Martes">Martes</option>
+            <option value="Miércoles">Miércoles</option>
+            <option value="Jueves">Jueves</option>
+            <option value="Viernes">Viernes</option>
+            <option value="Sábado">Sábado</option>
+            <option value="Domingo">Domingo</option>
+          </select>
+          <div style={{ marginBottom: "20px" }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: "6px",
+              }}
+            >
+              Teléfono
+            </label>
+
+            <div style={{ display: "flex", gap: "8px" }}>
+              <select
+                value={comercioSeleccionado.codigo_pais || "+54"}
+onChange={(e) =>
+  setComercioSeleccionado({
+    ...comercioSeleccionado,
+    codigo_pais: e.target.value,
+  })
+}
+                style={{
+                  width: "105px",
+                  padding: "10px",
+                  boxSizing: "border-box",
+                }}
+              >
+                <option value="+54">🇦🇷 +54</option>
+                <option value="+598">🇺🇾 +598</option>
+                <option value="+56">🇨🇱 +56</option>
+                <option value="+595">🇵🇾 +595</option>
+                <option value="+55">🇧🇷 +55</option>
+                <option value="+591">🇧🇴 +591</option>
+                <option value="+51">🇵🇪 +51</option>
+                <option value="+57">🇨🇴 +57</option>
+                <option value="+52">🇲🇽 +52</option>
+                <option value="+34">🇪🇸 +34</option>
+                <option value="+1">🇺🇸 +1</option>
+              </select>
+
+              <input
+                type="tel"
+                value={comercioSeleccionado.telefono || ""}
+                onChange={(e) =>
+                  setComercioSeleccionado({
+                    ...comercioSeleccionado,
+                    telefono: e.target.value,
+                  })
+                }
+                placeholder="Ej: 11 2250 1680"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: "10px",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: "20px" }}>
+            <label style={{display:"block", marginBottom:"6px"}}>WhatsApp</label>
+            <input type="tel" value={comercioSeleccionado.whatsapp || ""} onChange={(e) => setComercioSeleccionado({...comercioSeleccionado, whatsapp:e.target.value})} placeholder="Ej: 11 2250 1680" style={{width:"100%",padding:"10px",boxSizing:"border-box"}} />
+          </div>
+
+          {/* 📸 Foto del comercio / fachada */}
+          <div style={{ marginBottom: "16px" }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: "8px",
+                fontWeight: "bold",
+              }}
+            >
+              📷 Foto del comercio
+            </label>
+
+            {comercioSeleccionado.foto_url && (
+              <img
+                src={comercioSeleccionado.foto_url}
+                alt="Foto del comercio"
+                style={{
+                  width: "100%",
+                  maxHeight: "220px",
+                  objectFit: "cover",
+                  borderRadius: "10px",
+                  marginBottom: "10px",
+                  border: "1px solid #334155",
+                }}
+              />
+            )}
+
+            <label
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "13px",
+                boxSizing: "border-box",
+                backgroundColor: "#7c3aed",
+                color: "#fff",
+                borderRadius: "8px",
+                fontSize: "15px",
+                fontWeight: "bold",
+                textAlign: "center",
+                cursor: subiendoFoto ? "wait" : "pointer",
+                opacity: subiendoFoto ? 0.7 : 1,
+              }}
+            >
+              {subiendoFoto
+                ? "⏳ GUARDANDO FOTO..."
+                : comercioSeleccionado.foto_url
+                  ? "📸 CAMBIAR FOTO"
+                  : "📸 SACAR FOTO / ELEGIR FOTO"}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={subirFotoFachada}
+                disabled={subiendoFoto}
+                style={{ display: "none" }}
+              />
+            </label>
+          </div>
+
+          <div style={{ marginBottom: "16px" }}>
+            {!editandoUbicacion ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const lat = Number(
+                    comercioSeleccionado.ubicacion_exacta_latitud ||
+                    comercioSeleccionado.latitud
+                  );
+                  const lng = Number(
+                    comercioSeleccionado.ubicacion_exacta_longitud ||
+                    comercioSeleccionado.longitud
+                  );
+
+                  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                    alert("Este comercio no tiene una ubicación válida para corregir.");
+                    return;
+                  }
+
+                  setPosicionEdicionUbicacion([lat, lng]);
+                  setEditandoUbicacion(true);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "13px",
+                  backgroundColor: "#0ea5e9",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontSize: "15px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                }}
+              >
+                📍 CORREGIR UBICACIÓN EXACTA
+              </button>
+            ) : (
+              <div
+                style={{
+                  backgroundColor: "#111827",
+                  border: "1px solid #334155",
+                  borderRadius: "10px",
+                  padding: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: "700",
+                    marginBottom: "8px",
+                    color: "#e2e8f0",
+                  }}
+                >
+                  Arrastrá el marcador hasta la ubicación exacta o tocá el mapa.
+                </div>
+
+                <div
+                  style={{
+                    width: "100%",
+                    height: "320px",
+                    borderRadius: "10px",
+                    overflow: "hidden",
+                    marginBottom: "10px",
+                  }}
+                >
+                  <MapContainer
+                    center={posicionEdicionUbicacion}
+                    zoom={18}
+                    style={{ width: "100%", height: "100%" }}
+                  >
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <MarcadorArrastrable
+                      posicion={posicionEdicionUbicacion}
+                      setPosicion={setPosicionEdicionUbicacion}
+                    />
+                  </MapContainer>
+                </div>
+
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditandoUbicacion(false);
+                      setPosicionEdicionUbicacion(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "11px",
+                      backgroundColor: "#475569",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    CANCELAR
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!posicionEdicionUbicacion) return;
+
+                      setComercioSeleccionado({
+                        ...comercioSeleccionado,
+                        ubicacion_exacta_latitud: posicionEdicionUbicacion[0],
+                        ubicacion_exacta_longitud: posicionEdicionUbicacion[1],
+                      });
+                      setEditandoUbicacion(false);
+                      setPosicionEdicionUbicacion(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "11px",
+                      backgroundColor: "#16a34a",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ✓ USAR ESTA UBICACIÓN
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: "8px",
+                    fontSize: "11px",
+                    color: "#94a3b8",
+                  }}
+                >
+                  Después tocá “💾 Guardar Cambios” para dejarla guardada en RutaComercio.
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+  type="button"
+  onClick={() => {
+    const codigo = comercioSeleccionado.codigo_pais || "+54";
+    const telefono = comercioSeleccionado.whatsapp || comercioSeleccionado.telefono || "";
+
+    const numeroLimpio =
+      (codigo + telefono).replace(/\D/g, "");
+
+    if (!telefono.trim()) {
+      alert("Este comercio no tiene WhatsApp ni teléfono cargado.");
+      return;
+    }
+
+    window.open(
+      "https://wa.me/" + numeroLimpio,
+      "_blank"
+    );
+  }}
+  style={{
+    width: "100%",
+    padding: "13px",
+    marginBottom: "12px",
+    backgroundColor: "#16a34a",
+    color: "#fff",
+    border: "none",
+    borderRadius: "8px",
+    fontSize: "15px",
+    fontWeight: "bold",
+    cursor: "pointer",
+  }}
+>
+  💬 Abrir WhatsApp
+</button>
+          <button
+            type="button"
+            onClick={guardarEdicion}
+            disabled={guardandoEdicion}
+            style={{
+              width: "100%",
+              padding: "13px",
+              backgroundColor: "#16a34a",
+              color: "#fff",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            {guardandoEdicion ? "Guardando..." : "💾 Guardar Cambios"}
+          </button>
+          <button
+            type="button"
+            onClick={() => eliminarCapturaVirgen(comercioSeleccionado)}
+            style={{
+              width: "100%",
+              padding: "12px",
+              marginTop: "12px",
+              backgroundColor: "#7f1d1d",
+              color: "#fff",
+              border: "1px solid #ef4444",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            🗑️ ELIMINAR CAPTURA
+          </button>
+          <div
+            style={{
+              marginTop: "6px",
+              fontSize: "11px",
+              color: "#94a3b8",
+              textAlign: "center",
+            }}
+          >
+            Solo se elimina si todavía no tiene visitas ni pedidos.
+          </div>
+        </div>
+        )}
+      </div>
+    </div>
+  );
+}
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#0f172a", color: "#fff", fontFamily: "sans-serif" }}>
+        <header style={{ padding: "9px 14px", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #334155" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <img src="/logo.svg" alt="RutaComercio" style={{ width: "30px", height: "30px", objectFit: "contain" }} />
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: "800", color: "#ffffff", letterSpacing: "-0.3px" }}>RutaComercio</div>
+              <div style={{ fontSize: "10px", color: "#94a3b8", display: "flex", alignItems: "center", gap: "4px" }}>
+                <span>👤 {perfil?.nombre || "Preventista"}</span>
+                <span>·</span>
+                <span style={{ color: "#38bdf8", fontWeight: "600" }}>{perfil?.empresa || "DEMO S.A."}</span>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleCerrarSesion}
+            style={{ background: "#ef4444", color: "#ffffff", border: "none", padding: "5px 10px", borderRadius: "7px", fontSize: "11px", cursor: "pointer", fontWeight: "700" }}
+          >
+            ✕ Salir
+          </button>
+        </header>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"7px",margin:"9px 13px 0"}}>
+          <button type="button" onClick={abrirConsultaPrecios}
+            style={{minWidth:0,minHeight:"49px",padding:"7px 2px",background:"#0369a1",color:"#fff",border:0,borderRadius:"10px",fontSize:"12px",fontWeight:900,cursor:"pointer"}}>
+            🔎 PRECIOS
+          </button>
+          <button type="button" onClick={() => setServiciosAbiertos(v => !v)} aria-expanded={serviciosAbiertos}
+            style={{minWidth:0,minHeight:"49px",padding:"7px 2px",background:"#334155",color:"#fff",border:"1px solid #64748b",borderRadius:"10px",fontSize:"12px",fontWeight:900,cursor:"pointer"}}>
+            ☰ SERVICIOS {avisosSinLeer.length + mensajesSinLeer.length > 0 ? `(${avisosSinLeer.length + mensajesSinLeer.length})` : ""} {serviciosAbiertos ? "▲" : "▼"}
+          </button>
+        </div>
+        {serviciosAbiertos && (
+          <div style={{margin:"7px 13px 0",background:"#172033",border:"1px solid #475569",borderRadius:"10px",padding:"9px",display:"grid",gap:"7px"}}>
+            {/* ESTADÍSTICAS DIARIAS: visibles directamente al abrir SERVICIOS */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px", marginTop: "7px" }}>
+          <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Visitas</div>
+            <div style={{ fontSize: "19px", lineHeight: 1.05, fontWeight: "900", color: "#38bdf8", marginTop: "1px" }}>
+              {`${visitasRealizadasHoy} de ${visitasProgramadasHoy}`}
+            </div>
+          </div>
+
+          <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Venta Hoy</div>
+            <div style={{ fontSize: "19px", lineHeight: 1.05, fontWeight: "900", color: "#4ade80", marginTop: "1px" }}>
+              {ventaHoyTexto}
+            </div>
+          </div>
+
+          <div style={{ backgroundColor: "#1e293b", padding: "3px 3px", borderRadius: "8px", border: "1px solid #334155", textAlign: "center" }}>
+            <div style={{ fontSize: "8px", color: "#94a3b8", textTransform: "uppercase", fontWeight: "700", lineHeight: 1 }}>Efectividad</div>
+            <div style={{ fontSize: "20px", lineHeight: 1.05, fontWeight: "900", color: "#facc15", marginTop: "1px" }}>
+              {`${efectividadHoy}%`}
+            </div>
+          </div>
+        </div>
+
+            <button type="button" onClick={() => {setServiciosAbiertos(false);setModoManejo(true);}}
+              style={{textAlign:"left",background:"#f59e0b",color:"#111827",border:0,borderRadius:"8px",padding:"12px",fontWeight:900,cursor:"pointer"}}>🚗 MODO MANEJO</button>
+            <button type="button" onClick={() => {setRutaChatAbierto(v => !v);setAvisosAbiertos(false);}} aria-expanded={rutaChatAbierto}
+              style={{textAlign:"left",background:"#166534",color:"#fff",border:0,borderRadius:"8px",padding:"12px",fontWeight:900,cursor:"pointer"}}>💬 RUTACHAT {mensajesSinLeer.length > 0 ? `(${mensajesSinLeer.length})` : ""} {rutaChatAbierto ? "▲" : "▼"}</button>
+            {rutaChatAbierto && <div style={{background:"#0b141a",color:"#fff",padding:"8px",borderRadius:"9px",border:"1px solid #263744"}}>
+              <div style={{fontSize:"12px",fontWeight:800,color:"#a7f3d0",padding:"2px 4px 7px"}}>💬 RutaChat · Supervisor</div>
+              {mensajesOperativos.length === 0 && <div style={{padding:"10px",fontSize:"12px",color:"#cbd5e1"}}>Todavía no tenés mensajes.</div>}
+              <div style={{display:"flex",flexDirection:"column",gap:"5px",maxHeight:"280px",overflowY:"auto",padding:"3px 2px"}}>
+                {[...mensajesOperativos].reverse().map(m => (
+                  <div key={m.id} style={{alignSelf:m.remitente_id === miIdRutaChat ? "flex-end" : "flex-start",maxWidth:"88%",width:"fit-content",minWidth:"90px",background:m.remitente_id === miIdRutaChat ? "#005c4b" : "#202c33",borderRadius:m.remitente_id === miIdRutaChat ? "10px 3px 10px 10px" : "3px 10px 10px 10px",padding:"6px 8px 5px",boxShadow:"0 1px 2px #0004",overflowWrap:"anywhere"}}>
+                    <div style={{fontSize:"10px",fontWeight:800,color:"#86efac",marginBottom:"2px"}}>{m.remitente_id === miIdRutaChat ? "Vos" : "Supervisor"} {m.destinatario_id === miIdRutaChat && !m.leido_at ? "· Nuevo" : ""}</div>
+                    <div style={{fontSize:"12px",lineHeight:1.35,whiteSpace:"pre-wrap"}}>{m.contenido}</div>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"flex-end",gap:"7px",marginTop:"2px"}}>
+                      <span style={{fontSize:"9px",color:"#aebac1"}}>{new Date(m.creado_at).toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"})}</span>
+                      {m.remitente_id === miIdRutaChat && <span style={{fontSize:"10px",color:"#a7f3d0"}}>{m.leido_at ? "✓✓" : "✓"}</span>}
+                      {m.destinatario_id === miIdRutaChat && !m.leido_at && <button type="button" onClick={() => leerMensajeOperativo(m)} style={{fontSize:"10px",padding:"2px 6px",border:"1px solid #86efac",borderRadius:"5px",background:"transparent",color:"#86efac",fontWeight:700,cursor:"pointer"}}>✓ Leído</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <form onSubmit={e => {e.preventDefault();enviarRespuestaRutaChat();}} style={{display:"flex",gap:"5px",marginTop:"8px"}}>
+                <input aria-label="Responder en RutaChat" value={respuestaRutaChat} onChange={e => setRespuestaRutaChat(e.target.value)} placeholder={supervisorRutaChatId ? "Escribí tu respuesta…" : "Buscando Supervisor de Ventas..."} disabled={!supervisorRutaChatId || enviandoRespuestaRutaChat} maxLength={2000} style={{flex:1,minWidth:0,background:"#202c33",color:"white",border:"1px solid #334155",borderRadius:"18px",padding:"8px 10px",fontSize:"12px"}} />
+                <button type="submit" disabled={!supervisorRutaChatId || !respuestaRutaChat.trim() || enviandoRespuestaRutaChat} style={{border:0,borderRadius:"50%",background:"#16a34a",color:"white",width:"34px",height:"34px",cursor:"pointer",opacity:!supervisorRutaChatId || !respuestaRutaChat.trim() ? .5 : 1}} aria-label="Enviar respuesta">➤</button>
+              </form>
+            </div>}
+            <button type="button" onClick={() => {setAvisosAbiertos(v => !v);setRutaChatAbierto(false);}} aria-expanded={avisosAbiertos}
+              style={{textAlign:"left",background:"#78350f",color:"#fde68a",border:"1px solid #d97706",borderRadius:"8px",padding:"12px",fontWeight:900,cursor:"pointer"}}>🔔 AVISOS Y ANULACIONES {avisosSinLeer.length > 0 ? `(${avisosSinLeer.length})` : ""} {avisosAbiertos ? "▲" : "▼"}</button>
+            {avisosAbiertos && <div style={{background:"#451a03",border:"1px solid #f59e0b",borderRadius:"8px",padding:"10px",color:"#fff"}}>
+              {avisosAnulacion.length === 0 && <div style={{fontSize:"12px"}}>No tenés avisos por ahora.</div>}
+              {avisosAnulacion.map(a => <div key={a.clave} style={{borderTop:"1px solid #92400e",padding:"10px 2px",fontSize:"12px"}}>
+                <div style={{fontWeight:900,color:"#fca5a5"}}>🚫 NVI #{String(a.numero_pedido || "").padStart(6,"0")} ANULADA {avisosLeidos.includes(a.clave) ? "" : "· NUEVA"}</div>
+                <div>{a.comercio_nombre || "Comercio"} · ${Number(a.total || 0).toLocaleString("es-AR")}</div>
+                <div>Motivo: {a.entrega?.motivo_solicitud_anulacion || "No informado"}</div>
+                <div style={{color:"#cbd5e1"}}>Autorizada por Supervisor{a.entrega?.decision_anulacion_at ? ` · ${new Date(a.entrega.decision_anulacion_at).toLocaleString("es-AR")}` : ""}</div>
+                <div style={{color:"#fcd34d"}}>No integra las ventas efectivas.</div>
+              </div>)}
+              {avisosSinLeer.length > 0 && <button type="button" onClick={marcarAvisosLeidos}
+                style={{background:"#f59e0b",border:0,borderRadius:"7px",padding:"9px 12px",fontWeight:800,cursor:"pointer"}}>✓ MARCAR COMO LEÍDAS</button>}
+            </div>}
+          </div>
+        )}
+        {/* BUSCADOR */}
+        <div style={{ marginTop: "7px", position: "relative" }}>
+          <input
+            type="text"
+            placeholder="🔍 Buscar comercio por nombre o ID..."
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            style={{ width: "100%", padding: "7px 14px", backgroundColor: "#0b1329", border: "1px solid #334155", borderRadius: "8px", color: "#fff", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
+          />
+        </div>
+        <div
+  style={{
+    display: "flex",
+    gap: "8px",
+    margin: "10px 16px 0",
+  }}
+>
+  <button
+    type="button"
+    onClick={() => setVistaComercios("HOY")}
+    style={{
+      flex: 1,
+      padding: "12px",
+      border: "none",
+      borderRadius: "8px",
+      backgroundColor: vistaComercios === "HOY" ? "#2563eb" : "#334155",
+      color: "#fff",
+      fontSize: "15px",
+      fontWeight: "800",
+      cursor: "pointer",
+    }}
+  >
+    HOY
+  </button>
+
+  <button
+    type="button"
+    onClick={() => setVistaComercios("TODOS")}
+    style={{
+      flex: 1,
+      padding: "12px",
+      border: "none",
+      borderRadius: "8px",
+      backgroundColor: vistaComercios === "TODOS" ? "#2563eb" : "#334155",
+      color: "#fff",
+      fontSize: "15px",
+      fontWeight: "800",
+      cursor: "pointer",
+    }}
+  >
+    TODOS
+  </button>
+</div>
+      {/* PRÓXIMO DESTINO SEGÚN RUTA SUGERIDA */}
+      {vistaComercios === "HOY" && (
+        <div style={{ padding: "7px 16px 0" }}>
+          <div
+            style={{
+              background: proximoDestino ? "#172554" : "#14532d",
+              border: proximoDestino ? "1px solid #2563eb" : "1px solid #22c55e",
+              borderRadius: "10px",
+              padding: "6px 8px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+            }}
+          >
+            {proximoDestino ? (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                    marginBottom: "3px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      color: "#93c5fd",
+                      letterSpacing: "0.4px",
+                      minWidth: 0,
+                    }}
+                  >
+                    🎯 PRÓXIMO · {indiceProximoDestino + 1}/{rutaSugeridaHoy.length}
+                  </div>
+                  <div style={{ fontSize: "12px", fontWeight: "900", color: "#f8fafc", flexShrink: 0 }}>
+                    {distanciaProximoDestino === null
+                      ? "—"
+                      : distanciaProximoDestino < 1000
+                        ? `🚗 ${distanciaProximoDestino} m`
+                        : `🚗 ${(distanciaProximoDestino / 1000).toFixed(1)} km`}
+                  </div>
+                </div>
+
+                {/* En móvil, los datos del cliente ocupan todo el ancho.
+                    Así los botones nunca tapan el nombre ni la dirección. */}
+                <div style={{ minWidth: 0, marginBottom: "4px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      minWidth: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: "900",
+                        color: "#fff",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        minWidth: 0,
+                        flex: 1,
+                      }}
+                    >
+                      {proximoDestino.nombre || `Comercio #${proximoDestino.id}`}
+                    </div>
+
+                    <span
+                      title={Number(proximoDestino.deuda || 0) > 0 ? "Cliente con saldo pendiente" : "Cliente sin saldo pendiente"}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        flexShrink: 0,
+                        padding: "3px 6px",
+                        backgroundColor: Number(proximoDestino.deuda || 0) > 0 ? "#991b1b" : "#1e40af",
+                        color: "#fff",
+                        border: Number(proximoDestino.deuda || 0) > 0 ? "1px solid #ef4444" : "1px solid #60a5fa",
+                        borderRadius: "999px",
+                        fontSize: "9px",
+                        lineHeight: 1.1,
+                        fontWeight: "900",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {Number(proximoDestino.deuda || 0) > 0 ? "🔴 DEBE" : "🔵 SIN DEUDA"}
+                    </span>
+                  </div>
+
+                </div>
+
+                {/* Acciones compactas: tres columnas iguales para iPhone chico */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                    gap: "5px",
+                    width: "100%",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ultimaVisita = (visitasMapa || []).find(
+                        (v) => String(v.comercio_id) === String(proximoDestino.id)
+                      );
+                      setObservacionVisita(ultimaVisita?.observacion || "");
+                      setResultadoVisita(ultimaVisita?.resultado || "Visitado");
+                      setComercioSeleccionado(proximoDestino);
+                    }}
+                    style={{
+                      minWidth: 0,
+                      padding: "5px 4px",
+                      backgroundColor: "#334155",
+                      color: "#fff",
+                      border: "1px solid #64748b",
+                      borderRadius: "7px",
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ABRIR
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDestinoMapa(proximoDestino)}
+                    style={{
+                      minWidth: 0,
+                      padding: "5px 4px",
+                      backgroundColor: "#2563eb",
+                      color: "#fff",
+                      border: "1px solid #60a5fa",
+                      borderRadius: "7px",
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    🗺️ MAPA
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLlegueDestino(proximoDestino)}
+                    style={{
+                      minWidth: 0,
+                      padding: "5px 4px",
+                      backgroundColor: "#166534",
+                      color: "#fff",
+                      border: "1px solid #4ade80",
+                      borderRadius: "7px",
+                      fontSize: "10px",
+                      fontWeight: "900",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ✓ LLEGUÉ
+                  </button>
+                </div>
+              </>
+            ) : rutaSugeridaHoy.length > 0 ? (
+              <div style={{ fontSize: "13px", fontWeight: "900", color: "#fff" }}>
+                ✓ Ruta del día completada
+              </div>
+            ) : (
+              <div style={{ fontSize: "13px", fontWeight: "800", color: "#fff" }}>
+                Sin ruta sugerida para hoy
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* LISTADO DE COMERCIOS */}
+      <main style={{ flex: 1, overflowY: "auto", padding: "12px 16px 80px" }}>
+        
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+          <span style={{ fontSize: "12px", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+            {vistaComercios === "HOY"
+  ? `COMERCIOS DE HOY · ${obtenerDiaActual().toUpperCase()} (${listaFiltrada.length})`
+  : `TODOS LOS COMERCIOS (${listaFiltrada.length})`}
+          </span>
+          {vistaComercios === "HOY" && (
+            <div style={{ display: "flex", gap: "5px", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setOrdenComerciosHoy("CERCANIA")}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: "7px",
+                  border: ordenComerciosHoy === "CERCANIA" ? "1px solid #38bdf8" : "1px solid #475569",
+                  background: ordenComerciosHoy === "CERCANIA" ? "#0369a1" : "#1e293b",
+                  color: "#fff",
+                  fontSize: "10px",
+                  fontWeight: "900",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                📍 CERCANÍA
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrdenComerciosHoy("RUTA")}
+                style={{
+                  padding: "6px 8px",
+                  borderRadius: "7px",
+                  border: ordenComerciosHoy === "RUTA" ? "1px solid #fbbf24" : "1px solid #475569",
+                  background: ordenComerciosHoy === "RUTA" ? "#b45309" : "#1e293b",
+                  color: "#fff",
+                  fontSize: "10px",
+                  fontWeight: "900",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                🗺️ RUTA
+              </button>
+            </div>
+          )}
+        </div>
+
+        {cargando ? (
+          <div style={{ textAlign: "center", padding: "40px 0", color: "#94a3b8" }}>Cargando comercios...</div>
+        ) : listaFiltrada.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px 0", color: "#94a3b8", fontSize: "14px" }}>No se encontraron comercios</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {(() => {
+              const visitadoHoy = (c) =>
+                (visitasMapa || []).some(
+                  (v) =>
+                    String(v.comercio_id) === String(c.id) &&
+                    v?.fecha &&
+                    new Date(v.fecha) >= inicioHoyMetricas
+                );
+
+              const pendientes = listaFiltrada.filter((c) => !visitadoHoy(c));
+              const visitados = listaFiltrada.filter((c) => visitadoHoy(c));
+
+              const renderComercio = (c) => {
+              const visitaDeHoy = (visitasMapa || []).find(
+                (v) =>
+                  String(v.comercio_id) === String(c.id) &&
+                  v?.fecha &&
+                  new Date(v.fecha) >= inicioHoyMetricas
+              );
+              const yaVisitadoHoy = Boolean(visitaDeHoy);
+              const resultadoHoy = String(visitaDeHoy?.resultado || "Visitado").toUpperCase();
+
+              return (
+                <div
+                  key={c.id}
+                  onClick={() => {
+                    const ultimaVisita = (visitasMapa || []).find(
+                      (v) => String(v.comercio_id) === String(c.id)
+                    );
+                    setObservacionVisita(ultimaVisita?.observacion || '');
+                    setResultadoVisita(ultimaVisita?.resultado || 'Visitado');
+                    setComercioSeleccionado(c);
+                  }}
+                  style={{
+                    backgroundColor: yaVisitadoHoy ? "#172033" : "#1e293b",
+                    padding: "7px 10px",
+                    borderRadius: "9px",
+                    border: yaVisitadoHoy ? "1px solid #475569" : "1px solid #334155",
+                    display: "flex",
+                    alignItems: "center",
+                    cursor: "pointer",
+                    transition: "transform 0.1s",
+                    opacity: yaVisitadoHoy ? 0.72 : 1,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
+                    {c.foto_url ? (
+                      <img src={c.foto_url} alt="Local" style={{ width: "36px", height: "36px", borderRadius: "7px", objectFit: "cover", border: "1px solid #475569", flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: "36px", height: "36px", borderRadius: "7px", backgroundColor: "#0b1329", border: "1px solid #334155", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
+                        🏪
+                      </div>
+                    )}
+
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                        <div style={{ fontWeight: "800", fontSize: "14px", color: "#f8fafc", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: 1 }}>
+                          {c.nombre || "Comercio #" + c.id}
+                        </div>
+
+                        {c.distancia_actual !== null && (
+                          <div style={{ fontSize: "12px", color: yaVisitadoHoy ? "#94a3b8" : "#60a5fa", fontWeight: "900", whiteSpace: "nowrap", flexShrink: 0 }}>
+                            📍 {c.distancia_actual < 1000
+                              ? `${c.distancia_actual} m`
+                              : `${(c.distancia_actual / 1000).toFixed(1)} km`}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "2px", minWidth: 0 }}>
+                        <div style={{ fontSize: "11px", color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: 1 }}>
+                          📍 {c.direccion || "Sin dirección"}
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: "900",
+                            color: Number(c.deuda || 0) > 0 ? "#fca5a5" : "#93c5fd",
+                            whiteSpace: "nowrap",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {Number(c.deuda || 0) > 0
+                            ? `🔴 DEBE $${Number(c.deuda || 0).toLocaleString("es-AR")}`
+                            : "🔵 SIN DEUDA"}
+                        </div>
+                      </div>
+
+                      {yaVisitadoHoy && (
+                        <div
+                          style={{
+                            display: "inline-block",
+                            marginTop: "3px",
+                            padding: "2px 5px",
+                            borderRadius: "999px",
+                            backgroundColor: "#334155",
+                            color: "#e2e8f0",
+                            fontSize: "9px",
+                            fontWeight: "900",
+                            letterSpacing: "0.2px",
+                          }}
+                        >
+                          ✓ {resultadoHoy}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: "17px", color: "#64748b", paddingLeft: "6px", flexShrink: 0 }}>›</span>
+                </div>
+              );
+
+              };
+
+              return (
+                <>
+                  {pendientes.map(renderComercio)}
+
+                  {visitados.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: pendientes.length > 0 ? "8px" : "0",
+                        padding: "9px 4px 3px",
+                        borderTop: "1px solid #334155",
+                        fontSize: "11px",
+                        fontWeight: "900",
+                        color: "#94a3b8",
+                        letterSpacing: "0.5px",
+                      }}
+                    >
+                      ✓ VISITADOS HOY ({visitados.length})
+                    </div>
+                  )}
+
+                  {visitados.map(renderComercio)}
+                </>
+              );
+            })()}
+          </div>
+        )}
+      </main>
+
+      {/* BOTÓN FLOTANTE REGISTRAR COMERCIO - compacto fuera de Modo Manejo */}
+      <button
+        type="button"
+        onClick={agregarComercioInmediato}
+        title="Registrar comercio"
+        aria-label="Registrar comercio"
+        style={{
+          position: "fixed",
+          right: "18px",
+          bottom: "18px",
+          width: "56px",
+          height: "56px",
+          padding: 0,
+          backgroundColor: "#2563eb",
+          color: "#ffffff",
+          border: "2px solid #60a5fa",
+          borderRadius: "50%",
+          fontSize: "30px",
+          lineHeight: 1,
+          fontWeight: "700",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 8px 24px rgba(37, 99, 235, 0.5)",
+          touchAction: "manipulation",
+          zIndex: 1000,
+        }}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
