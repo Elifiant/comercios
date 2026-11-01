@@ -17,9 +17,9 @@ function AjustarMapa({ puntos }) {
   return null;
 }
 
-const iconoNumero = (numero) => L.divIcon({
+const iconoNumero = (numero, color = "#2563eb") => L.divIcon({
   className: "",
-  html: `<div style="width:32px;height:32px;border-radius:50%;background:#2563eb;color:white;border:3px solid white;box-shadow:0 2px 7px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font:900 14px Arial">${numero}</div>`,
+  html: `<div style="width:32px;height:32px;border-radius:50%;background:${color};color:white;border:3px solid white;box-shadow:0 2px 7px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font:900 14px Arial">${numero}</div>`,
   iconSize: [32,32],
   iconAnchor: [16,16],
   popupAnchor: [0,-16],
@@ -111,6 +111,93 @@ function useRutaChatAviso(empresaId, usuarioId) {
   }, [empresaId, usuarioId]);
 }
 
+// Recepción física de entregas transferidas. El servidor confirma todo el lote o nada.
+function RecepcionTransferencias({ empresaId, usuarioId, pendientesOffline, actualizarEntregas }) {
+  const [filas, setFilas] = useState([]);
+  const [selecciones, setSelecciones] = useState({});
+  const [notas, setNotas] = useState({});
+  const [abierto, setAbierto] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState("");
+  const [aviso, setAviso] = useState("");
+  const cargarTransferencias = async () => {
+    if (!empresaId || !usuarioId) return;
+    const { data, error: fallo } = await supabase.rpc("repartos_mis_transferencias_pendientes");
+    if (fallo) { setError(fallo.message); return; }
+    setFilas(data || []);
+    setError("");
+  };
+  useEffect(() => {
+    if (!empresaId || !usuarioId) return;
+    cargarTransferencias();
+    const intervalo = window.setInterval(cargarTransferencias, 30000);
+    return () => window.clearInterval(intervalo);
+  }, [empresaId, usuarioId]);
+  const grupos = Object.values(filas.reduce((acc, t) => {
+    const clave = String(t.lote_id);
+    (acc[clave] ||= []).push(t);
+    return acc;
+  }, {}));
+  const confirmarLote = async (grupo) => {
+    if (ocupado || pendientesOffline || !navigator.onLine) {
+      setError("Necesitás conexión y ninguna entrega pendiente de sincronización."); return;
+    }
+    if (grupo.some(t => !["recibida", "faltante"].includes(selecciones[t.transferencia_id]))) {
+      setError("Marcá RECIBIDA o FALTANTE para cada entrega del lote."); return;
+    }
+    const recibidas = grupo.filter(t => selecciones[t.transferencia_id] === "recibida").map(t => t.transferencia_id);
+    const faltantes = grupo.filter(t => selecciones[t.transferencia_id] === "faltante").map(t => t.transferencia_id);
+    if (faltantes.length && !faltantes.every(id => (notas[id] || "").trim().length >= 3)) {
+      setError("Explicá cada faltante con al menos 3 caracteres."); return;
+    }
+    if (!window.confirm(`¿Confirmar ${recibidas.length} recibidas y ${faltantes.length} faltantes? Verificá los paquetes físicamente.`)) return;
+    setOcupado(true); setError(""); setAviso("");
+    try {
+      const detalleFaltantes = faltantes.map(id => `${id}: ${(notas[id] || "").trim()}`).join(" | ");
+      const { data, error: fallo } = await supabase.rpc("repartos_confirmar_lote_transferencia", {
+        p_lote_id: grupo[0].lote_id,
+        p_recibidas: recibidas,
+        p_faltantes: faltantes,
+        p_observaciones: detalleFaltantes || null,
+      });
+      if (fallo) throw fallo;
+      if (!["confirmado", "ya_confirmado"].includes(data)) {
+        throw new Error(`Respuesta inesperada al confirmar: ${String(data)}`);
+      }
+      setAviso("Recepción confirmada por Supabase. Se actualizó el reparto.");
+      await cargarTransferencias();
+      await actualizarEntregas();
+    } catch (e) { setError(e?.message || "No se confirmó la recepción."); }
+    finally { setOcupado(false); }
+  };
+  if (!filas.length && !error && !aviso) return null;
+  return <section style={{background:"#fff",border:"2px solid #7c3aed",borderRadius:10,padding:12,marginBottom:12}}>
+    <button type="button" onClick={() => setAbierto(v => !v)} style={{width:"100%",padding:12,background:"#6d28d9",color:"white",border:0,borderRadius:8,fontWeight:900}}>
+      📦 TRANSFERENCIAS PARA RECIBIR ({filas.length}) {abierto ? "▲" : "▼"}
+    </button>
+    {aviso && <p style={{color:"#166534"}}>{aviso}</p>}
+    {error && <p style={{color:"#b91c1c"}}>⚠️ {error}</p>}
+    {abierto && <div>
+      <p>Verificá cada paquete físicamente. Ninguna entrega se incorpora a tu recorrido antes de confirmar.</p>
+      <button type="button" onClick={cargarTransferencias} disabled={ocupado}>🔄 Actualizar</button>
+      {grupos.map((grupo, i) => <div key={grupo[0].lote_id} style={{marginTop:12,padding:10,background:"#f5f3ff",borderRadius:8}}>
+        <strong>Lote {i + 1} · {grupo.length} entrega/s</strong>
+        {grupo.map(t => <div key={t.transferencia_id} style={{padding:10,marginTop:8,background:"white",borderRadius:8}}>
+          <strong>{t.destinatario || "Entrega"}</strong>
+          <div>📍 {[t.direccion,t.localidad,t.partido,t.provincia].filter(Boolean).join(", ")}</div>
+          <div>📦 {t.bultos ?? "Sin detalle de bultos"}</div>
+          <label style={{display:"block",marginTop:8}}><input type="radio" name={`transferencia-${t.transferencia_id}`} checked={selecciones[t.transferencia_id] === "recibida"} onChange={() => setSelecciones(v => ({...v,[t.transferencia_id]:"recibida"}))}/> RECIBIDA FÍSICAMENTE</label>
+          <label style={{display:"block",marginTop:6}}><input type="radio" name={`transferencia-${t.transferencia_id}`} checked={selecciones[t.transferencia_id] === "faltante"} onChange={() => setSelecciones(v => ({...v,[t.transferencia_id]:"faltante"}))}/> FALTANTE</label>
+          {selecciones[t.transferencia_id] === "faltante" && <textarea value={notas[t.transferencia_id] || ""} onChange={e => setNotas(v => ({...v,[t.transferencia_id]:e.target.value}))} placeholder="Qué mercadería falta" style={{width:"100%",boxSizing:"border-box",padding:8}}/>}
+        </div>)}
+        <button type="button" disabled={ocupado || pendientesOffline || !navigator.onLine} onClick={() => confirmarLote(grupo)} style={{width:"100%",marginTop:10,padding:13,border:0,borderRadius:8,background:"#166534",color:"white",fontWeight:900,opacity:ocupado || pendientesOffline ? .5 : 1}}>
+          {ocupado ? "CONFIRMANDO..." : "CONFIRMAR RECEPCIÓN DEL LOTE"}
+        </button>
+      </div>)}
+    </div>}
+  </section>;
+}
+
 export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onVolver }) {
   const [perfil, setPerfil] = useState(perfilProp || null);
   // Cola local de resoluciones. Nunca se borra hasta confirmación de Supabase.
@@ -148,7 +235,36 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
           p_motivo: op.motivo || null,
           p_fecha_cliente: op.fecha,
         });
-        if (err) throw err;
+        if (err) {
+          // Solo investigar una transferencia si Supabase informa que la entrega
+          // dejó de pertenecer a este repartidor. Otros errores conservan la cola.
+          const mensaje = err.message || "";
+          const posibleTransferencia =
+            mensaje.includes("Entrega inexistente o no asignada al repartidor") ||
+            mensaje.includes("La entrega cambió de asignación");
+          if (!posibleTransferencia) throw err;
+
+          const { data: resultadoConflicto, error: errorConflicto } =
+            await supabase.rpc("repartos_registrar_conflicto_transferencia", {
+              p_operacion_id: op.operacionId,
+              p_entrega_id: op.entregaId,
+              p_estado: op.estado,
+              p_motivo: op.motivo || null,
+              p_fecha_cliente: op.fecha,
+            });
+          if (errorConflicto) throw errorConflicto;
+          if (
+            resultadoConflicto !== "conflicto_registrado" &&
+            resultadoConflicto !== "conflicto_ya_registrado"
+          ) {
+            throw new Error("Supabase no confirmó el registro del conflicto.");
+          }
+
+          // Confirmado en servidor: se retira de pendientes de envío, pero
+          // permanece en la tabla de conflictos para revisión del supervisor.
+          guardarColaOffline(colaRef.current.slice(1));
+          continue;
+        }
         if (data !== "registrado" && data !== "ya_registrado")
           throw new Error("Supabase no confirmó la operación.");
         guardarColaOffline(colaRef.current.slice(1));
@@ -538,7 +654,13 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   }, [entregas, resumenSalida, cargando, error]);
 
   useEffect(() => {
-    const idsRecibidas = entregas.filter(e => ["asignado", "recibido", "en_reparto", "reintentar"].includes(e.estado)).map(e => e.id);
+    // Conservar la numeración de las paradas completadas del reparto actual.
+    const ordenActiva = entregas.find(e => e.reparto_orden_id && e.ordenReparto?.estado === "en_reparto")?.reparto_orden_id;
+    const idsRecibidas = entregas.filter(e =>
+      ["asignado", "recibido", "en_reparto", "reintentar"].includes(e.estado) ||
+      (ordenActiva && e.reparto_orden_id === ordenActiva &&
+        ["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado))
+    ).map(e => e.id);
     if (!idsRecibidas.length) {
       setOrdenRuta([]);
       return;
@@ -708,6 +830,35 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     }
     return abiertas[0]?.reparto_orden_id || null;
   })();
+  // El mapa completo usa la ruta compartida, no solo la lista local de pendientes.
+  // No modifica el orden de trabajo ni los estados de ninguna entrega.
+  const [ordenMapaServidor, setOrdenMapaServidor] = useState([]);
+  useEffect(() => {
+    const empresaId = perfil?.empresa_id;
+    const repartidorId = sesionProp?.user?.id || perfil?.id;
+    if (!ordenActualId || !empresaId || !repartidorId) {
+      setOrdenMapaServidor([]);
+      return;
+    }
+    let vigente = true;
+    const recuperar = async () => {
+      const { data, error: errorRuta } = await supabase
+        .from("repartos_rutas_planificadas")
+        .select("entrega_ids")
+        .eq("empresa_id", empresaId)
+        .eq("repartidor_id", repartidorId)
+        .maybeSingle();
+      if (!vigente) return;
+      if (errorRuta) {
+        console.warn("No se pudo recuperar el recorrido completo:", errorRuta);
+        return;
+      }
+      setOrdenMapaServidor(Array.isArray(data?.entrega_ids) ? data.entrega_ids : []);
+    };
+    recuperar();
+    return () => { vigente = false; };
+  }, [ordenActualId, perfil?.empresa_id, perfil?.id, sesionProp?.user?.id]);
+
   const esEntregaActual = e => ordenActualId
     ? e.reparto_orden_id === ordenActualId &&
       !["finalizado", "suspendido"].includes(e.ordenReparto?.estado)
@@ -734,11 +885,27 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     return Number.isNaN(fecha.getTime()) ? "Fecha no registrada" : fecha.toLocaleDateString("es-AR", {day:"2-digit",month:"2-digit",year:"numeric"});
   };
 
-  const mapaDuranteRuta = [...pendientesOrdenadas, ...otrasPendientes]
-    .map((e, idx) => ({ ...e, numeroParada: idx + 1 }))
+  // Marcadores de TODAS las paradas del reparto, incluidos los rechazos y las entregadas.
+  // La línea, en cambio, une únicamente los destinos que quedan por visitar.
+  const entregasDelRecorrido = entregas.filter(e => esEntregaActual(e) &&
+    ["asignado", "recibido", "en_reparto", "reintentar", "entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(e.estado));
+  const porIdRecorrido = new Map(entregasDelRecorrido.map(e => [String(e.id), e]));
+  const idsMapa = [...new Set([
+    ...ordenMapaServidor.map(String),
+    ...ordenRuta.map(String),
+    ...entregasDelRecorrido.map(e => String(e.id)),
+  ])].filter(id => porIdRecorrido.has(id));
+  // Numeración estable incluso si una parada carece de coordenadas.
+  const mapaDuranteRuta = idsMapa
+    .map((id, idx) => ({ ...porIdRecorrido.get(id), numeroParada: idx + 1 }))
     .filter(e => Number.isFinite(e.latitud) && Number.isFinite(e.longitud));
 
-  const puntosDuranteRuta = mapaDuranteRuta.map(e => [e.latitud, e.longitud]);
+  const puntosDuranteRuta = mapaDuranteRuta
+    .filter(e => ["en_reparto", "reintentar"].includes(e.estado))
+    .map(e => [e.latitud, e.longitud]);
+  const colorParada = estado => estado === "entregado" ? "#16a34a" :
+    ["no_entregado", "devolucion_informada", "vuelto_deposito"].includes(estado) ? "#dc2626" :
+    estado === "reintentar" ? "#f59e0b" : "#2563eb";
 
   useEffect(() => {
     if (!jornadaActiva || !navigator.geolocation) return;
@@ -989,7 +1156,22 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
   };
 
   const informarDevolucion = async (entrega) => {
+    if (!entrega?.reparto_orden_id || !["finalizado", "suspendido"].includes(entrega.ordenReparto?.estado)) {
+      alert("La devolución al depósito se informa después de finalizar o suspender el reparto.");
+      return;
+    }
     if (colaRef.current.length) { alert("Primero sincronizá las entregas pendientes antes de continuar con esta acción."); return; }
+    // Volver a comprobar el estado real antes de modificar la entrega.
+    const { data: ordenActual, error: errorOrdenActual } = await supabase
+      .from("repartos_ordenes")
+      .select("estado")
+      .eq("id", entrega.reparto_orden_id)
+      .eq("empresa_id", perfil.empresa_id)
+      .maybeSingle();
+    if (errorOrdenActual || !["finalizado", "suspendido"].includes(ordenActual?.estado)) {
+      alert("El reparto todavía no está finalizado o suspendido. Actualizá la pantalla.");
+      return;
+    }
     const ok = window.confirm(
       `¿Confirmar que devolvés al depósito la mercadería NO ENTREGADA?\n\n${tituloEntrega(entrega)} · ${entrega.cliente}\n${entrega.bultos ?? 0} bulto/s\n\nDepósito deberá confirmar luego la recepción física.`
     );
@@ -1073,31 +1255,23 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
     window.location.replace("/");
   };
 
-  // Si la página se recargó en medio de una salida, recuperar las cifras
-  // de las entregas que siguen teniendo salida_at (sin cambiar estados).
-  const entregasConSalida = entregas.filter(e => e.salida_at);
-  const salidasEnCurso = entregasConSalida.filter(e =>
-    ["en_reparto", "reintentar"].includes(e.estado));
-  const inicioSalidaActual = salidasEnCurso.length
-    ? salidasEnCurso.map(e => new Date(e.salida_at).getTime()).filter(Number.isFinite).sort((a,b)=>b-a)[0]
-    : null;
-  const idsSalidaActiva = jornadaActiva && resumenSalida?.idsSalida?.length
-    ? resumenSalida.idsSalida
-    : inicioSalidaActual == null ? [] : entregasConSalida
-      .filter(e => new Date(e.salida_at).getTime() === inicioSalidaActual)
-      .map(e => e.id);
-  const entregadasEstaSalida = entregas.filter(
-    e => idsSalidaActiva.includes(e.id) && e.estado === "entregado"
-  ).length;
-  const totalSalidaMostrado = jornadaActiva
-    ? (resumenSalida?.recibidasTotal ?? idsSalidaActiva.length)
-    : 0;
+  // Contadores del reparto ACTUAL, leídos de las entregas vigentes en Supabase.
+  // No usar el resumen guardado al salir: queda desactualizado cuando el
+  // repartidor recibe paquetes adicionales mientras ya está en la calle.
+  const entregasDelRepartoActual = ordenActualId
+    ? entregas.filter(e => e.reparto_orden_id === ordenActualId &&
+        !["finalizado", "suspendido"].includes(e.ordenReparto?.estado))
+    : [];
+  const estadosRecibidos = new Set([
+    "recibido", "en_reparto", "reintentar", "entregado", "no_entregado",
+    "devolucion_informada", "vuelto_deposito"
+  ]);
+  const entregadasEstaSalida = entregasDelRepartoActual.filter(e => e.estado === "entregado").length;
+  const totalSalidaMostrado = entregasDelRepartoActual.filter(e => estadosRecibidos.has(e.estado)).length;
   const asignadasMostradas = jornadaActiva
-    ? (resumenSalida?.asignadasTotal ?? idsSalidaActiva.length + asignadas.length)
+    ? entregasDelRepartoActual.filter(e => e.estado === "asignado" || estadosRecibidos.has(e.estado)).length
     : asignadas.length + recibidas.length;
-  const recibidasMostradas = jornadaActiva
-    ? totalSalidaMostrado
-    : recibidas.length;
+  const recibidasMostradas = jornadaActiva ? totalSalidaMostrado : recibidas.length;
 
   const tituloEntrega = e => e.pedido_id ? `NVI #${e.numeroVisible}` : "Entrega";
 
@@ -1341,9 +1515,15 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
               <div style={{fontSize:"15px",color:"#334155",textAlign:"center",marginBottom:10}}>
                 La visita ya quedó resuelta. El recorrido puede finalizar automáticamente; la devolución se registra por separado cuando regreses al depósito.
               </div>
-              <button onClick={()=>informarDevolucion(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"16px"}}>
-                📦 INFORMAR MERCADERÍA DEVUELTA AL DEPÓSITO
-              </button>
+              {["finalizado", "suspendido"].includes(activa.ordenReparto?.estado) ? (
+                <button onClick={()=>informarDevolucion(activa)} style={{...boton,width:"100%",background:"#0f766e",color:"#fff",fontSize:"16px"}}>
+                  📦 INFORMAR MERCADERÍA DEVUELTA AL DEPÓSITO
+                </button>
+              ) : (
+                <div style={{padding:10,background:"#f1f5f9",borderRadius:8,textAlign:"center",color:"#334155",fontWeight:700}}>
+                  La devolución se habilitará al finalizar o suspender el reparto.
+                </div>
+              )}
               <button type="button" onClick={() => setActiva(null)} style={{...boton,width:"100%",marginTop:"10px",background:"#1d4ed8",color:"#fff",fontSize:"15px"}}>
                 🏠 VOLVER A MIS ENTREGAS
               </button>
@@ -1414,14 +1594,20 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
       </header>
 
       <main style={{maxWidth:"760px",margin:"0 auto",padding:"9px"}}>
-        {!cargando && !error && devolucionesPorInformar.length > 0 && (
+        <RecepcionTransferencias
+          empresaId={perfil?.empresa_id}
+          usuarioId={sesionProp?.user?.id || perfil?.id}
+          pendientesOffline={colaOffline.length > 0}
+          actualizarEntregas={cargar}
+        />
+        {!cargando && !error && devolucionesPorInformar.some(e => ["finalizado", "suspendido"].includes(e.ordenReparto?.estado)) && (
           <section role="status" style={{background:"#fff7ed",border:"3px solid #ea580c",borderRadius:12,padding:13,marginBottom:12,color:"#7c2d12"}}>
             <div style={{fontSize:18,fontWeight:950}}>⚠️ MERCADERÍA PENDIENTE DE DEVOLUCIÓN</div>
             <div style={{fontSize:15,marginTop:5,marginBottom:10,fontWeight:700}}>
-              Tenés {devolucionesPorInformar.length} entrega{devolucionesPorInformar.length === 1 ? "" : "s"} sin informar al depósito, incluso de repartos finalizados.
+              Tenés {devolucionesPorInformar.filter(e => ["finalizado", "suspendido"].includes(e.ordenReparto?.estado)).length} entrega/s pendientes de informar al depósito de repartos finalizados o suspendidos.
             </div>
             <div style={{display:"grid",gap:8}}>
-              {devolucionesPorInformar.map(e => (
+              {devolucionesPorInformar.filter(e => ["finalizado", "suspendido"].includes(e.ordenReparto?.estado)).map(e => (
                 <button key={e.id} type="button" onClick={() => setActiva(e)}
                   style={{...boton,width:"100%",textAlign:"left",background:"#fff",border:"2px solid #fb923c",color:"#7c2d12",fontSize:16,padding:12}}>
                   📦 {e.cliente || "Entrega no realizada"} · {e.ordenReparto?.numero || "Reparto anterior"}
@@ -1737,7 +1923,7 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
 
         {!cargando && !error && jornadaActiva && mapaDuranteRuta.length > 0 && (
           <div style={{background:"#fff",border:"1px solid #cbd5e1",borderRadius:"11px",padding:"12px",marginBottom:"12px"}}>
-            <div style={{fontSize:"16px",fontWeight:"950",marginBottom:"8px"}}>📍 RUTA PENDIENTE</div>
+            <div style={{fontSize:"16px",fontWeight:"950",marginBottom:"8px"}}>📍 RECORRIDO COMPLETO</div>
             <div style={{height:"320px",borderRadius:"10px",overflow:"hidden",border:"1px solid #cbd5e1"}}>
               <MapContainer
                 center={[mapaDuranteRuta[0].latitud, mapaDuranteRuta[0].longitud]}
@@ -1757,11 +1943,12 @@ export default function Repartidor({ sesion: sesionProp, perfil: perfilProp, onV
                   <Marker
                     key={e.id}
                     position={[e.latitud,e.longitud]}
-                    icon={iconoNumero(e.numeroParada)}
+                    icon={iconoNumero(e.numeroParada, colorParada(e.estado))}
                   >
                     <Popup>
                       <div style={{fontFamily:"Arial,sans-serif"}}>
-                        <div style={{fontWeight:"900"}}>Próxima {e.numeroParada} · {e.cliente}</div>
+                        <div style={{fontWeight:"900"}}>Parada {e.numeroParada} · {e.cliente}</div>
+                        <div>Estado: {e.estado === "devolucion_informada" ? "No entregada · Devolución informada" : e.estado}</div>
                         <div style={{fontSize:"16px",marginTop:"4px"}}>{tituloEntrega(e)}</div>
                         <div style={{fontSize:"16px",marginTop:"4px"}}>{e.direccion}</div>
                       </div>

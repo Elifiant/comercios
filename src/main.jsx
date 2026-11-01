@@ -12,6 +12,8 @@ import Ayuda from "./Ayuda";
 import MonitorPedidos from "./MonitorPedidos";
 import Repartos from "./Repartos";
 import Repartidor from "./Repartidor";
+import RepartosExpress from "./RepartosExpress";
+import RepartidorExpress from "./RepartidorExpress";
 import { supabase } from "./supabase";
 
 // Navegación para quienes tienen acceso a ambos módulos.
@@ -213,6 +215,29 @@ if (!perfil) {
   );
 }
 
+// Vista de prueba Express: acceso limitado a usuarios con permiso Express.
+// Los datos de esta pantalla siguen siendo temporales hasta conectar Supabase.
+if (ruta === "/express-demo" || ruta === "/express-demo/") {
+  if (
+    rol === "superadmin" ||
+    rolesExtra.includes("express_admin") ||
+    rolesExtra.includes("express_operador")
+  ) {
+    return <RepartosExpress />;
+  }
+  window.location.replace("/");
+  return null;
+}
+
+// Express: acceso exclusivo del motociclista, independiente de Repartos tradicional.
+if (ruta === "/express/repartidor" || ruta === "/express/repartidor/") {
+  if (rolesExtra.includes("express_repartidor")) {
+    return <RepartidorExpress />;
+  }
+  window.location.replace("/");
+  return null;
+}
+
 // El panel Admin solo puede abrirlo el SuperAdmin
 if (ruta.startsWith("/admin")) {
   if (rol === "superadmin") return <AdminClientes />;
@@ -270,6 +295,33 @@ if (ruta.startsWith("/promotores")) {
     return <AdminClientes />;
   }
 
+  // Supervisor de Ventas con permiso adicional de Express:
+  // conserva Ventas y puede elegir Express al iniciar sesión.
+  if (
+    ruta === "/" &&
+    puedeVentas &&
+    rolesExtra.includes("express_admin") &&
+    !puedeRepartos &&
+    rol !== "superadmin"
+  ) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "sans-serif" }}>
+        <div style={{ width: "100%", maxWidth: 430, background: "#1e293b", color: "white", padding: 26, borderRadius: 16, textAlign: "center" }}>
+          <h2>Hola, {perfil?.nombre || "supervisor"}</h2>
+          <p>¿Con qué módulo querés trabajar?</p>
+          <div style={{ display: "grid", gap: 12 }}>
+            <button type="button" onClick={() => window.location.assign("/ventas")} style={{ padding: 18, background: "#2563eb", color: "white", border: 0, borderRadius: 10, fontWeight: "bold", cursor: "pointer" }}>
+              📋 SUPERVISOR DE VENTAS
+            </button>
+            <button type="button" onClick={() => window.location.assign("/express-demo")} style={{ padding: 18, background: "#16a34a", color: "white", border: 0, borderRadius: 10, fontWeight: "bold", cursor: "pointer" }}>
+              🍕 RUTACOMERCIOS EXPRESS
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Un supervisor con ambas funciones elige su módulo al entrar.
   if (puedeVentas && puedeRepartos && rol !== "superadmin" && (ruta === "/" || ruta === "/ventas")) {
     if (ruta === "/ventas") return <SupervisorConCambioModulo />;
@@ -320,6 +372,16 @@ if (ruta.startsWith("/promotores")) {
         </div>
       </div>
     );
+  }
+
+  // Motociclista exclusivo Express: entra directamente a sus pedidos.
+  // No interfiere con el rol repartidor del módulo tradicional.
+  if (rolesExtra.includes("express_repartidor") &&
+      !puedeVentas && !puedeRepartos &&
+      rol !== "superadmin" && rol !== "simplex" &&
+      !rolesExtra.includes("express_admin") && !rolesExtra.includes("express_operador") &&
+      !rolesExtra.includes("repartidor") && rol !== "repartidor") {
+    return <RepartidorExpress />;
   }
 
   // Repartidor exclusivo: abrir su módulo, nunca la app de preventistas.

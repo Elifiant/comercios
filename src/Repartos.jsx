@@ -310,7 +310,7 @@ function MapaRutaEnviada({ paradas, ubicacionChofer, nombreChofer }) {
   const puntos = ubicadas.map(p => [Number(p.latitud), Number(p.longitud)]);
   // Solo trazar la ruta pendiente: desde el GPS actual hacia las paradas
   // todavía por visitar. Las finalizadas conservan su marcador histórico.
-  const pendientes = ubicadas.filter(p => !["entregado", "no_entregado", "devolucion_informada"].includes(p.estado));
+  const pendientes = ubicadas.filter(p => !["entregado", "no_entregado", "devolucion_informada", "vuelto_deposito"].includes(p.estado));
   const gpsValido = puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud);
   const lineaPendiente = [
     ...(gpsValido ? [[Number(ubicacionChofer.latitud), Number(ubicacionChofer.longitud)]] : []),
@@ -327,7 +327,7 @@ function MapaRutaEnviada({ paradas, ubicacionChofer, nombreChofer }) {
         <AjustarMapaRepartos puntos={puntosEncuadre.length ? puntosEncuadre : [centro]} />
         {lineaPendiente.length > 1 && <Polyline positions={lineaPendiente} pathOptions={{color:"#2563eb",weight:3,dashArray:"7,7"}} />}
         {ubicadas.map(p => <Marker key={p.id} position={[Number(p.latitud),Number(p.longitud)]}
-          icon={L.divIcon({className:"",html:`<div style="width:30px;height:30px;border-radius:50%;background:${p.estado === "entregado" ? "#16a34a" : p.estado === "no_entregado" ? "#dc2626" : p.estado === "reintentar" ? "#f59e0b" : "#1d4ed8"};color:white;border:3px solid white;box-shadow:0 2px 6px #33415588;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900">${p.numero}</div>`,iconSize:[36,36],iconAnchor:[18,18]})}>
+          icon={L.divIcon({className:"",html:`<div style="width:30px;height:30px;border-radius:50%;background:${p.estado === "entregado" ? "#16a34a" : ["no_entregado", "devolucion_informada", "vuelto_deposito"].includes(p.estado) ? "#dc2626" : p.estado === "reintentar" ? "#f59e0b" : "#1d4ed8"};color:white;border:3px solid white;box-shadow:0 2px 6px #33415588;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900">${p.numero}</div>`,iconSize:[36,36],iconAnchor:[18,18]})}>
           <Popup><strong>{p.numero}. {p.nombre}</strong><div>{p.direccion}</div><div>Estado: {p.estado || "Pendiente"}</div></Popup>
         </Marker>)}
         {puntoValido(ubicacionChofer?.latitud, ubicacionChofer?.longitud) &&
@@ -429,6 +429,7 @@ function RutaEnviadaViva({ empresaId, repartidorId, nombreChofer, paradasInicial
 // Recorridos enviados por los repartidores: consulta exclusivamente de lectura.
 function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas, pedidos, ordenesCompartidas, codigoRepartosCompartido }) {
   const [rutasAbiertas, setRutasAbiertas] = useState({});
+  const [mostrarMapaFlota, setMostrarMapaFlota] = useState(false);
   const [datos, setDatos] = useState([]);
   const [gps, setGps] = useState({});
   const ordenesActuales = ordenesCompartidas.filter(o => ["preparado", "en_reparto"].includes(o.estado));
@@ -602,6 +603,28 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
     return () => { vigente = false; window.clearInterval(intervalo); };
   }, [empresaId, claveAvisos]);
 
+  // Solo lectura: usa el mismo GPS que ya consulta Control de Repartidores.
+  const puntosFlota = repartidores.map(rep => {
+    const posicion = gps[String(rep.id)];
+    const orden = ordenesActuales
+      .filter(o => String(o.repartidor_id) === String(rep.id))
+      .sort((a,b) => Number(b.numero || 0) - Number(a.numero || 0))[0];
+    const lat = posicion?.latitud;
+    const lng = posicion?.longitud;
+    const fecha = posicion?.ultima_posicion_at;
+    const antiguedad = fecha ? Date.now() - new Date(fecha).getTime() : NaN;
+    return {
+      id: rep.id, nombre: rep.nombre || rep.email || "Repartidor",
+      punto: puntoValido(lat,lng) && !(Number(lat) === 0 && Number(lng) === 0) ? [Number(lat),Number(lng)] : null,
+      fecha, antiguedad,
+      estado: orden?.estado === "en_reparto" ? "En reparto" : orden?.estado === "preparado" ? "Preparado" : "Sin reparto activo",
+    };
+  });
+  const puntosConGps = puntosFlota.filter(p => p.punto);
+  const iconoFlota = L.divIcon({
+    className: "", html: '<div style="background:#1d4ed8;border:3px solid white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #0005;font-size:17px">🚚</div>',
+    iconSize:[38,38],iconAnchor:[19,19]
+  });
   const entregasPorId = new Map(entregas.map(e => [String(e.id), e]));
   const pedidosPorId = new Map(pedidos.map(p => [String(p.id), p]));
   return <section style={{background:"white",border:"1px solid #cbd5e1",borderRadius:11,padding:12,marginBottom:14}}>
@@ -609,6 +632,32 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
       <strong>🚚 CONTROL DE REPARTIDORES</strong>
       <span style={{fontSize:11,color:"#64748b"}}>GPS y entregas: cada 30 s · Rutas: cada 60 s{revision ? ` · ${hora(revision)}` : ""}</span>
     </div>
+    <button type="button" onClick={() => setMostrarMapaFlota(v => !v)}
+      style={{width:"100%",padding:"13px",marginBottom:10,background:"#1d4ed8",color:"white",border:0,borderRadius:9,fontWeight:900,fontSize:15,cursor:"pointer"}}>
+      🗺️ {mostrarMapaFlota ? "OCULTAR MAPA GENERAL" : "MAPA GENERAL DE REPARTIDORES"}
+    </button>
+    {mostrarMapaFlota && <div style={{border:"1px solid #cbd5e1",borderRadius:10,padding:10,marginBottom:12,background:"#f8fafc"}}>
+      <strong>🚚 Flota · {puntosConGps.length} con posición GPS de {repartidores.length} repartidores</strong>
+      <div style={{fontSize:12,color:"#475569",margin:"5px 0 10px"}}>Ubicaciones registradas, no seguimiento continuo garantizado. Se consultan cada 30 segundos.</div>
+      {puntosConGps.length ? <div style={{height:390,width:"100%",borderRadius:9,overflow:"hidden"}}>
+        <MapContainer center={puntosConGps[0].punto} zoom={12} style={{height:"100%",width:"100%"}} scrollWheelZoom={true}>
+          <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <AjustarMapaRepartos puntos={puntosConGps.map(p => p.punto)} />
+          {puntosConGps.map(p => <Marker key={p.id} position={p.punto} icon={iconoFlota}>
+            <Popup><strong>🚚 {p.nombre}</strong><div>{p.estado}</div>
+              <div>📍 GPS: {tiempoGps(p.fecha)}</div>
+              {Number.isFinite(p.antiguedad) && p.antiguedad > 120000 && <div style={{color:"#b91c1c",fontWeight:700}}>⚠️ Posición antigua; puede no estar aquí.</div>}
+            </Popup>
+          </Marker>)}
+        </MapContainer>
+      </div> : <p style={{fontSize:13}}>Todavía no hay posiciones GPS disponibles para mostrar en el mapa.</p>}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+        {puntosFlota.map(p => <span key={p.id} style={{border:"1px solid #cbd5e1",borderRadius:7,padding:"6px 9px",fontSize:12,background:"white"}}>
+          <b>{p.nombre}</b> · {p.estado} · {p.punto ? tiempoGps(p.fecha) : "Sin GPS"}
+          {p.punto && Number.isFinite(p.antiguedad) && p.antiguedad > 120000 ? " ⚠️ Ubicación antigua" : ""}
+        </span>)}
+      </div>
+    </div>}
     {error && <p style={{color:"#b91c1c",fontSize:12}}>⚠️ {error}</p>}
     {cargando && !ultimaRevision && <p style={{fontSize:12}}>Consultando rutas...</p>}
     {!repartidores.length && <p style={{fontSize:12}}>Todavía no hay repartidores habilitados.</p>}
@@ -639,11 +688,6 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
           ...idsOrden.filter(id => !idsEnviadosSet.has(String(id)))
         ] : [];
         const todas = datos.filter(e => String(e.repartidor_id) === String(rep.id));
-        const salidas = todas.filter(e => e.salida_at);
-        const ultimaSalida = salidas.reduce((max,e) => {
-          const t = new Date(e.salida_at).getTime();
-          return Number.isFinite(t) && t > max ? t : max;
-        }, 0);
         // Priorizar las paradas de la ruta enviada para que cifras y detalle coincidan.
         const base = ordenActual ? ids.map(id => todas.find(e => String(e.id) === String(id))).filter(Boolean)
           : todas.filter(e => !e.reparto_orden_id && ["asignado","recibido","en_reparto","reintentar"].includes(e.estado));
@@ -674,8 +718,8 @@ function RutasEnviadasSupervisor({ empresaId, usuarioId, repartidores, entregas,
           <summary style={{cursor:"pointer",listStyle:"revert"}}>
             <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"space-between"}}>
               <strong style={{minWidth:115,fontSize:14}}>🚚 {rep.nombre || rep.email || "Repartidor"}</strong>
-              <span style={{fontSize:12,color:enRuta?"#166534":"#475569"}}>{enRuta?"● En ruta":"Sin reparto activo"}</span>
-              {ordenActual && <span style={{fontSize:12}}>🕐 Inicio del reparto: <b>{hora(ordenActual.salida_at || ultimaSalida || null)}</b></span>}
+              <span style={{fontSize:12,color:enRuta?"#166534":"#475569"}}>{ordenActual?.estado === "preparado" ? "📦 Reparto preparado · sin iniciar" : enRuta ? "● En ruta" : "Sin reparto activo"}</span>
+              {ordenActual?.estado === "en_reparto" && ordenActual.salida_at && <span style={{fontSize:12}}>🕐 Inicio del reparto: <b>{hora(ordenActual.salida_at)}</b></span>}
               <span style={{fontSize:13,color:"#166534",fontWeight:800}}>✅ {completadas}/{base.length}</span>
               <span style={{fontSize:12}}>📦 {pendientesRuta} pendientes</span>
               <span style={{fontSize:12,color:fallidas?"#b91c1c":"#475569"}}>❌ {fallidas}</span>
@@ -787,19 +831,103 @@ function HistorialRepartosSupervisor({ empresaId, repartidores }) {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
   const [limite, setLimite] = useState(30);
+  const [destinosTransferencia, setDestinosTransferencia] = useState([]);
+  const [seleccionTransferencia, setSeleccionTransferencia] = useState({});
+  const [destinoTransferencia, setDestinoTransferencia] = useState("");
+  const [transfiriendo, setTransfiriendo] = useState(false);
+  const [resultadoTransferencia, setResultadoTransferencia] = useState("");
+  const [transferenciasPendientes, setTransferenciasPendientes] = useState([]);
+  const [resolviendoSuspendida, setResolviendoSuspendida] = useState(null);
+  const [resultadoSuspendida, setResultadoSuspendida] = useState("");
+  const resolverSuspendida = async (entrega, accion) => {
+    if (resolviendoSuspendida || transferenciasPendientes.some(t => String(t.entrega_id) === String(entrega.id))) return;
+    const textos = {
+      informar_regreso: "INFORMAR REGRESO AL DEPÓSITO",
+      confirmar_regreso: "CONFIRMAR RECEPCIÓN FÍSICA EN DEPÓSITO",
+      eliminar: "ELIMINAR DE PENDIENTES (conservar historial)",
+      reprogramar: "REPROGRAMAR PARA OTRO DÍA"
+    };
+    let motivo = null;
+    let fecha = null;
+    if (["eliminar","reprogramar"].includes(accion)) {
+      motivo = window.prompt("Motivo obligatorio (se conservará en el historial):");
+      if (motivo === null) return;
+      if (motivo.trim().length < 3) { alert("Indicá un motivo de al menos 3 caracteres."); return; }
+    }
+    if (accion === "reprogramar") {
+      fecha = window.prompt("Nueva fecha (AAAA-MM-DD):", fechaLocalISO());
+      if (fecha === null) return;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || Number.isNaN(new Date(fecha+"T12:00:00").getTime()) || new Date(fecha+"T12:00:00").toISOString().slice(0,10) !== fecha) {
+        alert("Ingresá una fecha válida (AAAA-MM-DD)."); return;
+      }
+    }
+    if (!window.confirm(`${textos[accion]}\n\n${entrega.destinatario || "Entrega"}\n\nEl historial original no se borrará. ¿Confirmás?`)) return;
+    setResolviendoSuspendida(entrega.id);
+    setResultadoSuspendida("");
+    try {
+      const {error: err} = await supabase.rpc("repartos_resolver_pendiente_suspendida", {
+        p_entrega_id: entrega.id, p_accion: accion, p_motivo: motivo?.trim() || null, p_fecha: fecha
+      });
+      if (err) throw err;
+      const {data: actualizadas, error: e2} = await supabase.from("repartos_entregas")
+        .select("id,reparto_orden_id,repartidor_id,pedido_id,destinatario,direccion,localidad,estado,entregado_at,actualizado_at,motivo_no_entrega,cancelada_operativamente_at,motivo_cancelacion_operativa,devolucion_recibida_at")
+        .eq("empresa_id", empresaId).not("reparto_orden_id","is",null).limit(5000);
+      if (e2) throw e2;
+      setEntregasHistoricas(actualizadas || []);
+      setResultadoSuspendida(`✅ ${textos[accion]}: operación confirmada por Supabase.`);
+    } catch (e) { setResultadoSuspendida("❌ " + (e?.message || "No se completó la operación")); }
+    finally { setResolviendoSuspendida(null); }
+  };
+  const consultarTransferencias = async () => {
+    if (!empresaId) return;
+    const [ordenesRes, pendientesRes] = await Promise.all([
+      supabase.from("repartos_ordenes").select("id,numero,estado,repartidor_id").eq("empresa_id",empresaId).in("estado",["preparado","en_reparto"]),
+      supabase.from("repartos_transferencias").select("entrega_id,estado").eq("empresa_id",empresaId).eq("estado","pendiente")
+    ]);
+    if (ordenesRes.error) throw ordenesRes.error;
+    // La tabla de transferencias tiene acceso restringido por diseño.
+    // Si la lectura está denegada, la RPC sigue siendo la autoridad final.
+    setDestinosTransferencia(ordenesRes.data || []);
+    if (!pendientesRes.error) setTransferenciasPendientes(pendientesRes.data || []);
+  };
+  const autorizarTransferencias = async (origen) => {
+    const ids = (porOrden.get(origen.id) || []).filter(e => e.estado === "asignado" && !e.cancelada_operativamente_at && !transferenciasPendientes.some(t => String(t.entrega_id) === String(e.id)) && seleccionTransferencia[e.id]).map(e => e.id);
+    const destino = destinosTransferencia.find(o => o.id === destinoTransferencia);
+    if (!ids.length || !destino) { setResultadoTransferencia("Seleccioná entregas y un reparto de destino."); return; }
+    if (destino.repartidor_id === origen.repartidor_id) { setResultadoTransferencia("Elegí otro repartidor."); return; }
+    if (!window.confirm(`¿Autorizar transferencia de ${ids.length} entrega/s al reparto REP${String(codigo ?? "???").padStart(3,"0")}-${String(destino.numero).padStart(6,"0")}? El nuevo repartidor deberá confirmar físicamente la mercadería.`)) return;
+    setTransfiriendo(true); setResultadoTransferencia("");
+    const loteId = crypto.randomUUID();
+    let exitosas = 0;
+    const fallas = [];
+    try {
+      for (const id of ids) {
+        const { error: err } = await supabase.rpc("repartos_autorizar_transferencia", {
+          p_entrega_id: id, p_reparto_destino_id: destino.id, p_lote_id: loteId
+        });
+        if (err) fallas.push(err.message || `Error en entrega ${id}`);
+        else exitosas++;
+      }
+      setResultadoTransferencia(`${exitosas} entrega/s autorizada/s y pendientes de recepción.${fallas.length ? ` ${fallas.length} error/es: ${fallas.join(" | ")}` : ""}`);
+      setSeleccionTransferencia({});
+      await consultarTransferencias();
+    } catch(e) { setResultadoTransferencia(e.message || "No se pudo completar la transferencia."); }
+    finally { setTransfiriendo(false); }
+  };
 
   useEffect(() => {
     if (!abierto || !empresaId) return;
     let vigente = true;
-    const consultar = async () => {
-      setCargando(true); setError("");
+    const consultar = async (silenciosa = false) => {
+      if (!silenciosa) setCargando(true);
+      setError("");
       try {
         const [resOrdenes, resEntregas, resPrefijo] = await Promise.all([
           supabase.from("repartos_ordenes")
             .select("id,numero,estado,repartidor_id,creado_at,salida_at,finalizado_at,motivo_suspension,observaciones_suspension")
             .eq("empresa_id", empresaId).order("numero", {ascending:false}).limit(500),
           supabase.from("repartos_entregas")
-            .select("id,reparto_orden_id,repartidor_id,pedido_id,destinatario,direccion,localidad,estado,entregado_at,actualizado_at,motivo_no_entrega")
+            .select("id,reparto_orden_id,repartidor_id,pedido_id,destinatario,direccion,localidad,estado,entregado_at,actualizado_at,motivo_no_entrega,cancelada_operativamente_at,motivo_cancelacion_operativa,devolucion_recibida_at")
             .eq("empresa_id", empresaId).not("reparto_orden_id", "is", null).limit(5000),
           supabase.from("repartos_prefijos_empresa").select("codigo").eq("empresa_id", empresaId).maybeSingle()
         ]);
@@ -811,10 +939,23 @@ function HistorialRepartosSupervisor({ empresaId, repartidores }) {
         setEntregasHistoricas(resEntregas.data || []);
         setCodigo(resPrefijo.data?.codigo ?? null);
       } catch (e) { if (vigente) setError(e?.message || "No se pudo consultar el historial."); }
-      finally { if (vigente) setCargando(false); }
+      finally { if (vigente && !silenciosa) setCargando(false); }
     };
     consultar();
-    return () => { vigente = false; };
+    consultarTransferencias().catch(e => { if (vigente) setError(e.message || "Error al consultar destinos"); });
+    // Actualizar el historial abierto cada 60 segundos, sin cerrarlo ni hacer parpadear la pantalla.
+    const intervaloHistorial = window.setInterval(() => {
+      if (document.visibilityState === "visible") consultar(true);
+    }, 60000);
+    const alVolver = () => {
+      if (document.visibilityState === "visible") consultar(true);
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    return () => {
+      vigente = false;
+      window.clearInterval(intervaloHistorial);
+      document.removeEventListener("visibilitychange", alVolver);
+    };
   }, [abierto, empresaId]);
 
   const numeroVisible = o => `REP${codigo == null ? "???" : String(codigo).padStart(3,"0")}-${String(o.numero).padStart(6,"0")}`;
@@ -878,6 +1019,39 @@ function HistorialRepartosSupervisor({ empresaId, repartidores }) {
               {o.salida_at && o.finalizado_at && new Date(o.finalizado_at)>=new Date(o.salida_at) && <span> · <strong>Duracion:</strong> {Math.floor((new Date(o.finalizado_at)-new Date(o.salida_at))/60000)} min</span>}
               {o.estado === "suspendido" && <div style={{color:"#9a3412"}}>⚠️ Motivo: {({vehiculo:"Vehiculo averiado",salud:"Problema de salud",otros:"Otro motivo"})[o.motivo_suspension] || "No registrado"} · {o.observaciones_suspension || "Sin observaciones"}</div>}
             </div>
+            {o.estado === "suspendido" && items.some(e => e.estado === "asignado" && !e.cancelada_operativamente_at) && <div style={{padding:12,margin:"10px 0",border:"2px solid #f59e0b",borderRadius:9,background:"#fffbeb"}}>
+              <strong>🔄 TRANSFERIR ENTREGAS PENDIENTES</strong>
+              <p style={{fontSize:13,margin:"6px 0"}}>Seleccioná las entregas que siguen asignadas. Las ya entregadas no se pueden transferir. La autorización no cambia el chofer hasta que el destinatario confirme la carga.</p>
+              {items.filter(e => e.estado === "asignado" && !e.cancelada_operativamente_at).map(e => <label key={e.id} style={{display:"block",padding:"7px 0",fontSize:14}}>
+                <input type="checkbox" checked={!!seleccionTransferencia[e.id]} disabled={transfiriendo || transferenciasPendientes.some(t=>t.entrega_id===e.id)} onChange={ev=>setSeleccionTransferencia(v=>({...v,[e.id]:ev.target.checked}))} /> {e.destinatario || "Entrega NVI"} · {[e.direccion,e.localidad].filter(Boolean).join(", ")}
+                {transferenciasPendientes.some(t=>t.entrega_id===e.id) && <strong> · Esperando recepción</strong>}
+              </label>)}
+              <select aria-label="Reparto de destino" value={destinoTransferencia} onChange={ev=>setDestinoTransferencia(ev.target.value)} style={{width:"100%",padding:10,margin:"8px 0",borderRadius:7}}>
+                <option value="">Elegí reparto de destino</option>
+                {destinosTransferencia.filter(d=>d.repartidor_id && d.repartidor_id!==o.repartidor_id).map(d=><option key={d.id} value={d.id}>REP{String(codigo??"???").padStart(3,"0")}-{String(d.numero).padStart(6,"0")} · {repartidores.find(r=>r.id===d.repartidor_id)?.nombre || "Repartidor"} · {d.estado === "en_reparto" ? "En reparto" : "Preparado"}</option>)}
+              </select>
+              <button type="button" disabled={transfiriendo || !destinoTransferencia || !items.some(e=>e.estado==="asignado" && !e.cancelada_operativamente_at && !transferenciasPendientes.some(t=>String(t.entrega_id)===String(e.id)) && seleccionTransferencia[e.id])} onClick={()=>autorizarTransferencias(o)} style={{width:"100%",padding:12,border:0,borderRadius:8,background:"#9a3412",color:"white",fontWeight:900,opacity:transfiriendo?.6:1}}>{transfiriendo ? "AUTORIZANDO..." : "AUTORIZAR TRANSFERENCIA"}</button>
+              {resultadoTransferencia && <p role="status" style={{fontSize:13,fontWeight:700}}>{resultadoTransferencia}</p>}
+            </div>}
+            {o.estado === "suspendido" && <div style={{padding:12,margin:"10px 0",border:"2px solid #0f766e",borderRadius:9,background:"#f0fdfa"}}>
+              <strong>📦 REGRESO AL DEPÓSITO / 🗑️ ELIMINACIÓN</strong>
+              <p style={{fontSize:13,margin:"6px 0"}}>Solo entregas pendientes de este reparto suspendido. La recepción física se confirma por separado. La eliminación conserva el historial.</p>
+              {items.filter(e => !e.cancelada_operativamente_at && ["asignado","devolucion_informada","vuelto_deposito"].includes(e.estado)).map(e => {
+                const bloqueada = resolviendoSuspendida !== null || transferenciasPendientes.some(t=>String(t.entrega_id)===String(e.id));
+                const boton = (accion, texto, color) => <button type="button" key={accion} disabled={bloqueada} onClick={()=>resolverSuspendida(e,accion)} style={{padding:"9px 10px",border:0,borderRadius:7,background:color,color:"white",fontWeight:800,opacity:bloqueada?.5:1}}>{texto}</button>;
+                return <div key={e.id} style={{padding:"10px 0",borderTop:"1px solid #99f6e4"}}>
+                  <strong>{e.destinatario || "Entrega NVI"}</strong> · {e.estado.replaceAll("_"," ")}
+                  {transferenciasPendientes.some(t=>String(t.entrega_id)===String(e.id)) && <div>⏳ Transferencia pendiente: no se puede modificar.</div>}
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:7}}>
+                    {e.estado === "asignado" && boton("informar_regreso","📦 INFORMAR REGRESO","#0f766e")}
+                    {e.estado === "devolucion_informada" && boton("confirmar_regreso","✅ CONFIRMAR RECEPCIÓN FÍSICA","#166534")}
+                    {e.estado === "vuelto_deposito" && boton("reprogramar","📅 REPROGRAMAR","#1d4ed8")}
+                    {e.estado === "vuelto_deposito" && e.devolucion_recibida_at && boton("eliminar","🗑️ ELIMINAR DE PENDIENTES","#991b1b")}
+                  </div>
+                </div>;
+              })}
+              {resultadoSuspendida && <p role="status" style={{fontSize:13,fontWeight:800}}>{resultadoSuspendida}</p>}
+            </div>}
             {!items.length && <div>Sin entregas vinculadas.</div>}
             {items.map(e=><div key={e.id} style={{padding:"5px 0",borderBottom:"1px solid #e2e8f0",display:"flex",flexWrap:"wrap",gap:"4px 12px",fontSize:15}}>
               <strong>📦 {e.destinatario || (e.pedido_id ? "Entrega NVI" : "Destinatario")}</strong>
@@ -885,6 +1059,7 @@ function HistorialRepartosSupervisor({ empresaId, repartidores }) {
               <strong style={{color:e.estado==="entregado"?"#166534":"#991b1b"}}>{e.estado==="entregado"?"✓ Entregada":e.estado.replaceAll("_"," ")}</strong>
               <span>🕐 {e.entregado_at || e.actualizado_at ? new Date(e.entregado_at || e.actualizado_at).toLocaleString("es-AR") : "Sin horario registrado"}</span>
               {e.motivo_no_entrega && <span title={e.motivo_no_entrega}>📝 {e.motivo_no_entrega}</span>}
+              {e.cancelada_operativamente_at && <strong style={{color:"#991b1b"}}>🗃️ Retirada de pendientes · {new Date(e.cancelada_operativamente_at).toLocaleString("es-AR")} · {e.motivo_cancelacion_operativa || "Sin motivo"}</strong>}
             </div>)}
           </div>}
         </div>;
@@ -897,7 +1072,7 @@ function HistorialRepartosSupervisor({ empresaId, repartidores }) {
 
 // Confirmación de salida: agrupa entregas ya asignadas en una orden única.
 // La RPC confirma y numera en una transacción; nunca se calcula el número en el navegador.
-function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaEntrega, modoIndependiente, ordenesCompartidas, codigoRepartosCompartido, consultarOrdenesCompartidas, errorOrdenesCompartidas }) {
+function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaEntrega, modoIndependiente, ordenesCompartidas, codigoRepartosCompartido, consultarOrdenesCompartidas, errorOrdenesCompartidas, seleccionadasParaAgregar, onLimpiarSeleccionadas }) {
   const [abierto, setAbierto] = useState(true);
   const ordenes = ordenesCompartidas;
   const codigo = codigoRepartosCompartido;
@@ -996,6 +1171,47 @@ function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaE
     const data = await ejecutar(() => supabase.rpc("agregar_entrega_a_reparto", {p_orden_id:seleccion,p_entrega_id:idEntrega}),
       () => "✅ Entrega agregada al reparto. El número no cambia.");
     if (data !== undefined) setEntregaId("");
+  };
+  const agregarLote = async () => {
+    if (ocupado || !orden || orden.estado !== "preparado" || yaSalio) return;
+    const ids = [...new Set(seleccionadasParaAgregar || [])];
+    const elegidas = ids.map(id => entregas.find(e => String(e.id) === String(id))).filter(Boolean);
+    const validas = elegidas.filter(e => disponibles.some(d => String(d.id) === String(e.id)));
+    if (validas.length !== ids.length || !validas.length) {
+      setMensaje("⚠️ Algunas entregas cambiaron de estado. Volvé a Preparadas para asignar y seleccioná nuevamente.");
+      return;
+    }
+    const futuras = validas.filter(e => esFutura(e, fechaLocalISO()));
+    const avisoFuturas = futuras.length && orden.repartidor_id
+      ? `\n\n⚠️ ${futuras.length} entrega/s tienen fecha futura y el reparto ya tiene chofer. Revisá las fechas antes de confirmar.`
+      : "";
+    if (!window.confirm(`¿AGREGAR ${validas.length} ENTREGA/S A ${formato(orden)}?\nChofer: ${nombreChofer(orden.repartidor_id)}.${avisoFuturas}\n\nNo se modifican las entregas de repartos en marcha.`)) return;
+    setOcupado(true);
+    setMensaje("");
+    let agregadas = 0;
+    const errores = [];
+    for (const entrega of validas) {
+      try {
+        const {error} = await supabase.rpc("agregar_entrega_a_reparto", {
+          p_orden_id:orden.id, p_entrega_id:entrega.id
+        });
+        if (error) throw error;
+        agregadas++;
+      } catch(e) {
+        errores.push(`${entrega.destinatario || entrega.id}: ${e.message || "Error"}`);
+      }
+    }
+    try {
+      await onCambio();
+      await consultarOrdenesCompartidas();
+      onLimpiarSeleccionadas?.();
+      setMensaje(`✅ Agregadas: ${agregadas} de ${validas.length}.` +
+        (errores.length ? ` ⚠️ Sin agregar: ${errores.length}. ${errores.slice(0,3).join(" | ")}` : ""));
+    } catch(e) {
+      setMensaje(`⚠️ Se procesaron ${agregadas} entrega/s, pero no se pudo actualizar la pantalla: ${e.message}`);
+    } finally {
+      setOcupado(false);
+    }
   };
   const agregar = async () => {
     if (!seleccion || !entregaId || ocupado) return;
@@ -1101,6 +1317,13 @@ function GestionRepartos({ empresaId, repartidores, entregas, onCambio, onNuevaE
             <button type="button" disabled={ocupado} onClick={() => quitarEntrega(e)} style={{padding:"8px 10px",border:"1px solid #b45309",borderRadius:7,background:"#fff7ed",color:"#9a3412",fontWeight:800,cursor:"pointer"}}>↩️ QUITAR DEL REPARTO</button>}
         </div>) : <div style={{fontSize:12,color:"#64748b"}}>Todavía no hay entregas.</div>}
         {orden.estado === "preparado" && !yaSalio && <>
+          {modoIndependiente && seleccionadasParaAgregar?.length > 0 && <div style={{padding:12,marginTop:12,border:"2px solid #2563eb",borderRadius:9,background:"#ffffff"}}>
+            <strong>📦 {seleccionadasParaAgregar.length} entrega/s seleccionadas desde Preparadas para asignar</strong>
+            <button type="button" disabled={ocupado} onClick={agregarLote}
+              style={{display:"block",width:"100%",marginTop:9,padding:13,border:0,borderRadius:8,background:"#166534",color:"white",fontWeight:900,opacity:ocupado?.5:1}}>
+              {ocupado ? "AGREGANDO..." : `＋ AGREGAR ${seleccionadasParaAgregar.length} AL REPARTO ${formato(orden)}`}
+            </button>
+          </div>}
           <label style={{display:"block",fontSize:13,fontWeight:800,marginTop:12}}>Agregar entrega existente
             <select value={entregaId} onChange={e=>setEntregaId(e.target.value)} style={{display:"block",width:"100%",padding:10,marginTop:5}}>
               <option value="">Seleccionar entrega preparada...</option>
@@ -1165,6 +1388,12 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
   const [guardando, setGuardando] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [bandeja, setBandeja] = useState("pendientes");
+  const [pestanaRepartos, setPestanaRepartos] = useState(0);
+  const [entregasSeleccionadasPreparar, setEntregasSeleccionadasPreparar] = useState([]);
+  const [entregasSeleccionadasAsignar, setEntregasSeleccionadasAsignar] = useState([]);
+
+  const [preparandoLote, setPreparandoLote] = useState(false);
+
   const [fechaConsultaEntregas, setFechaConsultaEntregas] = useState(fechaLocalISO());
   const [fechaHistorialRetiradas, setFechaHistorialRetiradas] = useState("");
   // Fuente única de órdenes para Gestión y Control. No duplicar consultas por sección.
@@ -1954,6 +2183,41 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
     finally { setGuardandoManual(false); }
   };
 
+  // Preparación múltiple: solo entregas independientes, sin chofer ni reparto.
+  // Cada escritura exige que la entrega siga pendiente; nunca modifica NVI.
+  const prepararSeleccionadas = async () => {
+    if (preparandoLote || guardandoManual || !empresaId) return;
+    const elegidas = entregas.filter(e =>
+      entregasSeleccionadasPreparar.includes(String(e.id)) &&
+      e.estado === "pendiente_preparacion" &&
+      !e.pedido_id && !e.repartidor_id && !e.reparto_orden_id &&
+      !e.cancelada_operativamente_at
+    );
+    if (!elegidas.length) { alert("No hay entregas pendientes válidas seleccionadas."); return; }
+    if (!window.confirm(`¿MARCAR COMO PREPARADAS ${elegidas.length} ENTREGA/S?\n\nConfirmá únicamente la mercadería que ya preparaste físicamente.`)) return;
+    setPreparandoLote(true);
+    let completadas = 0;
+    const fallidas = [];
+    try {
+      for (const entrega of elegidas) {
+        const ahora = new Date().toISOString();
+        const {data, error} = await supabase.from("repartos_entregas")
+          .update({estado:"preparado", preparado_at:ahora, actualizado_at:ahora})
+          .eq("id",entrega.id).eq("empresa_id",empresaId)
+          .eq("estado","pendiente_preparacion")
+          .is("pedido_id",null).is("repartidor_id",null)
+          .is("reparto_orden_id",null).is("cancelada_operativamente_at",null)
+          .select("id");
+        if (error || data?.length !== 1) fallidas.push(entrega.destinatario || String(entrega.id));
+        else completadas++;
+      }
+      setEntregasSeleccionadasPreparar([]);
+      await cargarDatos();
+      alert(`Preparadas: ${completadas}. Sin actualizar: ${fallidas.length}.` +
+        (fallidas.length ? `\nRevisar: ${fallidas.slice(0,10).join(", ")}` : ""));
+    } finally { setPreparandoLote(false); }
+  };
+
   const actualizarEntregaManual = async (nuevoEstado, repartidorId = null) => {
     if (!entregaManualActiva || guardandoManual) return;
     if (nuevoEstado === "asignado") { alert("🚚 Para asignar esta entrega, usá NUEVO REPARTO → AGREGAR ENTREGA → ASIGNAR REPARTIDOR."); return; }
@@ -2348,27 +2612,54 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
           </div>
         </header>
         <main style={{ maxWidth: 1000, margin: "auto", padding: 14 }}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:14}}>
+          <div style={{background:"white",border:"1px solid #cbd5e1",borderRadius:12,padding:12,marginBottom:14}}>
+            <div style={{fontWeight:900,fontSize:16,marginBottom:5}}>🚚 Circuito de trabajo</div>
+            <div style={{fontSize:12,color:"#475569",marginBottom:12}}>Cargar → Preparar → Crear reparto → Asignar → Recibir mercadería → Comenzar → Controlar</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))",gap:8}}>
+              {[
+                ["📦", "Preparar entregas", "pendientes"],
+                ["🚚", "Organizar repartos", "asignados"],
+                ["📍", "Controlar repartos", "todos"],
+                ["⚠️", "Resolver entregas", "no_entregadas"],
+                ["📚", "Historial y planificación", "futuras"],
+              ].map(([icono,titulo,bandejaInicial],indice) =>
+                <button key={titulo} type="button" onClick={() => {setPestanaRepartos(indice);setBandeja(bandejaInicial);setBusqueda("");setFiltroRepartidor("todos");}}
+                  aria-pressed={pestanaRepartos === indice}
+                  style={{minHeight:76,padding:10,borderRadius:10,border:pestanaRepartos===indice?"2px solid #2563eb":"1px solid #cbd5e1",background:pestanaRepartos===indice?"#dbeafe":"#f8fafc",color:"#0f172a",fontWeight:900,fontSize:13,cursor:"pointer"}}>
+                  <div style={{fontSize:23,marginBottom:4}}>{icono}</div>{indice+1}. {titulo}
+                </button>
+              )}
+            </div>
+          </div>
+          <div style={{fontWeight:900,fontSize:18,margin:"12px 0"}}>{[
+            "📦 1. Preparar las entregas", "🚚 2. Organizar los repartos", "📍 3. Controlar los repartos en marcha",
+            "⚠️ 4. Resolver entregas que no se concretaron", "📚 5. Historial y planificación"
+          ][pestanaRepartos]}</div>
+          {pestanaRepartos === 0 && <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:14}}>
             <div style={{fontSize:19,fontWeight:900}}>📦 Gestión de entregas</div>
             <button type="button" onClick={() => {setNuevaEntregaAbierta(true);setEntregaManualActiva(null);}}
               style={{background:"#16a34a",color:"white",border:0,borderRadius:8,padding:"12px 16px",fontWeight:900,cursor:"pointer"}}>
               ＋ NUEVA ENTREGA
             </button>
-          </div>
-          {/* Tarjetas en dos filas para mantener etiquetas legibles. */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: 4, marginBottom: 14 }}>
+          </div>}
+          {(pestanaRepartos === 0 || pestanaRepartos === 2 || pestanaRepartos === 3 || pestanaRepartos === 4) && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))", gap: 8, marginBottom: 14 }}>
             {[
               ["pendientes", "📦 PENDIENTES", "DE PREPARAR", cuenta("pendiente_preparacion"), "Pendientes de preparar"],
               ["preparados", "✅ PREPARADAS", "PARA ASIGNAR", cuenta("preparado"), "Preparadas para asignar a repartidores"],
               ["asignados", "🚚 ASIGNADAS", "A REPARTIDORES", cuenta("asignado") + cuenta("en_reparto"), "Asignadas a repartidores"],
               ["todos", "🗓️ TODAS", fechaConsultaEntregas === fechaLocalISO() ? "(HOY)" : `(${fechaConsultaEntregas.slice(8, 10)}/${fechaConsultaEntregas.slice(5, 7)})`, entregasFecha.length, "Todas las entregas de la fecha seleccionada"],
               ["futuras", "📅 ENTREGAS", "FUTURAS", entregasFuturas.length, "Entregas futuras, desde mañana"],
-              ["no_entregadas", "❌ ENTREGAS NO CONCRETADAS", "AL CLIENTE", totalNoEntregadas, "Historial de visitas sin entrega al cliente, incluso si la mercadería ya regresó al depósito"],
+              ["no_entregadas", "❌ NO ENTREGADAS", "", totalNoEntregadas, "Historial de visitas sin entrega al cliente, incluso si la mercadería ya regresó al depósito"],
+              ["devoluciones_pendientes", "📦 DEVOLUCIONES", "PENDIENTES", cuenta("devolucion_informada"), "El chofer informó que regresó la mercadería; Depósito todavía no registró su recepción física"],
               ["pendientes_devolver", "🚚 RECHAZOS POR REGRESAR", "A DEPÓSITO", totalPendientesDevolver, "Mercadería que todavía tiene el chofer y debe regresar al depósito"],
               ["retiradas", "📚 HISTORIAL DE ENTREGAS", "QUITADAS DE PENDIENTES", retiradasEnFecha.length, "Retiradas en la fecha seleccionada. Al abrir, consultás todo el historial con filtros."],
-              ["devoluciones_pendientes", "📦 RECHAZOS INFORMADOS", "AL DEPÓSITO", cuenta("devolucion_informada"), "El chofer informó que regresó la mercadería; Depósito todavía no registró su recepción física"],
-              ["volvieron_hoy", "✅ RECHAZOS RECIBIDOS", "EN DEPÓSITO", cuenta("vuelto_deposito"), "Mercadería cuyo regreso físico fue registrado por Depósito"],
-            ].map(([id, linea1, linea2, n, descripcion]) => (
+              ["volvieron_hoy", "✅ DEVOLUCIONES", "RECIBIDAS", cuenta("vuelto_deposito"), "Mercadería cuyo regreso físico fue registrado por Depósito"],
+            ].filter(([id]) => (
+              pestanaRepartos === 0 ? ["pendientes","preparados"].includes(id) :
+              pestanaRepartos === 2 ? ["asignados","todos"].includes(id) :
+              pestanaRepartos === 3 ? ["no_entregadas","devoluciones_pendientes","volvieron_hoy"].includes(id) :
+              ["retiradas","futuras"].includes(id)
+            )).map(([id, linea1, linea2, n, descripcion]) => (
               <button key={id} type="button" title={descripcion}
                 onClick={() => { setBandeja(id); setFiltroRepartidor(["pendientes", "preparados"].includes(id) ? "sin_asignar" : "todos"); }}
                 style={{ padding: "5px 5px", minWidth: 0, textAlign: "center", background: bandeja === id ? "#dbeafe" : "white", border: bandeja === id ? "2px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
@@ -2379,17 +2670,18 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
                 <div style={{ fontSize: 21, fontWeight: 900, color: "#111111", marginTop: 0 }}>{n}</div>
               </button>
             ))}
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:12}}>
+          </div>}
+          {pestanaRepartos === 3 && bandeja === "devoluciones_pendientes" && <p style={{fontSize:13,color:"#334155",margin:"-4px 0 12px"}}>Para confirmar la recepción física, abrí la tarjeta de la entrega y pulsá «📥 CONFIRMAR MERCADERÍA RECIBIDA». Hacelo únicamente cuando la mercadería esté en Depósito.</p>}
+          {(pestanaRepartos === 0 || pestanaRepartos === 2 || pestanaRepartos === 4) && <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:12}}>
             <label htmlFor="fecha-entregas-repartos" style={{fontWeight:800,fontSize:13}}>📅 Fecha de entregas:</label>
             <input id="fecha-entregas-repartos" type="date" value={fechaConsultaEntregas}
               onChange={e => {setFechaConsultaEntregas(e.target.value || fechaLocalISO());setBandeja("todos");setFiltroRepartidor("todos");}}
               style={{padding:"9px 11px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",color:"#0f172a"}} />
             <button type="button" onClick={() => {setFechaConsultaEntregas(fechaLocalISO());setBandeja("todos");setFiltroRepartidor("todos");}}
-              style={{padding:"9px 12px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",cursor:"pointer"}}>Hoy</button>
+              style={{padding:"9px 12px",border:"1px solid #cbd5e1",borderRadius:8,background:"#ffffff",color:"#0f172a",fontWeight:800,cursor:"pointer"}}>Hoy</button>
             <span style={{fontSize:12,color:"#64748b"}}>La fecha filtra «Todas». «Entregas futuras» muestra todas las programadas desde mañana, ordenadas por fecha.</span>
-          </div>
-          {bandeja === "retiradas" && <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"9px 12px",background:"#e2e8f0",borderRadius:8,marginBottom:10}}>
+          </div>}
+          {pestanaRepartos === 4 && bandeja === "retiradas" && <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"9px 12px",background:"#e2e8f0",borderRadius:8,marginBottom:10}}>
             <strong style={{fontSize:13}}>📚 Historial completo · {historicasRetiradas.length} registros</strong>
             <label htmlFor="fecha-historial-retiradas" style={{fontSize:13}}>Fecha en que se quitó:</label>
             <input id="fecha-historial-retiradas" type="date" value={fechaHistorialRetiradas}
@@ -2399,9 +2691,9 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
               style={{padding:8,border:"1px solid #94a3b8",borderRadius:7,background:"white",cursor:"pointer"}}>Ver todas las fechas</button>
             <span style={{fontSize:12,color:"#475569"}}>Usá el buscador de abajo para filtrar por cliente y el filtro de repartidor si lo necesitás.</span>
           </div>}
-          <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:10}}>
+          {pestanaRepartos === 0 && <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:10}}>
             <select aria-label="Entrega para geolocalizar" value={geoEntregaId} onChange={e=>setGeoEntregaId(e.target.value)}
-              style={{padding:"10px 8px",border:"1px solid #cbd5e1",borderRadius:8,background:"white",maxWidth:"100%",minWidth:180}}>
+              style={{padding:"10px 8px",border:"1px solid #cbd5e1",borderRadius:8,background:"#ffffff",color:"#0f172a",fontSize:13,maxWidth:"100%",minWidth:180}}>
               <option value="">Elegir entrega sin ubicación...</option>
               {pendientesGeo.map(e=><option key={e.id} value={e.id}>{e.destinatario || "Sin nombre"} · {e.direccion}</option>)}
             </select>
@@ -2413,21 +2705,67 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
               style={{padding:"10px 14px",border:"1px solid #166534",borderRadius:8,background:"#dcfce7",color:"#166534",fontWeight:900,opacity:pendientesGeo.length?1:.5}}>
               📍 GEOLOCALIZAR TODAS ({pendientesGeo.length})
             </button>
-          </div>
-          {geoProgreso && <div style={{fontSize:12,color:"#1d4ed8",marginBottom:10}}>⏳ {geoProgreso}</div>}
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><input placeholder="🔎 Destinatario, dirección, remito o factura..." value={busqueda} onChange={e => setBusqueda(e.target.value)} style={inputStyle} />
-            <button onClick={cargarDatos} style={{ padding: "0 14px" }}>↻</button></div>
-          <AvisosRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
+          </div>}
+          {pestanaRepartos === 0 && geoProgreso && <div style={{fontSize:12,color:"#1d4ed8",marginBottom:10}}>⏳ {geoProgreso}</div>}
+          {pestanaRepartos !== 1 && <div style={{ display: "flex", gap: 8, marginBottom: 12 }}><input placeholder="🔎 Destinatario, dirección, remito o factura..." value={busqueda} onChange={e => setBusqueda(e.target.value)} style={{...inputStyle,background:"#ffffff",color:"#0f172a"}} />
+            <button type="button" aria-label="Actualizar entregas" title="Actualizar entregas" onClick={cargarDatos} style={{ padding: "0 14px", minWidth:46, background:"#334155", color:"#ffffff", border:"1px solid #334155", borderRadius:7, fontWeight:900, fontSize:17, cursor:"pointer" }}>↻</button></div>}
+          {pestanaRepartos === 0 && bandeja === "pendientes" && <div style={{display:"flex",gap:9,alignItems:"center",flexWrap:"wrap",padding:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:9,marginBottom:12}}>
+            <label style={{display:"flex",alignItems:"center",gap:6,fontWeight:800}}>
+              <input type="checkbox" disabled={preparandoLote}
+                checked={filtradas.filter(e=>e.estado==="pendiente_preparacion"&&!e.pedido_id&&!e.repartidor_id&&!e.reparto_orden_id&&!e.cancelada_operativamente_at).length>0 &&
+                  filtradas.filter(e=>e.estado==="pendiente_preparacion"&&!e.pedido_id&&!e.repartidor_id&&!e.reparto_orden_id&&!e.cancelada_operativamente_at).every(e=>entregasSeleccionadasPreparar.includes(String(e.id)))}
+                onChange={ev=>setEntregasSeleccionadasPreparar(ev.target.checked ?
+                  filtradas.filter(e=>e.estado==="pendiente_preparacion"&&!e.pedido_id&&!e.repartidor_id&&!e.reparto_orden_id&&!e.cancelada_operativamente_at).map(e=>String(e.id)) : [])} />
+              Seleccionar todas las visibles
+            </label>
+            <button type="button" disabled={preparandoLote || !entregasSeleccionadasPreparar.length}
+              onClick={prepararSeleccionadas}
+              style={{background:"#166534",color:"white",padding:"11px 14px",border:0,borderRadius:8,fontWeight:900,opacity:preparandoLote||!entregasSeleccionadasPreparar.length?.55:1,cursor:"pointer"}}>
+              {preparandoLote?"PREPARANDO...":`✅ MARCAR SELECCIONADAS COMO PREPARADAS (${entregasSeleccionadasPreparar.length})`}
+            </button>
+            <span style={{fontSize:12,color:"#475569"}}>Solo entregas independientes sin asignar. Las NVI se preparan desde su ficha.</span>
+          </div>}
+          {pestanaRepartos === 0 && bandeja === "preparados" && <div style={{display:"flex",gap:9,alignItems:"center",flexWrap:"wrap",padding:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:9,marginBottom:12}}>
+            <label style={{display:"flex",alignItems:"center",gap:6,fontWeight:800}}>
+              <input type="checkbox"
+                checked={filtradas.filter(e=>e.estado==="preparado"&&!e.reparto_orden_id&&!e.repartidor_id&&!e.cancelada_operativamente_at).length>0 &&
+                  filtradas.filter(e=>e.estado==="preparado"&&!e.reparto_orden_id&&!e.repartidor_id&&!e.cancelada_operativamente_at).every(e=>entregasSeleccionadasAsignar.includes(String(e.id)))}
+                onChange={ev=>setEntregasSeleccionadasAsignar(ev.target.checked ?
+                  filtradas.filter(e=>e.estado==="preparado"&&!e.reparto_orden_id&&!e.repartidor_id&&!e.cancelada_operativamente_at).map(e=>String(e.id)) : [])} />
+              Seleccionar todas las visibles
+            </label>
+            <button type="button" disabled={!entregasSeleccionadasAsignar.length}
+              onClick={()=>{setPestanaRepartos(1);setBusqueda("");}}
+              style={{background:"#166534",color:"white",padding:"11px 14px",border:0,borderRadius:8,fontWeight:900,opacity:entregasSeleccionadasAsignar.length?1:.5,cursor:"pointer"}}>
+              🚚 AGREGAR SELECCIONADAS A UN REPARTO ({entregasSeleccionadasAsignar.length})
+            </button>
+            <span style={{fontSize:12,color:"#475569"}}>Después elegí un reparto que todavía no haya salido. Podés crear uno nuevo.</span>
+          </div>}
+          {pestanaRepartos === 2 && <AvisosRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />}
           {/* Dos columnas en escritorio: entregas a la izquierda y gestión de repartos a la derecha. */}
           <style>{`@media (max-width: 740px) { .repartos-paneles-independiente { grid-template-columns: minmax(0, 1fr) !important; } }`}</style>
-          <div className="repartos-paneles-independiente" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, alignItems: "stretch", marginBottom: 14 }}>
-            <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <div className="repartos-paneles-independiente" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr)", gap: 10, alignItems: "stretch", marginBottom: 14 }}>
+            <div style={{ minWidth: 0, display: pestanaRepartos === 1 || pestanaRepartos === 2 ? "none" : "flex", flexDirection: "column" }}>
           {cargando ? <p>Cargando entregas...</p> : errorCarga ? <p style={{ color: "#b91c1c" }}>❌ {errorCarga}</p> : filtradas.length === 0 ?
             <div style={{ background: "white", padding: 25, borderRadius: 9, textAlign: "center", flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 80 }}>No hay entregas en esta bandeja.</div> :
             <div style={{ display: "grid", gap: 8 }}>{filtradas.map(e => {
               const aviso = avisoFecha(e);
               const referenciaHistorial = bandeja === "retiradas" ? datosRepartoHistorial(e) : null;
-              return <button key={e.id} onClick={() => { setEntregaManualActiva(e); setEditandoDomicilio(false); setNuevaEntregaAbierta(false); setRepartidorSeleccionado(e.repartidor_id || ""); }}
+              const seleccionable = pestanaRepartos === 0 && bandeja === "pendientes" &&
+                e.estado === "pendiente_preparacion" && !e.pedido_id &&
+                !e.repartidor_id && !e.reparto_orden_id && !e.cancelada_operativamente_at;
+              const seleccionableAsignar = pestanaRepartos === 0 && bandeja === "preparados" &&
+                e.estado === "preparado" && !e.reparto_orden_id && !e.repartidor_id && !e.cancelada_operativamente_at;
+              return <div key={e.id} style={{display:"flex",alignItems:"stretch",gap:8}}>
+                {seleccionableAsignar && <label title="Seleccionar entrega para agregar a un reparto" style={{display:"flex",alignItems:"center",padding:"0 8px",background:"#eff6ff",borderRadius:8}}>
+                  <input type="checkbox" checked={entregasSeleccionadasAsignar.includes(String(e.id))}
+                    onChange={ev=>setEntregasSeleccionadasAsignar(prev=>ev.target.checked?[...new Set([...prev,String(e.id)])]:prev.filter(id=>id!==String(e.id)))} />
+                </label>}
+                {seleccionable && <label title="Seleccionar entrega para preparar" style={{display:"flex",alignItems:"center",padding:"0 8px",background:"#eff6ff",borderRadius:8}}>
+                  <input type="checkbox" disabled={preparandoLote} checked={entregasSeleccionadasPreparar.includes(String(e.id))}
+                    onChange={ev=>setEntregasSeleccionadasPreparar(prev=>ev.target.checked?[...new Set([...prev,String(e.id)])]:prev.filter(id=>id!==String(e.id)))} />
+                </label>}
+                <button key={e.id} onClick={() => { setEntregaManualActiva(e); setEditandoDomicilio(false); setNuevaEntregaAbierta(false); setRepartidorSeleccionado(e.repartidor_id || ""); }}
                 style={{ textAlign: "left", padding: 14, background: "white", color: "#111111", border: "1px solid #cbd5e1", borderRadius: 9, cursor: "pointer" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", color: "#111111" }}><strong>📦 {e.destinatario || "Sin destinatario"}</strong><strong>{e.estado === "asignado" ? (e.repartidor_id ? `🚚 ASIGNADO A: ${repartidores.find(r => String(r.id) === String(e.repartidor_id))?.nombre || repartidores.find(r => String(r.id) === String(e.repartidor_id))?.email || "Repartidor"}` : "🚚 SIN REPARTIDOR") : e.estado === "en_reparto" ? `🚚 EN REPARTO · ${repartidores.find(r => String(r.id) === String(e.repartidor_id))?.nombre || repartidores.find(r => String(r.id) === String(e.repartidor_id))?.email || "Repartidor"}` : (ESTADO_LABEL[e.estado] || e.estado)}</strong></div>
                 <div style={{ marginTop: 9, padding: "9px 12px", borderRadius: 8, background: aviso.fondo, border: `2px solid ${aviso.borde}`, color: "#111111", fontSize: 17, fontWeight: 900, lineHeight: 1.35 }}>
@@ -2443,16 +2781,18 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
                     <div style={{ fontSize: 13, color: "#111111", marginTop: 7 }}>📍 {[e.direccion, e.localidad, e.partido, e.provincia].filter(Boolean).join(", ")}</div>
                     <div style={{ fontSize: 13, color: "#111111", marginTop: 4 }}>{e.bultos || "—"} bulto/s · {e.numero_remito ? `Remito ${e.numero_remito}` : "Sin remito"}</div>
                   </>}
-              </button>;
+              </button></div>;
             })}</div>}
-              <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />
+
             </div>
-            <div style={{ minWidth: 0 }}>
-              <GestionRepartos ordenesCompartidas={ordenesCompartidas} codigoRepartosCompartido={codigoRepartosCompartido} consultarOrdenesCompartidas={consultarOrdenesCompartidas} errorOrdenesCompartidas={errorOrdenesCompartidas} modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
+            <div style={{ minWidth: 0, display: pestanaRepartos === 1 ? "block" : "none" }}>
+              <GestionRepartos ordenesCompartidas={ordenesCompartidas} codigoRepartosCompartido={codigoRepartosCompartido} consultarOrdenesCompartidas={consultarOrdenesCompartidas} errorOrdenesCompartidas={errorOrdenesCompartidas} modoIndependiente={modoIndependiente} empresaId={empresaId} repartidores={repartidores} entregas={entregas} seleccionadasParaAgregar={entregasSeleccionadasAsignar} onLimpiarSeleccionadas={()=>setEntregasSeleccionadasAsignar([])} onCambio={cargarDatos} onNuevaEntrega={() => { setNuevaEntregaAbierta(true); setEntregaManualActiva(null); }} />
             </div>
           </div>
-          <RutasEnviadasSupervisor ordenesCompartidas={ordenesCompartidas} codigoRepartosCompartido={codigoRepartosCompartido} empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
-          <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />
+          {pestanaRepartos === 2 && <RutaChatSupervisor empresaId={empresaId} repartidores={repartidores} />}
+          {pestanaRepartos === 2 && <RutasEnviadasSupervisor ordenesCompartidas={ordenesCompartidas} codigoRepartosCompartido={codigoRepartosCompartido} empresaId={empresaId} usuarioId={sesionProp?.user?.id || perfil?.id} repartidores={repartidores} entregas={entregas} pedidos={pedidos} />
+          }
+          {pestanaRepartos === 4 && <HistorialRepartosSupervisor empresaId={empresaId} repartidores={repartidores} />}
           {seleccionUbicacion && <div style={{position:"fixed",inset:0,zIndex:3000,background:"#000a",padding:16,overflowY:"auto"}}>
             <div style={{maxWidth:680,margin:"25px auto",padding:20,background:"white",borderRadius:12}}>
               <h3>📍 Elegir ubicación — {seleccionUbicacion.entrega.destinatario}</h3>
@@ -2563,7 +2903,7 @@ export default function Repartos({ sesion: sesionProp, perfil: perfilProp, onVol
                 <div style={{fontSize:13,fontWeight:500,marginTop:5}}>El recorrido puede estar finalizado, pero falta que el repartidor informe el regreso de la mercadería.</div>
               </div>}
               {entregaManualActiva.estado === "devolucion_informada" && <div style={{background:"#fff7ed",border:"2px solid #fb923c",borderRadius:9,padding:12,marginTop:10,color:"#111111"}}>
-                <strong>📦 RECHAZO INFORMADO AL DEPÓSITO · RECEPCIÓN FÍSICA PENDIENTE</strong>
+                <strong>📦 DEVOLUCIÓN PENDIENTE · RECEPCIÓN FÍSICA PENDIENTE</strong>
                 <div style={{fontSize:13,margin:"8px 0"}}>Confirmá únicamente cuando los bultos estén físicamente en Depósito.</div>
                 <button type="button" disabled={guardandoManual} onClick={recibirDevolucionManual} style={{padding:12,width:"100%",background:"#0f766e",color:"white",border:0,borderRadius:8,fontWeight:900}}>
                   {guardandoManual ? "REGISTRANDO..." : "📥 CONFIRMAR MERCADERÍA RECIBIDA"}
