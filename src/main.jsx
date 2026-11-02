@@ -13,6 +13,7 @@ import MonitorPedidos from "./MonitorPedidos";
 import Repartos from "./Repartos";
 import Repartidor from "./Repartidor";
 import RepartosExpress from "./RepartosExpress";
+import AdminExpress from "./AdminExpress";
 import RepartidorExpress from "./RepartidorExpress";
 import { supabase } from "./supabase";
 
@@ -41,6 +42,7 @@ function EnrutadorSeguro() {
   const [sesion, setSesion] = useState(null);
   const [perfil, setPerfil] = useState(null);
   const [rolesExtra, setRolesExtra] = useState([]);
+  const [errorPermisos, setErrorPermisos] = useState("");
   const [cargando, setCargando] = useState(true);
   console.log("🔎 ESTADO:", { cargando, sesion, perfil });
   const [emailLogin, setEmailLogin] = useState("");
@@ -60,28 +62,33 @@ function EnrutadorSeguro() {
   }
 
   const cargarPerfil = async (userId) => {
+    setCargando(true);
+    setErrorPermisos("");
     try {
-      const { data } = await supabase
+      const { data, error: perfilError } = await supabase
         .from("perfiles")
         .select("rol, empresa, empresa_id, nombre")
         .eq("id", userId)
         .maybeSingle();
-      setPerfil(data || null);
+      if (perfilError) throw perfilError;
+      if (!data) throw new Error("No se encontró el perfil de este usuario.");
 
       const { data: rolesData, error: rolesError } = await supabase
         .from("perfiles_roles")
         .select("rol, activo")
         .eq("perfil_id", userId)
+        .eq("empresa_id", data.empresa_id)
         .eq("activo", true);
+      if (rolesError) throw rolesError;
 
-      if (rolesError) {
-        console.error("Error cargando roles adicionales:", rolesError);
-        setRolesExtra([]);
-      } else {
-        setRolesExtra((rolesData || []).map(r => String(r.rol || "").toLowerCase()));
-      }
+      // Publicar el perfil solamente cuando ambas consultas finalizaron correctamente.
+      setRolesExtra((rolesData || []).map(r => String(r.rol || "").toLowerCase()));
+      setPerfil(data);
     } catch (e) {
-      console.error(e);
+      console.error("No se pudieron verificar los permisos:", e);
+      setPerfil(null);
+      setRolesExtra([]);
+      setErrorPermisos(e?.message || "No se pudieron verificar los permisos.");
     } finally {
       setCargando(false);
     }
@@ -136,6 +143,19 @@ function EnrutadorSeguro() {
     return (
       <div style={{ minHeight: "100vh", backgroundColor: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: "sans-serif" }}>
         Iniciando RutaComercios...
+      </div>
+    );
+  }
+
+  if (sesion && errorPermisos) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0f172a", color: "white", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "sans-serif" }}>
+        <div style={{ maxWidth: 440, textAlign: "center" }}>
+          <h2>No se pudieron verificar tus permisos</h2>
+          <p>Por seguridad, RutaComercios no abrirá un módulo diferente al tuyo.</p>
+          <p style={{ color: "#fca5a5", overflowWrap: "anywhere" }}>{errorPermisos}</p>
+          <button type="button" onClick={() => cargarPerfil(sesion.user.id)} style={{ padding: "14px 24px", background: "#2563eb", border: 0, borderRadius: 10, color: "white", fontWeight: "bold" }}>Reintentar</button>
+        </div>
       </div>
     );
   }
@@ -220,9 +240,12 @@ if (!perfil) {
 if (ruta === "/express-demo" || ruta === "/express-demo/") {
   if (
     rol === "superadmin" ||
+    rol === "express_admin" ||
+    rol === "express_operador" ||
     rolesExtra.includes("express_admin") ||
     rolesExtra.includes("express_operador")
   ) {
+    if (rol === "express_admin" || rolesExtra.includes("express_admin")) return <AdminExpress />;
     return <RepartosExpress />;
   }
   window.location.replace("/");
@@ -231,7 +254,7 @@ if (ruta === "/express-demo" || ruta === "/express-demo/") {
 
 // Express: acceso exclusivo del motociclista, independiente de Repartos tradicional.
 if (ruta === "/express/repartidor" || ruta === "/express/repartidor/") {
-  if (rolesExtra.includes("express_repartidor")) {
+  if (rol === "express_repartidor" || rolesExtra.includes("express_repartidor")) {
     return <RepartidorExpress />;
   }
   window.location.replace("/");
@@ -293,6 +316,25 @@ if (ruta.startsWith("/promotores")) {
   if (rol === "superadmin") {
     if (ruta.startsWith("/supervisor")) return <Supervisor />;
     return <AdminClientes />;
+  }
+
+  // Usuarios exclusivos de Express: abrir su módulo al iniciar sesión.
+  // No altera la selección de módulos de usuarios con roles combinados.
+  if (rol === "express_admin") {
+    return <AdminExpress />;
+  }
+  if (rol === "express_operador") {
+    return <RepartosExpress />;
+  }
+  // Cuentas exclusivas Express con rol asignado en perfiles_roles.
+  if (rolesExtra.includes("express_admin") && !puedeVentas && !puedeRepartos && rol !== "superadmin") {
+    return <AdminExpress />;
+  }
+  if (rolesExtra.includes("express_operador") && !puedeVentas && !puedeRepartos && rol !== "superadmin") {
+    return <RepartosExpress />;
+  }
+  if (rol === "express_repartidor") {
+    return <RepartidorExpress />;
   }
 
   // Supervisor de Ventas con permiso adicional de Express:
@@ -394,7 +436,15 @@ if (ruta.startsWith("/promotores")) {
     window.location.replace("/");
     return null;
   }
-  return <App sesion={sesion} perfil={perfil} />;
+  if (rol === "preventista" || rolesExtra.includes("preventista")) {
+    return <App sesion={sesion} perfil={perfil} />;
+  }
+  return (
+    <div style={{ minHeight: "100vh", background: "#0f172a", color: "white", padding: 30, fontFamily: "sans-serif", textAlign: "center" }}>
+      <h2>No se encontró un módulo habilitado para tu cuenta</h2>
+      <p>Consultá con el administrador para verificar tus permisos.</p>
+    </div>
+  );
 }
 
 createRoot(document.getElementById("root")).render(
