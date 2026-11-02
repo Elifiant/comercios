@@ -2,6 +2,7 @@ import React, { useState } from "react";
 
 export default function WebComercial() {
   const [faqAbierta, setFaqAbierta] = useState(null);
+  const [solucionActiva, setSolucionActiva] = useState(0);
 
   const toggleFaq = (idx) => {
     setFaqAbierta(faqAbierta === idx ? null : idx);
@@ -203,38 +204,107 @@ export default function WebComercial() {
             >
               SOLICITAR DEMO
             </a>
+            <a
+              href={whatsapp}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Escribir al WhatsApp 11.6664.6806"
+              style={{
+                backgroundColor: "#16a34a",
+                color: "#ffffff",
+                textDecoration: "none",
+                fontSize: "14px",
+                fontWeight: "900",
+                whiteSpace: "nowrap",
+                padding: "12px 17px",
+                borderRadius: "10px",
+                boxShadow: "0 4px 12px rgba(22,163,74,0.2)",
+              }}
+            >
+              💬 WHATSAPP 11.6664.6806
+            </a>
           </div>
         </div>
       </header>
 
       {/* HERO */}
       <main>
-        {/* SOLUCIONES: ACCESOS PRINCIPALES */}
-        <section id="soluciones" style={{ padding: "20px 18px 18px", backgroundColor: "#f8fafc", boxSizing: "border-box" }}>
-          <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
-            <div style={{ textAlign: "center", marginBottom: "14px" }}>
-              <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#2563eb" }}>NUESTRAS SOLUCIONES</div>
-              <h2 style={{ fontSize: "clamp(28px, 4vw, 40px)", color: "#0f172a", margin: "10px 0" }}>Elegí la herramienta para tu negocio</h2>
-              <p style={{ color: "#64748b", fontSize: "15px", lineHeight: 1.6, margin: 0 }}>Cinco propuestas para distintas formas de trabajar.</p>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "12px" }}>
-              {[
-                { icono: "🛒", titulo: "RutaComercios Ventas", texto: "Preventistas, pedidos, visitas y supervisión comercial.", accion: "CONOCER VENTAS", enlace: "#ventas", color: "#2563eb" },
-                { icono: "🚚", titulo: "RutaComercios Repartos", texto: "Organizá entregas, asigná repartidores y seguí los recorridos.", accion: "CONOCER REPARTOS", enlace: "#repartos", color: "#0f766e" },
-                { icono: "📱", titulo: "VentaFácil", texto: "Registrá ventas, clientes y artículos. Gratis y sin registro.", accion: "USAR GRATIS", enlace: "https://ventafacil.rutacomercios.com/", color: "#16a34a" },
-                { icono: "👥", titulo: "VentaFácil Equipo", texto: "Una opción para equipos que necesitan compartir la gestión de ventas. En evaluación.", accion: "CONSULTAR", enlace: "#contacto", color: "#d97706" },
-                { icono: "🏪", titulo: "Simplex", texto: "Una opción simple para la actividad comercial.", accion: "CONSULTAR SIMPLEX", enlace: "#contacto", color: "#7c3aed" },
-              ].map((app) => (
-                <article key={app.titulo} style={{ display: "flex", flexDirection: "column", padding: "18px", borderRadius: "18px", border: "1px solid #e2e8f0", backgroundColor: "#ffffff", boxShadow: "0 8px 24px rgba(15,23,42,0.05)" }}>
-                  <div style={{ fontSize: "30px" }}>{app.icono}</div>
-                  <h3 style={{ fontSize: "18px", margin: "9px 0 6px", color: "#0f172a" }}>{app.titulo}</h3>
-                  <p style={{ color: "#475569", lineHeight: 1.6, fontSize: "14px", flexGrow: 1, margin: "0 0 12px" }}>{app.texto}</p>
-                  <a href={app.enlace} style={{ display: "block", textAlign: "center", padding: "13px 10px", borderRadius: "10px", backgroundColor: app.color, color: "#ffffff", textDecoration: "none", fontSize: "12px", fontWeight: 900 }}>{app.accion}</a>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
+                 {/* SOLUCIONES: CATÁLOGO INTERACTIVO */}
+         <section id="soluciones" className="rc-soluciones" style={{ padding: "38px 18px 48px", background: "linear-gradient(180deg,#f8fbff 0%,#f1f5f9 100%)", boxSizing: "border-box" }}>
+           <style>{`
+             .rc-catalogo { display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.75fr); gap: 18px; align-items: stretch; }
+             .rc-opciones { display: flex; flex-direction: column; gap: 10px; }
+             .rc-opcion { display: flex; align-items: center; width: 100%; min-height: 76px; padding: 12px 14px; gap: 13px; border-radius: 17px; border: 1px solid #dbe4f0; background: #fff; text-align: left; cursor: pointer; box-shadow: 0 5px 16px rgba(15,23,42,.045); transition: border-color .15s, background .15s, transform .15s; color: #0f172a; font-family: inherit; }
+             .rc-opcion:hover { transform: translateX(3px); border-color: #94a3b8; }
+             .rc-opcion:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+             .rc-opcion.rc-elegida { border: 2px solid var(--rc-acento); background: var(--rc-fondo); padding: 11px 13px; }
+             .rc-opcion-icono { font-size: 28px; width: 37px; flex-shrink: 0; text-align: center; }
+             .rc-opcion-texto { flex: 1; min-width: 0; }
+             .rc-opcion-titulo { display: block; font-size: 15px; font-weight: 900; line-height: 1.3; }
+             .rc-opcion-subtitulo { display: block; font-size: 12px; color: #64748b; line-height: 1.45; margin-top: 4px; }
+             .rc-panel { position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; padding: clamp(22px,3vw,38px); border-radius: 24px; border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 14px 38px rgba(15,23,42,.075); }
+             .rc-panel::after { content: ''; position: absolute; width: 320px; height: 320px; border-radius: 50%; right: -130px; top: -160px; background: var(--rc-suave); opacity: .85; pointer-events: none; }
+             .rc-panel-cabecera { position: relative; z-index: 1; display: flex; gap: 22px; align-items: center; }
+             .rc-panel-cuerpo { flex: 1; min-width: 0; }
+             .rc-panel-ilustracion { display: flex; justify-content: center; align-items: center; width: clamp(100px,15vw,175px); height: clamp(100px,15vw,175px); flex-shrink: 0; border-radius: 28px; background: var(--rc-suave); font-size: clamp(65px,9vw,112px); }
+             .rc-beneficios { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin: 26px 0 22px; position: relative; z-index: 1; }
+             .rc-beneficio { display: flex; align-items: center; gap: 9px; padding: 13px 12px; border-radius: 13px; border: 1px solid #e2e8f0; background: #f8fafc; font-size: 13px; font-weight: 750; color: #1e293b; }
+             .rc-panel-boton { display: block; width: fit-content; min-width: 220px; text-align: center; padding: 15px 24px; border-radius: 12px; background: var(--rc-acento); color: #fff; text-decoration: none; font-size: 14px; font-weight: 900; position: relative; z-index: 1; box-sizing: border-box; }
+             .rc-panel-boton:hover { filter: brightness(.94); }
+             .rc-panel-boton:focus-visible { outline: 3px solid #0f172a; outline-offset: 3px; }
+             @media (max-width: 780px) { .rc-catalogo { grid-template-columns: 1fr; } .rc-opciones { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); } .rc-opcion { min-height: 84px; } .rc-opcion-titulo { font-size: 13px; } .rc-opcion-subtitulo { font-size: 11px; } }
+             @media (max-width: 480px) { .rc-opciones { grid-template-columns: 1fr; gap: 8px; } .rc-opcion { min-height: 65px; } .rc-panel-cabecera { align-items: flex-start; gap: 12px; } .rc-panel-ilustracion { width: 72px; height: 72px; border-radius: 18px; font-size: 48px; } .rc-beneficios { grid-template-columns: 1fr; gap: 8px; margin: 18px 0; } .rc-panel-boton { width: 100%; min-width: 0; } }
+           `}</style>
+           <div style={{ maxWidth: "1120px", margin: "0 auto" }}>
+             <div style={{ textAlign: "center", marginBottom: "28px" }}>
+               <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1.4px", color: "#2563eb" }}>NUESTRAS SOLUCIONES</div>
+               <h2 style={{ fontSize: "clamp(28px, 4vw, 42px)", color: "#0f172a", margin: "10px 0" }}>Encontrá la herramienta para tu negocio</h2>
+               <p style={{ color: "#64748b", fontSize: "15px", lineHeight: 1.6, margin: 0 }}>Seis soluciones pensadas para distintas formas de trabajar.</p>
+             </div>
+             {(() => {
+               const soluciones = [
+                 { icono: "🛵", titulo: "RutaComercios Express", publico: "Deliverys, pizzerías, heladerías y más", encabezado: "Para comercios con entregas rápidas", descripcion: "Coordiná pedidos, asigná repartidores, seguí las entregas y controlá las rendiciones de efectivo desde un solo lugar.", beneficios: ["Gestión de pedidos", "Asignación de repartidores", "Seguimiento de entregas", "Rendiciones de efectivo"], accion: "CONOCER EXPRESS", enlace: "#express", color: "#ea580c", fondo: "#fff7ed", suave: "#ffedd5" },
+                 { icono: "🛒", titulo: "RutaComercios Ventas", publico: "Mayoristas con preventistas", encabezado: "Para mayoristas y distribuidoras", descripcion: "Organizá las visitas, los pedidos y los equipos de preventistas. Supervisá la actividad comercial desde un mismo sistema.", beneficios: ["Visitas a comercios", "Toma de pedidos", "Gestión de clientes", "Supervisión comercial"], accion: "CONOCER VENTAS", enlace: "#ventas", color: "#2563eb", fondo: "#eff6ff", suave: "#dbeafe" },
+                 { icono: "🚚", titulo: "RutaComercios Repartos", publico: "Entregas y distribución en general", encabezado: "Para empresas que realizan repartos", descripcion: "Organizá entregas y recorridos, asigná repartidores y seguí el avance de cada reparto, con o sin el módulo de Ventas.", beneficios: ["Carga de entregas", "Asignación de repartidores", "Organización de recorridos", "Control de entregas"], accion: "CONOCER REPARTOS", enlace: "#repartos", color: "#0f766e", fondo: "#f0fdfa", suave: "#ccfbf1" },
+                 { icono: "📱", titulo: "VentaFácil", publico: "Registrá las ventas de tu local", encabezado: "Para registrar tus ventas en el local", descripcion: "Llevá tus clientes, artículos y ventas desde el celular. Gratis, sin registro y con datos guardados en tu dispositivo.", beneficios: ["Registro de ventas", "Clientes y artículos", "Compartir por WhatsApp", "Gratis y sin registro"], accion: "USAR GRATIS", enlace: "https://ventafacil.rutacomercios.com/", color: "#16a34a", fondo: "#f0fdf4", suave: "#dcfce7" },
+                 { icono: "👥", titulo: "VentaFácil Equipo", publico: "Varios vendedores en un mismo local", encabezado: "Para negocios con varios vendedores", descripcion: "Una propuesta para organizar el trabajo de varios vendedores en un mismo comercio. Modalidad en evaluación.", beneficios: ["Trabajo en equipo", "Gestión de ventas", "Pensado para un mismo local", "Consultá la propuesta"], accion: "CONSULTAR", enlace: "#contacto", color: "#d97706", fondo: "#fffbeb", suave: "#fef3c7" },
+                 { icono: "🏪", titulo: "Simplex", publico: "Vendedores independientes · todo en uno", encabezado: "Para vendedores independientes", descripcion: "Una solución todo en uno para administrar clientes, artículos, pedidos y tu actividad comercial.", beneficios: ["Clientes", "Artículos", "Pedidos", "Gestión comercial"], accion: "CONSULTAR SIMPLEX", enlace: "#contacto", color: "#7c3aed", fondo: "#faf5ff", suave: "#ede9fe" },
+               ];
+               const actual = soluciones[solucionActiva];
+               return (
+                 <div className="rc-catalogo">
+                   <div className="rc-opciones" aria-label="Elegir una solución">
+                     {soluciones.map((item, idx) => (
+                       <button key={item.titulo} type="button" className={`rc-opcion ${solucionActiva === idx ? "rc-elegida" : ""}`}
+                         onMouseEnter={() => setSolucionActiva(idx)} onFocus={() => setSolucionActiva(idx)} onClick={() => setSolucionActiva(idx)}
+                         aria-pressed={solucionActiva === idx}
+                         style={{ "--rc-acento": item.color, "--rc-fondo": item.fondo }}>
+                         <span className="rc-opcion-icono" aria-hidden="true">{item.icono}</span>
+                         <span className="rc-opcion-texto"><span className="rc-opcion-titulo">{item.titulo}</span><span className="rc-opcion-subtitulo">{item.publico}</span></span>
+                         <span aria-hidden="true" style={{ fontSize: 24, fontWeight: 900, color: solucionActiva === idx ? item.color : "#64748b" }}>›</span>
+                       </button>
+                     ))}
+                   </div>
+                   <article className="rc-panel" style={{ "--rc-acento": actual.color, "--rc-suave": actual.suave }} aria-live="polite">
+                     <div className="rc-panel-cabecera">
+                       <div className="rc-panel-cuerpo">
+                         <div style={{ color: actual.color, fontWeight: 900, fontSize: 12, letterSpacing: 1.1, marginBottom: 10 }}>SOLUCIÓN PARA TU NEGOCIO</div>
+                         <h3 style={{ color: "#0f172a", fontSize: "clamp(24px,3vw,36px)", lineHeight: 1.12, margin: "0 0 12px", letterSpacing: "-0.8px" }}>{actual.titulo}</h3>
+                         <p style={{ color: "#0f172a", fontWeight: 850, fontSize: "clamp(15px,2vw,19px)", lineHeight: 1.35, margin: "0 0 12px" }}>{actual.encabezado}</p>
+                         <p style={{ color: "#475569", fontSize: 15, lineHeight: 1.7, margin: 0 }}>{actual.descripcion}</p>
+                       </div>
+                       <div className="rc-panel-ilustracion" aria-hidden="true">{actual.icono}</div>
+                     </div>
+                     <div className="rc-beneficios">
+                       {actual.beneficios.map((beneficio, idx) => <div key={beneficio} className="rc-beneficio"><span aria-hidden="true" style={{ color: actual.color, fontWeight: 900, fontSize: 19 }}>{["✓", "✓", "✓", "✓"][idx]}</span>{beneficio}</div>)}
+                     </div>
+                     <a className="rc-panel-boton" href={actual.enlace}>{actual.accion} →</a>
+                   </article>
+                 </div>
+               );
+             })()}
+           </div>
+         </section>
 
         <section
           style={{
@@ -883,6 +953,18 @@ export default function WebComercial() {
             <a href="#contacto" style={{ display: "inline-block", padding: "14px 22px", backgroundColor: "#0f766e", borderRadius: "11px", textDecoration: "none", color: "white", fontWeight: 900, fontSize: "14px" }}>SOLICITAR DEMO DE REPARTOS</a>
           </div>
         </section>
+        {/* EXPRESS: SOLUCIÓN COMERCIAL */}
+        <section id="express" style={{ padding: "65px 18px", backgroundColor: "#fff7ed", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: "900px", margin: "0 auto", textAlign: "center" }}>
+            <div style={{ color: "#c2410c", fontSize: "12px", fontWeight: 900, letterSpacing: "1px" }}>RUTACOMERCIOS EXPRESS</div>
+            <h2 style={{ fontSize: "clamp(28px, 4vw, 40px)", color: "#0f172a", margin: "12px 0" }}>🛵 Tus entregas rápidas, bajo control</h2>
+            <p style={{ maxWidth: "740px", margin: "0 auto 22px", color: "#475569", fontSize: "15px", lineHeight: 1.7 }}>
+              Organizá los pedidos, asigná repartidores, seguí el avance de las entregas y controlá las rendiciones de efectivo desde un mismo sistema.
+              Una solución pensada para negocios que realizan entregas rápidas y necesitan coordinar su operación diaria.
+            </p>
+            <a href="#contacto" style={{ display: "inline-block", padding: "14px 22px", backgroundColor: "#ea580c", borderRadius: "11px", textDecoration: "none", color: "white", fontWeight: 900, fontSize: "14px" }}>CONSULTAR POR EXPRESS</a>
+          </div>
+        </section>
         {/* COMERCIAL */}
         <section
           id="contacto"
@@ -936,7 +1018,7 @@ export default function WebComercial() {
                 lineHeight: "1.65",
               }}
             >
-              Contanos qué necesitás: Ventas, Repartos o Simplex. Te
+              Contanos qué necesitás: Ventas, Repartos, Express o Simplex. Te
               mostramos las opciones y evaluamos juntos la configuración que
               mejor se adapte a tu operación.
             </p>
@@ -1117,20 +1199,25 @@ export default function WebComercial() {
         aria-label="Consultar RutaComercios por WhatsApp"
         style={{
           position: "fixed",
-          right: "16px",
-          bottom: "16px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          bottom: "18px",
+          maxWidth: "calc(100vw - 32px)",
+          boxSizing: "border-box",
+          textAlign: "center",
+          whiteSpace: "nowrap",
           zIndex: 120,
           backgroundColor: "#16a34a",
           color: "#ffffff",
           textDecoration: "none",
           borderRadius: "999px",
-          padding: "11px 15px",
-          fontSize: "12px",
+          padding: "14px 22px",
+          fontSize: "14px",
           fontWeight: "900",
           boxShadow: "0 8px 22px rgba(0,0,0,0.22)",
         }}
       >
-        💬 Consultar
+        💬 WhatsApp 11.6664.6806
       </a>
     </div>
   );
