@@ -39,6 +39,7 @@ export default function RepartidorExpress() {
   const [viajes, setViajes] = useState([]);
   const [jornada, setJornada] = useState("trabajando");
   const [cambiandoJornada, setCambiandoJornada] = useState(false);
+  const [cerrandoSesion, setCerrandoSesion] = useState(false);
   const [relaciones, setRelaciones] = useState([]);
   const [pedidos, setPedidos] = useState({});
   const [cargando, setCargando] = useState(true);
@@ -169,6 +170,20 @@ export default function RepartidorExpress() {
     try { await Promise.all([cargar(sesion), cargarJornada(sesion), cargarSaldo()]); }
     catch (e) { setError(e.message || "No se pudo actualizar."); }
     finally { setActualizando(false); }
+  };
+
+  const cerrarSesion = async () => {
+    if (cerrandoSesion || !window.confirm("¿Cerrar sesión? Tu jornada laboral seguirá en el mismo estado.")) return;
+    setCerrandoSesion(true);
+    setError("");
+    try {
+      const { error: errorSalida } = await supabase.auth.signOut();
+      if (errorSalida) throw errorSalida;
+      window.location.replace("/");
+    } catch (e) {
+      setError(`No se pudo cerrar sesión: ${e.message || "Error desconocido"}`);
+      setCerrandoSesion(false);
+    }
   };
 
   const cambiarJornada = async (accion) => {
@@ -375,14 +390,20 @@ export default function RepartidorExpress() {
     <main style={{ minHeight: "100vh", background: fondo, color: "white", padding: "18px 12px 55px", fontFamily: "system-ui, sans-serif", boxSizing: "border-box" }}>
       <div style={{ maxWidth: 750, margin: "0 auto" }}>
         <h1 style={{ fontSize: "clamp(24px, 6vw, 34px)", marginBottom: 4, color: "#f8fafc", fontWeight: 800, fontSize: 14, margin: "5px 0" }}>🛵 RutaComercios Express</h1>
-        <p style={{ color: textoSuave, marginTop: 0 }}>Mis repartos {sesion ? `· ${sesion.nombre}` : ""}</p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+          <p style={{ color: textoSuave, margin: 0, minWidth: 0 }}>Mis repartos {sesion ? `· ${sesion.nombre}` : ""}</p>
+          {sesion && <button type="button" onClick={cerrarSesion} disabled={cerrandoSesion}
+            style={{ ...btn, background: "#475569", fontSize: 13, padding: "10px 12px", flexShrink: 0 }}>
+            {cerrandoSesion ? "Saliendo…" : "🚪 SALIR"}
+          </button>}
+        </div>
         {cargando && <p>Consultando tus pedidos...</p>}
         {aviso && <p role="status" style={{ background: "#14532d", padding: 12, borderRadius: 10 }}>{aviso}</p>}
         {error && <p role="alert" style={{ background: "#7f1d1d", padding: 12, borderRadius: 10 }}>{error}</p>}
         {sesion && <>
           <section style={{ background: tarjeta, border: `1px solid ${borde}`, padding: 14, borderRadius: 12, marginBottom: 14 }}>
             <strong style={{ fontSize: 18 }}>{jornada === "finalizada" ? "🌙 Jornada finalizada" : "🟢 Jornada trabajando"}</strong>
-            <p style={{ color: textoSuave, fontSize: 13 }}>La jornada es independiente de cada recorrido. Podés terminarla desde cualquier lugar, siempre que no tengas entregas pendientes ni otro reparto preparado.</p>
+
             <button type="button" disabled={cambiandoJornada || Boolean(registrandoPedido) || Boolean(iniciandoViaje)}
               onClick={() => cambiarJornada(jornada === "finalizada" ? "iniciar" : "finalizar")}
               style={{ ...btn, width: "100%", minHeight: 56, background: jornada === "finalizada" ? "#15803d" : "#475569" }}>

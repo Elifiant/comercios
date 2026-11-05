@@ -1104,7 +1104,6 @@ export default function RepartosExpress() {
     { id: "rendiciones", icono: "💰", texto: "Rendiciones", accion: () => { setVista("rendiciones"); cargarControlExpress(); } },
     { id: "devoluciones", icono: "📦", texto: "Devoluciones", accion: () => { setVista("devoluciones"); cargarControlExpress(); } },
     { id: "cierre", icono: "🌙", texto: "Cierre y turnos", accion: () => { setVista("cierre"); cargarHerencias(); } },
-    { id: "configuracion", icono: "⚙️", texto: "Configuración", accion: () => { setVista("configuracion"); setAvisoConfig(""); } },
   ];
   const tituloActual = menuExpress.find(m => m.id === vista)?.texto || "Express";
 
@@ -1188,7 +1187,7 @@ export default function RepartosExpress() {
           {identidad && <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, background: "#17243a", border: `1px solid ${colores.borde}`, borderRadius: 11, padding: "10px 14px", marginBottom: 14 }}>
             <strong>🕒 Turno comercial</strong>
             {cargandoTurno ? <span>Consultando turno...</span> : turnoActual ? (
-              <span style={{ color: "#86efac" }}>● Abierto desde {new Date(turnoActual.inicio_en).toLocaleString("es-AR")} · Los nuevos pedidos se asocian a este turno.</span>
+              <span style={{ color: "#86efac" }}>● Abierto · {new Date(turnoActual.inicio_en).toLocaleString("es-AR")}</span>
             ) : (
               <>
                 <span style={{ color: "#fde68a" }}>No tenés un turno abierto.</span>
@@ -1196,7 +1195,6 @@ export default function RepartosExpress() {
               </>
             )}
             {errorTurno && <span role="alert" style={{ color: "#fca5a5", width: "100%" }}>{errorTurno}</span>}
-            <span style={{ color: colores.suave, fontSize: 12, width: "100%" }}>Los indicadores muestran los pedidos bajo responsabilidad actual de tu turno, incluidos los heredados (entre los últimos 500 cargados). Los transferidos a otro supervisor ya no cuentan como tuyos.</span>
           </div>}
 
           {!identidad ? null : (
@@ -1336,7 +1334,6 @@ export default function RepartosExpress() {
 
           <section style={{ background: colores.tarjeta, border: `1px solid ${colores.borde}`, borderRadius: 14, padding: 18, marginBottom: 18 }}>
             <h2 style={{ marginTop: 0 }}>👥 Estados de repartidores</h2>
-            <p style={{ color: colores.suave }}>Situación de la jornada y avance de las entregas. Se actualiza automáticamente.</p>
             {!repartidores.length && <p>No hay repartidores habilitados en esta empresa.</p>}
             {repartidores.map(r => {
               const { actual, proximo, total, resueltos, porcentaje } = resumenRepartidor(r.id);
@@ -1356,31 +1353,9 @@ export default function RepartosExpress() {
               </article>;
             })}
           </section>
-        ) : vista === "configuracion" ? (
-          <section style={{ background: colores.tarjeta, border: `1px solid ${colores.borde}`, borderRadius: 14, padding: 18 }}>
-            <h2 style={{ marginTop: 0 }}>📍 Datos de la sucursal {nombreSucursalOperativa ? `· ${nombreSucursalOperativa}` : ""}</h2>
-            <p style={{ color: colores.suave }}>Estos datos los administra el dueño desde su panel. El supervisor solamente los consulta.</p>
-            {cargandoConfig ? <p>Cargando datos...</p> : (
-              <div style={{ display: "grid", gap: 12 }}>
-                <div><strong>Comercio:</strong> {configComercio.nombre_comercio || "Sin configurar"}</div>
-                <div><strong>Dirección:</strong> {configComercio.direccion || "Sin configurar"}</div>
-                <div><strong>Radio de entregas:</strong> {configComercio.radio_entregas_km ?? "Sin configurar"} km</div>
-                <div><strong>Ubicación GPS:</strong> {configComercio.latitud != null && configComercio.longitud != null
-                  ? `${Number(configComercio.latitud).toFixed(6)}, ${Number(configComercio.longitud).toFixed(6)}`
-                  : "Pendiente de configurar por el dueño"}</div>
-                {(configComercio.latitud == null || configComercio.longitud == null || !configComercio.direccion) && (
-                  <p style={{ color: "#fde68a" }}>⚠️ El dueño debe completar la dirección y ubicación GPS de esta sucursal desde su panel antes de cargar entregas.</p>
-                )}
-                {avisoConfig && <p role="status">{avisoConfig}</p>}
-              </div>
-            )}
-          </section>
         ) : vista === "asignar" ? (
           <section style={{ background: colores.tarjeta, border: `1px solid ${colores.borde}`, borderRadius: 14, padding: 18 }}>
             <h2 style={{ marginTop: 0 }}>🛵 Preparar pedidos por repartidor</h2>
-            <p style={{ color: colores.suave, fontSize: 13 }}>
-              Arrastrá pedidos o usá «Asignar» desde el celular. Las operaciones se guardan en Supabase.
-            </p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))", gap: 16 }}>
               <div style={{ background: "#111827", borderRadius: 12, padding: 14 }}>
                 <h3>📋 Pedidos listos para salir</h3>
@@ -1438,7 +1413,6 @@ export default function RepartosExpress() {
                 ))}
               </div>
             </div>
-            <p style={{ color: colores.suave, fontSize: 13 }}>Los viajes en preparación quedan guardados al actualizar. Los recorridos anteriores no se repiten en este panel. Las entregas resueltas pasan automáticamente a ↩️ Regresando; las rendiciones se consultan por separado.</p>
           </section>
         ) : vista === "nuevo" ? (
           <section style={{ background: colores.tarjeta, border: `1px solid ${colores.borde}`, borderRadius: 14, padding: 20 }}>
@@ -1687,7 +1661,6 @@ export default function RepartosExpress() {
                 </article>
               ))}
             </div>
-            <p style={{ color: colores.suave, fontSize: 12, marginTop: 10 }}>Pedidos de tu responsabilidad actual (consulta limitada a los últimos 500 de la empresa). Para asignarlos, usá «Preparar viajes». {esAdminExpress ? "Vista general del administrador." : "Vista operativa de tu turno y transferencias recibidas."}</p>
           </section>
         )}
           </>
