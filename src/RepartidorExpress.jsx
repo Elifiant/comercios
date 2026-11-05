@@ -21,6 +21,8 @@ const distanciaMetros = (a, b) => {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
   return 12742000 * Math.asin(Math.min(1, Math.sqrt(h)));
 };
+const GPS_RECIENTE_MS = 30000;
+const GPS_PRECISION_BUENA_M = 100;
 const mostrarDistancia = m => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2).replace(".", ",")} km`;
 function AjustarMapa({ puntos }) {
   const map = useMap();
@@ -47,10 +49,30 @@ export default function RepartidorExpress() {
   const [aviso, setAviso] = useState("");
   const [registrandoPedido, setRegistrandoPedido] = useState(null);
   const [gps, setGps] = useState(null);
+  const [ahoraGps, setAhoraGps] = useState(Date.now());
   const [errorGps, setErrorGps] = useState("");
   const [coordenadas, setCoordenadas] = useState({});
   const [errorMapa, setErrorMapa] = useState("");
   const [verMapa, setVerMapa] = useState(true);
+  const [saldoEfectivo, setSaldoEfectivo] = useState(null);
+  const [errorSaldo, setErrorSaldo] = useState("");
+  const [cargandoSaldo, setCargandoSaldo] = useState(false);
+
+  const cargarSaldo = useCallback(async () => {
+    setCargandoSaldo(true);
+    try {
+      const { data, error: err } = await supabase.rpc("express_mi_saldo_repartidor");
+      if (err) throw err;
+      setSaldoEfectivo(data?.[0] || null);
+      setErrorSaldo("");
+    } catch (e) {
+      setSaldoEfectivo(null);
+      setErrorSaldo(e.message || "No se pudo consultar el saldo.");
+    } finally {
+      setCargandoSaldo(false);
+    }
+  }, []);
+
 
 
   const cargarJornada = useCallback(async (identidad) => {
@@ -113,7 +135,7 @@ export default function RepartidorExpress() {
         const identidad = { usuarioId: user.id, empresaId: perfil.empresa_id, nombre: perfil.nombre || "Repartidor" };
         if (!vivo) return;
         setSesion(identidad);
-        await Promise.all([cargar(identidad), cargarJornada(identidad)]);
+        await Promise.all([cargar(identidad), cargarJornada(identidad), cargarSaldo()]);
       } catch (e) {
         if (vivo) setError(e.message || "No se pudieron cargar los repartos.");
       } finally {
@@ -121,9 +143,9 @@ export default function RepartidorExpress() {
       }
     })();
     return () => { vivo = false; };
-  }, [cargar, cargarJornada]);
+  }, [cargar, cargarJornada, cargarSaldo]);
 
-  // Refrescar asignaciones y estado de jornada sin recargar la pantalla.
+  // Refrescar asignaciones y saldo sin consultar periódicamente la jornada.
   useEffect(() => {
     if (!sesion) return;
     let activo = true;
@@ -132,19 +154,19 @@ export default function RepartidorExpress() {
       if (!activo || ocupado || document.visibilityState === "hidden") return;
       ocupado = true;
       try {
-        await Promise.all([cargar(sesion), cargarJornada(sesion)]);
+        await cargar(sesion);
       } catch (e) {
         console.warn("Express: no se pudieron actualizar las asignaciones", e);
       } finally { ocupado = false; }
     }, 15000);
     return () => { activo = false; clearInterval(timer); };
-  }, [sesion?.usuarioId, sesion?.empresaId, cargar, cargarJornada]);
+  }, [sesion?.usuarioId, sesion?.empresaId, cargar, cargarJornada, cargarSaldo]);
 
   const actualizar = async () => {
     if (!sesion || actualizando) return;
     setActualizando(true);
     setError("");
-    try { await Promise.all([cargar(sesion), cargarJornada(sesion)]); }
+    try { await Promise.all([cargar(sesion), cargarJornada(sesion), cargarSaldo()]); }
     catch (e) { setError(e.message || "No se pudo actualizar."); }
     finally { setActualizando(false); }
   };
@@ -196,6 +218,33 @@ export default function RepartidorExpress() {
     }
   };
 
+  // Una lectura reciente para la entrega: la ubicación del mapa nunca sustituye esta verificación.
+  const medirEntrega = (pedido) => new Promise(resolve => {
+    const destino = puntoPedido(pedido);
+    if (!destino || !Number.isFinite(destino.lat) || !Number.isFinite(destino.lon)) {
+      resolve({ estado: "sin_destino", distancia: null, precision: null, lat: null, lon: null });
+      return;
+    }
+    if (!navigator.geolocation) {
+      resolve({ estado: "sin_gps", distancia: null, precision: null, lat: null, lon: null });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(pos => {
+      const lat = pos.coords.latitude, lon = pos.coords.longitude;
+      const precision = pos.coords.accuracy;
+      // Algunos navegadores pueden devolver una lectura en caché aun solicitando maximumAge: 0.
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+          !Number.isFinite(pos.timestamp) || Date.now() - pos.timestamp > GPS_RECIENTE_MS ||
+          pos.timestamp > Date.now() + 5000) {
+        resolve({ estado: "sin_gps", distancia: null, precision: null, lat: null, lon: null });
+        return;
+      }
+      resolve({ estado: "medido", distancia: Math.round(distanciaMetros({ lat, lon }, destino)),
+        precision: Number.isFinite(precision) ? Math.round(precision) : null, lat, lon });
+    }, () => resolve({ estado: "sin_gps", distancia: null, precision: null, lat: null, lon: null }),
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 });
+  });
+
   const registrarEntrega = async (viaje, pedido, resultado) => {
     if (!sesion || registrandoPedido || viaje.estado !== "en_camino") return;
     const etiqueta = resultado === "entregado" ? "ENTREGADO" : "NO ENTREGADO";
@@ -206,37 +255,70 @@ export default function RepartidorExpress() {
       motivo = escrito.trim();
       if (!motivo) { setError("Es obligatorio indicar el motivo de la no entrega."); return; }
     }
-    if (!window.confirm(`¿Confirmar ${etiqueta} para EX-${String(pedido.numero_express).padStart(6, "0")}?\nEsta acción se guardará en Supabase.`)) return;
     setRegistrandoPedido(pedido.id);
-    setError("");
-    setAviso("");
+    setError(""); setAviso("");
     try {
+      // También auditamos NO ENTREGADO, para que no pueda eludirse la verificación.
+      const medicion = await medirEntrega(pedido);
+      const descripcion = medicion.estado === "medido"
+        ? `Distancia al destino: ${mostrarDistancia(medicion.distancia)} (precisión GPS aproximada: ${medicion.precision ?? "desconocida"} m).${medicion.precision == null || medicion.precision > GPS_PRECISION_BUENA_M ? "\n⚠️ La precisión es baja; la distancia es orientativa." : ""}${medicion.distancia > 100 ? "\n⚠️ La ubicación medida está a más de 100 metros del destino." : ""}`
+        : medicion.estado === "sin_destino" ? "⚠️ No hay coordenadas válidas del destino. La distancia no puede verificarse."
+        : "⚠️ No se pudo obtener una ubicación GPS nueva. La distancia no puede verificarse.";
+      const detalleRegistro = medicion.estado === "medido"
+        ? "Se intentará registrar la distancia y la precisión obtenidas."
+        : "Se intentará registrar la entrega como ubicación no verificada, sin distancia GPS.";
+      if (!window.confirm(`${descripcion}\n\n¿Confirmar ${etiqueta} para EX-${String(pedido.numero_express).padStart(6, "0")}?\n${detalleRegistro}`)) return;
       const { error: err } = await supabase.rpc("express_registrar_entrega", {
-        p_viaje: viaje.id,
-        p_pedido: pedido.id,
-        p_resultado: resultado,
-        p_motivo: motivo,
+        p_viaje: viaje.id, p_pedido: pedido.id, p_resultado: resultado, p_motivo: motivo,
       });
       if (err) throw err;
+      // Auditoría persistente. Si falla, avisamos claramente sin duplicar la entrega.
+      const { error: auditoriaError } = await supabase.from("express_entregas_gps").insert({
+        empresa_id: sesion.empresaId, viaje_id: viaje.id, pedido_id: pedido.id,
+        repartidor_id: sesion.usuarioId, resultado, estado_gps: medicion.estado,
+        distancia_m: medicion.distancia, precision_m: medicion.precision,
+        latitud: medicion.lat, longitud: medicion.lon,
+      });
       await cargar(sesion);
-      setAviso(`✓ Pedido EX-${String(pedido.numero_express).padStart(6, "0")} registrado como ${etiqueta}.`);
+      if (auditoriaError) {
+        setError(`⚠️ La entrega se registró, pero NO se guardó la auditoría GPS: ${auditoriaError.message}. No vuelvas a marcar la entrega.`);
+      } else {
+        setAviso(`✓ Pedido EX-${String(pedido.numero_express).padStart(6, "0")} ${etiqueta}. ${medicion.estado === "medido" ? `Distancia registrada: ${mostrarDistancia(medicion.distancia)}.` : "GPS no verificable (registrado)."}`);
+      }
     } catch (e) {
-      setError(`No se pudo registrar la entrega: ${e.message || "Error desconocido"}. Revisá el estado antes de reintentar.`);
-    } finally {
-      setRegistrandoPedido(null);
-    }
+      setError(`No se pudo completar la operación: ${e.message || "Error desconocido"}. Revisá el estado antes de reintentar.`);
+    } finally { setRegistrandoPedido(null); }
   };
 
   // El GPS se usa únicamente mientras la pantalla del repartidor está abierta.
   useEffect(() => {
     if (!sesion || !navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
-      pos => { setGps({ lat: pos.coords.latitude, lon: pos.coords.longitude }); setErrorGps(""); },
+      pos => {
+        setGps({ lat: pos.coords.latitude, lon: pos.coords.longitude, precision: pos.coords.accuracy, timestamp: pos.timestamp });
+        setAhoraGps(Date.now());
+        setErrorGps("");
+      },
       err => setErrorGps(err.code === 1 ? "Permití el acceso a la ubicación para ver las distancias." : "No se pudo obtener la ubicación GPS."),
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
     );
     return () => navigator.geolocation.clearWatch(id);
   }, [sesion?.usuarioId]);
+
+  // Actualizar la antigüedad visible aunque el GPS deje de enviar nuevas lecturas.
+  useEffect(() => {
+    if (!sesion) return;
+    const timer = setInterval(() => setAhoraGps(Date.now()), 10000);
+    return () => clearInterval(timer);
+  }, [sesion?.usuarioId]);
+
+  const antiguedadGps = gps?.timestamp != null ? Math.max(0, ahoraGps - gps.timestamp) : null;
+  const gpsReciente = antiguedadGps != null && antiguedadGps <= GPS_RECIENTE_MS;
+  const gpsPreciso = gpsReciente && Number.isFinite(gps?.precision) && gps.precision <= GPS_PRECISION_BUENA_M;
+  const etiquetaGps = !gps ? "🔴 GPS no disponible"
+    : !gpsReciente ? `🟡 Última ubicación conocida · hace ${Math.max(1, Math.floor(antiguedadGps / 1000))} s`
+    : gpsPreciso ? `🟢 GPS actualizado · precisión ±${Math.round(gps.precision)} m`
+    : `🟡 GPS reciente, precisión baja${Number.isFinite(gps.precision) ? ` (±${Math.round(gps.precision)} m)` : ""}`;
 
   // Geoapify: cada dirección pendiente se consulta una sola vez por sesión.
   useEffect(() => {
@@ -310,10 +392,29 @@ export default function RepartidorExpress() {
           <button type="button" disabled={actualizando} onClick={actualizar} style={{ ...btn, background: "#2563eb", width: "100%", marginBottom: 14 }}>
             {actualizando ? "Actualizando..." : "↻ Actualizar mis pedidos"}
           </button>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 16 }}>
-            <div style={{ background: tarjeta, borderRadius: 12, padding: 14 }}><div style={{ color: textoSuave, fontSize: 13 }}>Pedidos asignados</div><strong style={{ fontSize: 30 }}>{totalAsignados}</strong></div>
-            <div style={{ background: tarjeta, borderRadius: 12, padding: 14 }}><div style={{ color: textoSuave, fontSize: 13 }}>Viajes en curso</div><strong style={{ fontSize: 30 }}>{totalEnRuta}</strong></div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, marginBottom: 14 }}>
+            <div style={{ background: tarjeta, borderRadius: 10, padding: "10px 5px", textAlign: "center", minWidth: 0 }}>
+              <div style={{ color: textoSuave, fontSize: 10 }}>Pedidos</div>
+              <strong style={{ fontSize: 23 }}>{totalAsignados}</strong>
+            </div>
+            <div style={{ background: tarjeta, borderRadius: 10, padding: "10px 5px", textAlign: "center", minWidth: 0 }}>
+              <div style={{ color: textoSuave, fontSize: 10 }}>Viajes en curso</div>
+              <strong style={{ fontSize: 23 }}>{totalEnRuta}</strong>
+            </div>
+            <button type="button" onClick={cargarSaldo} disabled={cargandoSaldo}
+              title={errorSaldo || (saldoEfectivo ? `Pendiente: ${dinero(saldoEfectivo.saldo_pendiente)}. Tocá para actualizar.` : "Tocá para consultar el saldo")}
+              style={{ background: tarjeta, color: "inherit", border: `1px solid ${borde}`, borderRadius: 10, padding: "7px 3px", minWidth: 0, cursor: "pointer", textAlign: "center" }}>
+              <div style={{ color: textoSuave, fontSize: 10, marginBottom: 4 }}>💵 Cobrado / Rendido</div>
+              <div style={{ fontSize: 12, fontWeight: 700, overflowWrap: "anywhere", lineHeight: 1.5 }}>
+                {errorSaldo ? "Saldo no disponible" : saldoEfectivo ? <>
+                  <div>{dinero(saldoEfectivo.total_cobrado)}</div>
+                  <div style={{ color: "#86efac" }}>{dinero(saldoEfectivo.total_rendido)}</div>
+                </> : "Consultando…"}
+              </div>
+              <div style={{ fontSize: 9, color: textoSuave, marginTop: 3 }}>{cargandoSaldo ? "Actualizando…" : "↻ Actualizar"}</div>
+            </button>
           </div>
+          {errorSaldo && <p role="alert" style={{ color: "#fca5a5", fontSize: 12 }}>{errorSaldo}</p>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
             {[["todos", "Actuales"], ["preparando", "Por salir"], ["en_camino", "En reparto"], ["historial", "Historial"]].map(([id, label]) =>
               <button key={id} type="button" onClick={() => setVista(id)} style={{ ...btn, background: vista === id ? "#7c3aed" : borde, fontSize: 14 }}>{label}</button>
@@ -325,15 +426,16 @@ export default function RepartidorExpress() {
             </button>
             {verMapa && <>
               <p style={{ color: textoSuave, fontSize: 13 }}>🔵 Destinos del {viajeActual?.estado === "en_camino" ? "recorrido actual" : "próximo recorrido"} · 🟢 Tu GPS. Elegí libremente el próximo destino.</p>
+              <p style={{ color: gpsPreciso ? "#86efac" : "#fbbf24", fontSize: 12 }}>{etiquetaGps}</p>
               {errorGps && <p style={{ color: "#fca5a5" }}>{errorGps}</p>}
               {errorMapa && <p style={{ color: "#fca5a5" }}>{errorMapa}</p>}
               <div style={{ height: 340, overflow: "hidden", borderRadius: 12 }}>
                 <MapContainer center={gps ? [gps.lat, gps.lon] : [-34.7206, -58.2545]} zoom={12} style={{ height: "100%", width: "100%" }}>
                   <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                   <AjustarMapa puntos={[...(gps ? [gps] : []), ...destinosMapa.map(x => x.punto)]} />
-                  {gps && <Marker position={[gps.lat, gps.lon]} icon={iconoGps}><Popup>🛵 Tu ubicación actual</Popup></Marker>}
+                  {gps && <Marker position={[gps.lat, gps.lon]} icon={iconoGps}><Popup>🛵 {etiquetaGps}</Popup></Marker>}
                   {destinosMapa.map(({ pedido, punto }) => <Marker key={pedido.id} position={[punto.lat, punto.lon]} icon={iconoDestino}>
-                    <Popup><strong>{pedido.cliente_nombre}</strong><div>{pedido.direccion}</div>{gps && <strong>{mostrarDistancia(distanciaMetros(gps, punto))} en línea recta</strong>}</Popup>
+                    <Popup><strong>{pedido.cliente_nombre}</strong><div>{pedido.direccion}</div>{gps && <strong>{mostrarDistancia(distanciaMetros(gps, punto))} en línea recta · {gpsReciente ? "GPS reciente" : "última ubicación conocida"}</strong>}</Popup>
                   </Marker>)}
                 </MapContainer>
               </div>

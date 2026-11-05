@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase, supabaseRegistro } from "./supabase";
 import PlanesAbonos from "./PlanesAbonos";
 
-const tipoContrato = (nombre = "") => nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas";
+const tipoContrato = (nombre = "") => nombre === "Simplex" ? "Simplex" : nombre.startsWith("Express · ") ? "Express" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas";
 
 export default function AdminClientes() {
   const [empresas, setEmpresas] = useState([]);
@@ -72,6 +72,8 @@ export default function AdminClientes() {
   const [vencimientoAbono, setVencimientoAbono] = useState("");
   const [cupoAbono, setCupoAbono] = useState("");
   const [cupoRepartidoresAbono, setCupoRepartidoresAbono] = useState("");
+  const [cupoAdminsExpress, setCupoAdminsExpress] = useState("1");
+  const [cupoSupervisoresExpress, setCupoSupervisoresExpress] = useState("1");
   const [diaCorteAbono, setDiaCorteAbono] = useState("");
   const [notasContratoAbono, setNotasContratoAbono] = useState("");
   const [editandoContratoAbono, setEditandoContratoAbono] = useState(false);
@@ -92,6 +94,14 @@ export default function AdminClientes() {
   const [cambioTemporalPago, setCambioTemporalPago] = useState(false);
   const [historialPagos, setHistorialPagos] = useState([]);
   const [empresaDetalleModal, setEmpresaDetalleModal] = useState(null);
+  const [altaExpress, setAltaExpress] = useState(null);
+  const [guardandoAltaExpress, setGuardandoAltaExpress] = useState(false);
+  const [sucursalesExpress, setSucursalesExpress] = useState([]);
+  const [cargandoSucursalesExpress, setCargandoSucursalesExpress] = useState(false);
+  const [guardandoSucursalesExpress, setGuardandoSucursalesExpress] = useState(false);
+  const [nombreNuevaSucursal, setNombreNuevaSucursal] = useState("");
+  const [mensajeSucursalesExpress, setMensajeSucursalesExpress] = useState("");
+
   const [mostrarModalEditar, setMostrarModalEditar] = useState(false);
   const [empresaAEditar, setEmpresaAEditar] = useState(null);
   const [diaCobroModal, setDiaCobroModal] = useState("05");
@@ -210,42 +220,33 @@ export default function AdminClientes() {
   };
 
   const eliminarEmpresa = async (emp) => {
-    if (emp === "Elifiant") {
-      alert("No se recomienda eliminar la empresa principal Elifiant.");
-      return;
-    }
-    const prevsAsociados = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase());
-    const mensaje = prevsAsociados.length > 0 
-      ? `¿Estás seguro de eliminar la empresa "${emp}"?\n\n⚠ ATENCIÓN: También se darán de baja automáticamente sus ${prevsAsociados.length} preventistas en Supabase.`
-      : `¿Estás seguro de eliminar la empresa "${emp}"?`;
-      
-    const confirma = window.confirm(mensaje);
-    if (!confirma) return;
+    const empresaDB = empresasRegistros.find(e => e.nombre === emp);
+    if (!empresaDB?.id) return alert("No encontré la empresa en Supabase. Actualizá la lista.");
+    if (emp === "Elifiant") return alert("La empresa principal Elifiant está protegida contra eliminación.");
 
+    // No borrar cuentas ni datos históricos automáticamente: primero detectar dependencias.
     try {
-      // 1. Borrado en Supabase de todos los preventistas de esta empresa
-      const { error } = await supabase.from("perfiles").delete().eq("empresa", emp);
-      if (error) console.warn("Aviso al borrar en perfiles:", error.message);
+      const [usuarios, abonos] = await Promise.all([
+        supabase.from("perfiles").select("id", { count: "exact", head: true }).eq("empresa_id", empresaDB.id),
+        supabase.from("empresa_abonos").select("id", { count: "exact", head: true }).eq("empresa_id", empresaDB.id)
+      ]);
+      if (usuarios.error) throw usuarios.error;
+      if (abonos.error) throw abonos.error;
+      if ((usuarios.count || 0) > 0 || (abonos.count || 0) > 0) {
+        return alert(`No se eliminó «${emp}». Tiene ${usuarios.count || 0} perfil(es) y ${abonos.count || 0} abono(s) asociados. Para evitar pérdida de datos, la eliminación definitiva queda bloqueada hasta revisar sus relaciones.`);
+      }
+      if (!window.confirm(`¿Eliminar DEFINITIVAMENTE «${emp}»?\n\nEsta acción no se puede deshacer. Solo continuará si Supabase permite borrar el registro sin afectar datos vinculados.`)) return;
 
-      // 2. Limpieza del estado de preventistas en memoria
-      setPreventistas(prev => prev.filter(p => (p.empresa || "").toLowerCase() !== emp.toLowerCase()));
-
-      // 3. Limpieza de la empresa en memoria y localStorage
-      setEmpresas(prev => prev.filter(e => e !== emp));
-      const nuevoMapa = { ...tarifasMap };
-      delete nuevoMapa[emp];
-      setTarifasMap(nuevoMapa);
-      try { localStorage.setItem("tarifas_empresas", JSON.stringify(nuevoMapa)); } catch(e){}
-
-      setDiasCorteMap(prev => {
-        const nuevoDias = { ...prev };
-        delete nuevoDias[emp];
-        return nuevoDias;
-      });
-
-      alert(`Empresa "${emp}" y sus preventistas eliminados definitivamente.`);
+      const { data, error } = await supabase.from("empresas")
+        .delete().eq("id", empresaDB.id).select("id");
+      if (error) throw error;
+      if (!data?.some(e => e.id === empresaDB.id)) {
+        throw new Error("Supabase no confirmó la eliminación. Puede faltar permiso; la empresa sigue registrada.");
+      }
+      await cargarDatos();
+      alert(`Empresa «${emp}» eliminada de Supabase.`);
     } catch (err) {
-      alert("Error al eliminar: " + (err.message || "Error desconocido"));
+      alert("No se eliminó la empresa. Puede tener registros vinculados o faltar permisos: " + (err.message || "Error desconocido"));
     }
   };
 
@@ -376,7 +377,7 @@ export default function AdminClientes() {
     setAbonoEmpresaActual(contrato);
     setEditandoContratoAbono(!contrato);
     setPlanSeleccionadoId(contrato?.plan_id || "");
-    setProductoAbono(contrato?.plan_nombre?.startsWith("Repartos · ") ? "Repartos" : contrato?.plan_nombre === "Simplex" ? "Simplex" : "Ventas");
+    setProductoAbono(contrato?.plan_nombre?.startsWith("Express · ") ? "Express" : contrato?.plan_nombre?.startsWith("Repartos · ") ? "Repartos" : contrato?.plan_nombre === "Simplex" ? "Simplex" : "Ventas");
     setVarianteSeleccionadaId(contrato?.variante_id || "");
     setPrecioAcordado(contrato?.precio_acordado == null ? "" : String(contrato.precio_acordado));
     setMonedaAcordada(contrato?.moneda || t.moneda || "ARS");
@@ -384,6 +385,8 @@ export default function AdminClientes() {
     setVencimientoAbono(contrato?.proximo_vencimiento || "");
     setCupoAbono(contrato?.cupo_preventistas == null ? String(cupoContratado || "") : String(contrato.cupo_preventistas));
     setCupoRepartidoresAbono(String(contrato?.cupo_repartidores ?? 0));
+    setCupoAdminsExpress(String(contrato?.cupo_admins_express ?? 1));
+    setCupoSupervisoresExpress(String(contrato?.cupo_supervisores_express ?? 1));
     setDiaCorteAbono(contrato?.dia_corte == null ? String(t.diaCorte || "") : String(contrato.dia_corte));
     setNotasContratoAbono(contrato?.notas || "");
     setMostrarModalPago(true);
@@ -394,7 +397,7 @@ export default function AdminClientes() {
     setMontoPago(String(Number(contrato?.precio_acordado ?? 0)));
     setMonedaPago(contrato?.moneda || "ARS");
     const nombre = contrato?.plan_nombre || "";
-    setProductoAbono(nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas");
+    setProductoAbono(nombre === "Simplex" ? "Simplex" : nombre.startsWith("Express · ") ? "Express" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas");
     setPlanSeleccionadoId(contrato?.plan_id || "");
     setVarianteSeleccionadaId(contrato?.variante_id || "");
     setPrecioAcordado(contrato?.precio_acordado == null ? "" : String(contrato.precio_acordado));
@@ -403,6 +406,8 @@ export default function AdminClientes() {
     setVencimientoAbono(contrato?.proximo_vencimiento || "");
     setCupoAbono(String(contrato?.cupo_preventistas ?? 0));
     setCupoRepartidoresAbono(String(contrato?.cupo_repartidores ?? 0));
+    setCupoAdminsExpress(String(contrato?.cupo_admins_express ?? 1));
+    setCupoSupervisoresExpress(String(contrato?.cupo_supervisores_express ?? 1));
     setDiaCorteAbono(String(contrato?.dia_corte || ""));
     setNotasContratoAbono(contrato?.notas || "");
   };
@@ -419,16 +424,87 @@ export default function AdminClientes() {
     const variante = variantesCatalogo.find(v => v.id === varianteSeleccionadaId);
     if (!plan || !variante) return alert("No pude encontrar el plan o la modalidad seleccionada.");
     if (variante.plan_id !== plan.id) return alert("La modalidad no corresponde al plan seleccionado.");
-    const nombreProducto = plan.nombre === "Simplex" ? "Simplex" : plan.nombre.startsWith("Repartos · ") ? "Repartos" : plan.nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : "Ventas";
+    const nombreProducto = plan.nombre === "Simplex" ? "Simplex" : plan.nombre.startsWith("Express · ") ? "Express" : plan.nombre.startsWith("Repartos · ") ? "Repartos" : plan.nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : "Ventas";
     if (nombreProducto !== productoAbono) return alert("El plan elegido no corresponde al producto seleccionado.");
     // Simplex es un producto independiente: nunca se combina con otros contratos.
-    const tipoContrato = (nombre = "") => nombre === "Simplex" ? "Simplex" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas";
+    const tipoContrato = (nombre = "") => nombre === "Simplex" ? "Simplex" : nombre.startsWith("Express · ") ? "Express" : nombre.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : nombre.startsWith("Repartos · ") ? "Repartos" : "Ventas";
     if (contratosActivosEmpresa.some(c =>
       (productoAbono === "Simplex" && tipoContrato(c.plan_nombre) !== "Simplex") ||
       (productoAbono !== "Simplex" && tipoContrato(c.plan_nombre) === "Simplex")
     )) return alert("Simplex no se puede combinar con Ventas ni Repartos. Revisá primero los contratos activos de esta empresa.");
     if (contratosActivosEmpresa.some(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos") && productoAbono !== "Ventas + Repartos") return alert("Esta empresa ya tiene un contrato integrado. No se puede modificar un servicio por separado sin revisar ese contrato.");
     if (productoAbono === "Ventas + Repartos") return alert("El plan integrado requiere cupos independientes para ambos servicios. Todavía no está habilitado el guardado.");
+    if (productoAbono === "Express") {
+      const admins = Number(cupoAdminsExpress);
+      const supervisores = Number(cupoSupervisoresExpress);
+      if (![admins, supervisores].every(n => Number.isSafeInteger(n) && n >= 1)) {
+        return alert("Los cupos de administradores y supervisores Express deben ser números enteros de al menos 1.");
+      }
+      const cupo = Number(cupoRepartidoresAbono);
+      if (plan.nombre !== "Express · Básico" || !Number.isInteger(cupo) || cupo < 1 || cupo > 3) {
+        return alert("Express Básico permite de 1 a 3 repartidores.");
+      }
+      if (abonoEmpresaActual?.id && tipoContrato(abonoEmpresaActual.plan_nombre) === "Express") {
+        const original = contratosActivosEmpresa.find(c => c.id === abonoEmpresaActual.id);
+        if (!original) return alert("No encontré el contrato Express activo. Volvé a abrir Gestión de Abono.");
+        // Por seguridad, esta edición modifica exclusivamente los dos cupos nuevos.
+        if (!window.confirm(`¿Actualizar los cupos Express de ${empresaPago} a ${admins} administradores y ${supervisores} supervisores? El precio, las fechas y los repartidores no cambiarán.`)) return;
+        setGuardandoContratoAbono(true);
+        try {
+          const { data, error } = await supabase.from("empresa_abonos")
+            .update({ cupo_admins_express: admins, cupo_supervisores_express: supervisores })
+            .eq("id", original.id).eq("empresa_id", empresaDB.id).eq("activo", true)
+            .select().single();
+          if (error) throw error;
+          setAbonoEmpresaActual(data);
+          setContratosActivosEmpresa(prev => prev.map(c => c.id === data.id ? data : c));
+          setEditandoContratoAbono(false);
+          await cargarDatos();
+          alert("Cupos Express actualizados. El precio y el resto del contrato se conservaron.");
+        } catch (err) {
+          alert("No se pudieron guardar los cupos Express: " + (err.message || "Error desconocido"));
+        } finally {
+          setGuardandoContratoAbono(false);
+        }
+        return;
+      }
+      if (contratosActivosEmpresa.some(c => tipoContrato(c.plan_nombre) === "Express")) {
+        return alert("Ya existe otro contrato Express activo. Seleccionalo antes de modificar los cupos.");
+      }
+      if (precioAcordado === "" || !Number.isFinite(Number(precioAcordado)) || Number(precioAcordado) < 0) {
+        return alert("Indicá el precio acordado, incluso si es 0 para una prueba.");
+      }
+      if (!window.confirm(`¿Crear Express para ${empresaPago} con ${cupo} repartidores y precio acordado ${monedaAcordada} ${precioAcordado}? Los permisos de usuarios se configurarán después.`)) return;
+      setGuardandoContratoAbono(true);
+      try {
+        const payload = {
+          empresa_id: empresaDB.id, plan_id: plan.id, variante_id: variante.id,
+          plan_nombre: plan.nombre, modalidad: variante.modalidad,
+          meses: Number(variante.meses) || 1,
+          precio_catalogo: Number(variante.precio) || 0,
+          precio_acordado: Number(precioAcordado), moneda: monedaAcordada,
+          fecha_inicio: inicioAbono, proximo_vencimiento: vencimientoAbono,
+          cupo_preventistas: 0, cupo_repartidores: cupo,
+          cupo_admins_express: admins, cupo_supervisores_express: supervisores,
+          dia_corte: Number(diaCorteAbono),
+          notas: ["Express: 1 administrador y 1 supervisor incluidos. Adicionales autorizados por SuperAdmin.", notasContratoAbono.trim()].filter(Boolean).join(" | "),
+          activo: true
+        };
+        const { data, error } = await supabase.from("empresa_abonos").insert([payload]).select().single();
+        if (error) throw error;
+        // No actualizar empresas.cupo_repartidores: lo comparte con Repartos tradicional.
+        setContratosActivosEmpresa(prev => [data, ...prev]);
+        setAbonoEmpresaActual(data);
+        setEditandoContratoAbono(false);
+        await cargarDatos();
+        alert("Contrato Express creado. Pendiente: habilitar roles Express y controles de cupo independientes.");
+      } catch (err) {
+        alert("Error al crear contrato Express: " + (err.message || "Error desconocido"));
+      } finally {
+        setGuardandoContratoAbono(false);
+      }
+      return;
+    }
     if (productoAbono === "Repartos") {
       const cupo = Number(cupoRepartidoresAbono);
       const rangos = { "Básico": [1, 3], "Intermedio": [4, 8], "PyME": [9, 20], "Full": [21, Infinity] };
@@ -486,7 +562,7 @@ export default function AdminClientes() {
       // Nunca cerrar un contrato de otro producto al registrar uno de Ventas.
       const contratoAnterior = contratosActivosEmpresa.find(c => {
         const n = c.plan_nombre || "";
-        const tipo = n === "Simplex" ? "Simplex" : n.startsWith("Repartos · ") ? "Repartos" : n.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : "Ventas";
+        const tipo = n === "Simplex" ? "Simplex" : n.startsWith("Express · ") ? "Express" : n.startsWith("Repartos · ") ? "Repartos" : n.startsWith("Ventas + Repartos · ") ? "Ventas + Repartos" : "Ventas";
         return tipo === productoAbono;
       });
       if (contratoAnterior?.id) {
@@ -804,6 +880,104 @@ export default function AdminClientes() {
     }
   };
 
+  const cargarSucursalesExpress = async (empresaId) => {
+    if (!empresaId) return;
+    setCargandoSucursalesExpress(true);
+    setMensajeSucursalesExpress("");
+    const { data, error } = await supabase.from("express_sucursales")
+      .select("id,empresa_id,nombre,direccion,activa")
+      .eq("empresa_id", empresaId).order("nombre");
+    if (error) setMensajeSucursalesExpress("No se pudieron cargar las sucursales: " + error.message);
+    else setSucursalesExpress(data || []);
+    setCargandoSucursalesExpress(false);
+  };
+
+  const abrirFichaEmpresa = (nombre) => {
+    setEmpresaDetalleModal(nombre);
+    setSucursalesExpress([]);
+    setNombreNuevaSucursal("");
+    const empresa = empresasRegistros.find(e => e.nombre === nombre);
+    if (empresa?.id) cargarSucursalesExpress(empresa.id);
+  };
+
+  const crearSucursalExpress = async (empresaId) => {
+    const nombre = nombreNuevaSucursal.trim();
+    if (!empresaId || !nombre || guardandoSucursalesExpress) return;
+    if (sucursalesExpress.some(s => s.nombre.toLocaleLowerCase("es") === nombre.toLocaleLowerCase("es"))) {
+      setMensajeSucursalesExpress("Ya existe una sucursal con ese nombre.");
+      return;
+    }
+    if (!window.confirm(`¿Crear la sucursal «${nombre}» para esta empresa?`)) return;
+    setGuardandoSucursalesExpress(true);
+    setMensajeSucursalesExpress("");
+    const { error } = await supabase.from("express_sucursales")
+      .insert({ empresa_id: empresaId, nombre, activa: true });
+    if (error) setMensajeSucursalesExpress("No se pudo crear: " + error.message);
+    else {
+      setNombreNuevaSucursal("");
+      await cargarSucursalesExpress(empresaId);
+      setMensajeSucursalesExpress("Sucursal creada correctamente.");
+    }
+    setGuardandoSucursalesExpress(false);
+  };
+
+  const cambiarEstadoSucursalExpress = async (empresaId, sucursal) => {
+    if (guardandoSucursalesExpress) return;
+    const nuevoEstado = !sucursal.activa;
+    if (!window.confirm(`¿${nuevoEstado ? "Habilitar" : "Deshabilitar"} «${sucursal.nombre}»? No se borrarán sus datos.`)) return;
+    setGuardandoSucursalesExpress(true);
+    setMensajeSucursalesExpress("");
+    const { error } = await supabase.rpc("express_superadmin_estado_sucursal", {
+      p_sucursal_id: sucursal.id, p_activa: nuevoEstado
+    });
+    if (error) setMensajeSucursalesExpress("No se pudo cambiar el estado: " + error.message);
+    else {
+      await cargarSucursalesExpress(empresaId);
+      setMensajeSucursalesExpress(nuevoEstado ? "Sucursal habilitada." : "Sucursal deshabilitada.");
+    }
+    setGuardandoSucursalesExpress(false);
+  };
+
+  const abrirAltaExpress = (empresa, rol) => {
+    setAltaExpress({ empresaId: empresa.id, empresaNombre: empresa.nombre, rol, nombre: "", email: "", password: "" });
+  };
+
+  const crearUsuarioExpress = async (e) => {
+    e.preventDefault();
+    if (guardandoAltaExpress || !altaExpress) return;
+    if (!altaExpress.nombre.trim() || !altaExpress.email.trim() || altaExpress.password.length < 6) {
+      alert("Completá nombre, correo y contraseña de al menos 6 caracteres.");
+      return;
+    }
+    setGuardandoAltaExpress(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("crear-usuario-admin", {
+        body: {
+          empresa_id: altaExpress.empresaId,
+          rol: altaExpress.rol,
+          nombre: altaExpress.nombre.trim(),
+          email: altaExpress.email.trim().toLowerCase(),
+          password: altaExpress.password,
+        },
+      });
+      if (error) {
+        let mensaje = error.message || "No se pudo crear el usuario";
+        if (error.context && typeof error.context.json === "function") {
+          try { const detalle = await error.context.json(); mensaje = detalle.error || mensaje; } catch (_) {}
+        }
+        throw new Error(mensaje);
+      }
+      if (!data?.ok) throw new Error(data?.error || "El servidor no confirmó el alta.");
+      setAltaExpress(null);
+      await cargarDatos();
+      alert(`Usuario Express creado: ${data.nombre} (${data.email}).`);
+    } catch (err) {
+      alert("No se pudo completar el alta: " + (err.message || "Error desconocido") + "\nSi el servidor informó un alta incompleta, revisala antes de reintentar.");
+    } finally {
+      setGuardandoAltaExpress(false);
+    }
+  };
+
   const cobradoUSD = historialPagos.filter(h => h.moneda === "USD" && h.estado === "Confirmado").reduce((acc, h) => acc + Number(h.monto || 0), 0);
   const cobradoARS = historialPagos.filter(h => h.moneda === "ARS" && (h.estado === "Confirmado" || h.estado === "Acreditado")).reduce((acc, h) => acc + Number(h.monto || 0), 0);
   const cobradoUSDT = historialPagos.filter(h => h.moneda === "USDT" && h.estado === "Confirmado").reduce((acc, h) => acc + Number(h.monto || 0), 0);
@@ -817,12 +991,24 @@ export default function AdminClientes() {
   empresas.forEach(emp => {
     const t = tarifasMap[emp] || {};
     const cInfo = diasCorteMap[emp] || {};
-    const diaCorte = Number(t.diaCobro || t.dia_cobro || cInfo.dia || 5);
-    const cupoContratado = Number(t.cupo || cInfo.cupo || 0);
-    const valor = Number(t.valor || t.tarifa || (t.moneda === "ARS" ? 10000 : 50));
-    const moneda = t.moneda || "ARS";
-    const total = (t.tipo === "plana" ? valor : (cupoContratado * valor));
-    const item = { empresa: emp, total, moneda, dia: diaCorte };
+    const empresaDB = empresasRegistros.find(e => e.nombre === emp);
+    const contratos = (contratosTabla[empresaDB?.id] || []).filter(c => c.activo);
+    const contratoPrincipal = contratos[0] || null;
+    const diaCorte = Number(contratoPrincipal?.dia_corte ?? t.diaCobro ?? t.dia_cobro ?? cInfo.dia ?? 5);
+
+    // Mostrar exclusivamente la moneda y el precio pactados en los contratos activos.
+    // Si hay más de una moneda, no convertir ni mezclar importes.
+    const importes = contratos.length > 0
+      ? contratos.reduce((acumulado, contrato) => {
+          const moneda = contrato.moneda || "ARS";
+          acumulado[moneda] = (acumulado[moneda] || 0) + Number(contrato.precio_acordado ?? 0);
+          return acumulado;
+        }, {})
+      : { [t.moneda || "ARS"]: Number(t.valor ?? t.tarifa ?? 0) * (t.tipo === "plana" ? 1 : Number(t.cupo ?? cInfo.cupo ?? 0)) };
+    const importeTexto = Object.entries(importes)
+      .map(([moneda, total]) => `${moneda} $${Number(total).toLocaleString("es-AR")}`)
+      .join(" · ");
+    const item = { empresa: emp, importeTexto, dia: diaCorte };
 
     if (diaCorte === diaHoy) {
       empresasHoy.push(item);
@@ -831,7 +1017,7 @@ export default function AdminClientes() {
     } else if (diaCorte > diaHoy && diaCorte <= diaHoy + 15) {
       empresas15Dias.push(item);
     }
-  });
+  });;
 
   return (
     <main style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif", padding: "24px" }}>
@@ -913,7 +1099,7 @@ export default function AdminClientes() {
             <span style={{ fontSize: "18px" }}>🗓️</span>
           </div>
           <h2 style={{ margin: "10px 0 4px 0", fontSize: "28px", color: "#fbbf24", fontWeight: "800" }}>
-            {empresasHoy.length + empresasManana.length + empresas15Dias.length || 3} <span style={{ fontSize: "13px", color: "#94a3b8" }}>empresas</span>
+            {empresasHoy.length + empresasManana.length + empresas15Dias.length} <span style={{ fontSize: "13px", color: "#94a3b8" }}>empresas</span>
           </h2>
           <div style={{ fontSize: "12px", color: "#f59e0b" }}>Previsión próximos 15 días activa</div>
         </div>
@@ -941,7 +1127,7 @@ export default function AdminClientes() {
               empresasHoy.map(item => (
                 <div key={item.empresa} style={{ marginBottom: "6px" }}>
                   <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{item.empresa}</div>
-                  <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800" }}>{item.moneda} ${Number(item.total).toLocaleString()}</div>
+                  <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800" }}>{item.importeTexto}</div>
                 </div>
               ))
             ) : (
@@ -961,7 +1147,7 @@ export default function AdminClientes() {
               empresasManana.map(item => (
                 <div key={item.empresa} style={{ marginBottom: "6px" }}>
                   <div style={{ fontSize: "14px", fontWeight: "700", color: "#f8fafc" }}>{item.empresa}</div>
-                  <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800" }}>{item.moneda} ${Number(item.total).toLocaleString()}</div>
+                  <div style={{ fontSize: "13px", color: "#38bdf8", fontWeight: "800" }}>{item.importeTexto}</div>
                 </div>
               ))
             ) : (
@@ -981,7 +1167,7 @@ export default function AdminClientes() {
               empresas15Dias.slice(0, 3).map(item => (
                 <div key={item.empresa} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px", fontSize: "12px" }}>
                   <span style={{ color: "#f8fafc", fontWeight: "600" }}>{item.empresa} (Día {item.dia})</span>
-                  <span style={{ color: "#38bdf8", fontWeight: "700" }}>{item.moneda} ${Number(item.total).toLocaleString()}</span>
+                  <span style={{ color: "#38bdf8", fontWeight: "700" }}>{item.importeTexto}</span>
                 </div>
               ))
             ) : (
@@ -1074,7 +1260,7 @@ export default function AdminClientes() {
                       </span>
                     </td>
                     <td style={{ padding: "12px 8px", textAlign: "right" }}>
-                      <button type="button" onClick={() => setEmpresaDetalleModal(emp)} style={{ backgroundColor: "#0284c7", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
+                      <button type="button" onClick={() => abrirFichaEmpresa(emp)} style={{ backgroundColor: "#0284c7", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
                         👁️ Ficha 360°
                       </button>
                       <button type="button" onClick={() => abrirRegistrarPago(emp)} style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
@@ -1094,6 +1280,23 @@ export default function AdminClientes() {
           </table>
         </div>
       </div>
+
+      {altaExpress && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.82)", zIndex: 12000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+          <form onSubmit={crearUsuarioExpress} style={{ background: "#fff", color: "#0f172a", padding: "24px", borderRadius: "14px", width: "100%", maxWidth: "460px", display: "grid", gap: "12px", boxShadow: "0 20px 55px rgba(0,0,0,.35)" }}>
+            <h3 style={{ margin: 0 }}>Nuevo usuario Express</h3>
+            <div style={{ fontSize: "13px", color: "#475569" }}>{altaExpress.empresaNombre} · {altaExpress.rol === "express_admin" ? "Administrador" : altaExpress.rol === "express_operador" ? "Supervisor" : "Repartidor"}</div>
+            <label>Nombre completo<input required maxLength={150} autoComplete="off" value={altaExpress.nombre} onChange={e => setAltaExpress(v => ({ ...v, nombre: e.target.value }))} style={{ display: "block", width: "100%", boxSizing: "border-box", padding: "10px", marginTop: "4px" }} /></label>
+            <label>Correo de acceso<input required type="email" autoComplete="off" value={altaExpress.email} onChange={e => setAltaExpress(v => ({ ...v, email: e.target.value }))} style={{ display: "block", width: "100%", boxSizing: "border-box", padding: "10px", marginTop: "4px" }} /></label>
+            <label>Contraseña inicial<input required type="password" minLength={6} maxLength={128} autoComplete="new-password" value={altaExpress.password} onChange={e => setAltaExpress(v => ({ ...v, password: e.target.value }))} style={{ display: "block", width: "100%", boxSizing: "border-box", padding: "10px", marginTop: "4px" }} /></label>
+            <div style={{ fontSize: "12px", color: "#64748b" }}>Mínimo 6 caracteres. La contraseña no se muestra ni se guarda en este formulario después del alta. Usá un correo al que el usuario pueda acceder si necesita recuperar su clave.</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              <button type="button" disabled={guardandoAltaExpress} onClick={() => setAltaExpress(null)} style={{ padding: "10px 14px" }}>Cancelar</button>
+              <button type="submit" disabled={guardandoAltaExpress} style={{ background: "#2563eb", color: "white", border: 0, borderRadius: "7px", padding: "10px 14px", fontWeight: 700 }}>{guardandoAltaExpress ? "Creando..." : "Crear usuario"}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* MODAL FICHA 360 CON GESTIÓN DE SUPERVISORES Y PREVENTISTAS */}
       {empresaDetalleModal && (
@@ -1116,6 +1319,66 @@ export default function AdminClientes() {
 
             <div style={{ padding: "24px" }}>
               
+              {/* Administración de sucursales: exclusiva de SuperAdmin */}
+              {(() => {
+                const emp = empresasRegistros.find(e => e.nombre === empresaDetalleModal);
+                const contratos = (contratosTabla[emp?.id] || []).filter(c => c.activo);
+                if (!contratos.some(c => tipoContrato(c.plan_nombre) === "Express")) return null;
+                return <section style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12, padding: 16, marginBottom: 20, color: "#0f172a" }}>
+                  <h3 style={{ margin: "0 0 8px", fontSize: 17, color: "#0f172a" }}>🏬 Sucursales Express · SuperAdmin</h3>
+                  <p style={{ fontSize: 12, color: "#475569", marginTop: 0 }}>Todas las sucursales pertenecen a la misma empresa. Deshabilitar no elimina pedidos ni historiales.</p>
+                  {cargandoSucursalesExpress ? <p>Cargando sucursales…</p> : sucursalesExpress.length === 0 ? <p style={{ fontSize: 13 }}>No hay sucursales registradas.</p> :
+                    <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+                      {sucursalesExpress.map(s => <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", padding: 10, background: "white", border: "1px solid #cbd5e1", borderRadius: 8 }}>
+                        <div><strong>{s.nombre}</strong><div style={{ fontSize: 12, color: s.activa ? "#15803d" : "#b91c1c" }}>{s.activa ? "● Habilitada" : "● Deshabilitada"}{s.direccion ? ` · ${s.direccion}` : ""}</div></div>
+                        <button type="button" disabled={guardandoSucursalesExpress} onClick={() => cambiarEstadoSucursalExpress(emp.id, s)} style={{ background: s.activa ? "#b45309" : "#15803d", color: "white", border: 0, borderRadius: 7, padding: "9px 12px", cursor: "pointer", fontWeight: 700 }}>{s.activa ? "Deshabilitar" : "Habilitar"}</button>
+                      </div>)}
+                    </div>}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <input aria-label="Nombre de nueva sucursal" value={nombreNuevaSucursal} onChange={e => setNombreNuevaSucursal(e.target.value)} placeholder="Nombre de nueva sucursal" maxLength={120} style={{ flex: "1 1 220px", minWidth: 0, padding: 10, border: "1px solid #94a3b8", borderRadius: 7, color: "#0f172a", background: "white" }} />
+                    <button type="button" disabled={guardandoSucursalesExpress || !nombreNuevaSucursal.trim()} onClick={() => crearSucursalExpress(emp.id)} style={{ background: "#2563eb", color: "white", border: 0, borderRadius: 7, padding: "10px 14px", cursor: "pointer", fontWeight: 700 }}>+ Crear sucursal</button>
+                    <button type="button" disabled={cargandoSucursalesExpress || guardandoSucursalesExpress} onClick={() => cargarSucursalesExpress(emp.id)} style={{ background: "#475569", color: "white", border: 0, borderRadius: 7, padding: "10px 14px", cursor: "pointer" }}>Actualizar</button>
+                  </div>
+                  {mensajeSucursalesExpress && <p role="status" style={{ fontSize: 13, color: mensajeSucursalesExpress.startsWith("No se") || mensajeSucursalesExpress.startsWith("Ya existe") ? "#b91c1c" : "#166534" }}>{mensajeSucursalesExpress}</p>}
+                </section>;
+              })()}
+              {/* Express: vista independiente. Altas bloqueadas hasta disponer de endpoint seguro. */}
+              {(() => {
+                const emp = empresasRegistros.find(e => e.nombre === empresaDetalleModal);
+                const contratos = (contratosTabla[emp?.id] || []).filter(c => c.activo);
+                const express = contratos.find(c => tipoContrato(c.plan_nombre) === "Express");
+                if (!express) return null;
+                const grupos = [
+                  { titulo: "🛡️ ADMINISTRADORES EXPRESS", rol: "express_admin", cupo: Number(express.cupo_admins_express ?? 1) },
+                  { titulo: "👔 SUPERVISORES EXPRESS", rol: "express_operador", cupo: Number(express.cupo_supervisores_express ?? 1) },
+                  { titulo: "🚚 REPARTIDORES EXPRESS", rol: "express_repartidor", cupo: Number(express.cupo_repartidores ?? 0) },
+                ];
+                return <div style={{ marginBottom: "20px" }}>
+                  <div style={{ color: "#0f172a", fontWeight: "900", fontSize: "16px", marginBottom: "10px" }}>🚚 Usuarios de Express</div>
+                  {grupos.map(g => {
+                    const usuarios = preventistas.filter(p => p.empresa_id === emp?.id && p.rol === g.rol);
+                    const activos = usuarios.filter(p => p.activo !== false).length;
+                    return <div key={g.rol} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px", marginBottom: "12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                        <div>
+                          <strong style={{ color: "#0f172a", fontSize: "13px" }}>{g.titulo}</strong>
+                          <div style={{ color: "#64748b", fontSize: "12px" }}>{activos} / {g.cupo} activos</div>
+                        </div>
+                        <button type="button" disabled={activos >= g.cupo || !emp?.id} onClick={() => abrirAltaExpress(emp, g.rol)} title={activos >= g.cupo ? "Cupo completo" : "Crear usuario Express"} style={{ background: activos >= g.cupo ? "#94a3b8" : "#2563eb", color: "#fff", border: 0, borderRadius: "6px", padding: "7px 12px", cursor: activos >= g.cupo ? "not-allowed" : "pointer", fontWeight: 700 }}>{activos >= g.cupo ? "Cupo completo" : "+ Nuevo"}</button>
+                      </div>
+                      {usuarios.length === 0
+                        ? <div style={{ marginTop: "12px", padding: "12px", background: "#fff", color: "#94a3b8", fontSize: "12px", textAlign: "center", border: "1px dashed #cbd5e1", borderRadius: "8px" }}>Todavía no hay usuarios de este rol.</div>
+                        : usuarios.map(u => <div key={u.id} style={{ marginTop: "8px", padding: "10px", background: "#fff", color: "#334155", borderRadius: "8px", fontSize: "12px" }}>{u.nombre} · {u.email} · {u.activo === false ? "Inactivo" : "Activo"}</div>)}
+                    </div>;
+                  })}
+                  <div style={{ color: "#92400e", fontSize: "12px" }}>Las altas Express requieren una sesión SuperAdmin y se validan en el servidor. Probá primero con IAN, sin publicar en Vercel.</div>
+                </div>;
+              })()}
+              {(() => {
+                const emp = empresasRegistros.find(e => e.nombre === empresaDetalleModal);
+                const contratos = (contratosTabla[emp?.id] || []).filter(c => c.activo);
+                return contratos.some(c => ["Ventas", "Ventas + Repartos", "Repartos"].includes(tipoContrato(c.plan_nombre)));
+              })() && (<>
               {/* 1. SECCIÓN SUPERVISORES */}
               <div style={{ backgroundColor: "#f8fafc", borderRadius: "12px", padding: "16px", marginBottom: "20px", border: "1px solid #e2e8f0" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
@@ -1266,6 +1529,7 @@ export default function AdminClientes() {
                 );
               })()}
 
+              </>)}
               {/* Botón Cerrar Ficha */}
               <div style={{ marginTop: "24px", display: "flex", justifyContent: "flex-end" }}>
                 <button onClick={() => setEmpresaDetalleModal(null)} style={{ backgroundColor: "#0f172a", color: "#fff", border: "none", padding: "10px 20px", borderRadius: "8px", fontWeight: "700", cursor: "pointer" }}>
@@ -1470,8 +1734,13 @@ export default function AdminClientes() {
                         {abonoEmpresaActual.plan_nombre} · <span style={{ textTransform: "capitalize" }}>{abonoEmpresaActual.modalidad}</span>
                       </div>
                       <div style={{ color: "#cbd5e1", fontSize: "12px", marginTop: "3px" }}>
-                        {abonoEmpresaActual.moneda} ${Number(abonoEmpresaActual.precio_acordado || 0).toLocaleString("es-AR")} · {abonoEmpresaActual.plan_nombre?.startsWith("Repartos · ") ? `${Number(abonoEmpresaActual.cupo_repartidores ?? 0)} repartidores` : `${Number(abonoEmpresaActual.cupo_preventistas ?? 0)} preventistas`}
+                        {abonoEmpresaActual.moneda} ${Number(abonoEmpresaActual.precio_acordado || 0).toLocaleString("es-AR")} · {["Repartos", "Express"].includes(tipoContrato(abonoEmpresaActual.plan_nombre)) ? `${Number(abonoEmpresaActual.cupo_repartidores ?? 0)} repartidores` : `${Number(abonoEmpresaActual.cupo_preventistas ?? 0)} preventistas`}
                       </div>
+                      {tipoContrato(abonoEmpresaActual.plan_nombre) === "Express" && (
+                        <div style={{ color: "#c4b5fd", fontSize: "12px", marginTop: "3px" }}>
+                          {Number(abonoEmpresaActual.cupo_admins_express ?? 1)} administradores · {Number(abonoEmpresaActual.cupo_supervisores_express ?? 1)} supervisores autorizados
+                        </div>
+                      )}
                       <div style={{ color: "#94a3b8", fontSize: "11px", marginTop: "3px" }}>
                         Vigente desde {abonoEmpresaActual.fecha_inicio || "—"} · Día de corte {abonoEmpresaActual.dia_corte || "—"} · próximo vencimiento {abonoEmpresaActual.proximo_vencimiento || "—"}
                       </div>
@@ -1499,6 +1768,8 @@ export default function AdminClientes() {
                     setPrecioAcordado("");
                     setCupoAbono("");
                     setCupoRepartidoresAbono("");
+                    setCupoAdminsExpress("1");
+                    setCupoSupervisoresExpress("1");
                     setInicioAbono("");
                     setVencimientoAbono("");
                     setNotasContratoAbono("");
@@ -1527,8 +1798,8 @@ export default function AdminClientes() {
                 <div style={{ marginTop: "14px", borderTop: "1px solid #334155", paddingTop: "14px" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: "10px" }}>
                     <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Producto
-                      <select value={productoAbono} onChange={(e) => { setProductoAbono(e.target.value); setPlanSeleccionadoId(""); setVarianteSeleccionadaId(""); setPrecioAcordado(""); setCupoAbono(e.target.value === "Repartos" ? "0" : ""); setCupoRepartidoresAbono(e.target.value === "Repartos" ? "3" : ""); }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
-                        <option value="Ventas">Ventas</option><option value="Repartos">Repartos</option><option value="Ventas + Repartos">Ventas + Repartos</option><option value="Simplex">Simplex</option>
+                      <select value={productoAbono} onChange={(e) => { setProductoAbono(e.target.value); setPlanSeleccionadoId(""); setVarianteSeleccionadaId(""); setPrecioAcordado(""); setCupoAbono(["Repartos", "Express"].includes(e.target.value) ? "0" : ""); setCupoRepartidoresAbono(["Repartos", "Express"].includes(e.target.value) ? "3" : ""); if (e.target.value === "Express") { setCupoAdminsExpress("1"); setCupoSupervisoresExpress("1"); } }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
+                        <option value="Ventas">Ventas</option><option value="Repartos">Repartos</option><option value="Ventas + Repartos">Ventas + Repartos</option><option value="Simplex">Simplex</option><option value="Express">Express</option>
                       </select>
                     </label>
                     <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Plan
@@ -1538,7 +1809,7 @@ export default function AdminClientes() {
                         setPrecioAcordado("");
                       }} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff" }}>
                         <option value="">Elegir plan...</option>
-                        {planesCatalogo.filter(p => productoAbono === "Repartos" ? p.nombre.startsWith("Repartos · ") : productoAbono === "Ventas + Repartos" ? p.nombre.startsWith("Ventas + Repartos · ") : productoAbono === "Simplex" ? p.nombre === "Simplex" : p.nombre.startsWith("Ventas · ") || p.nombre === "Básico").map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                        {planesCatalogo.filter(p => productoAbono === "Express" ? p.nombre.startsWith("Express · ") : productoAbono === "Repartos" ? p.nombre.startsWith("Repartos · ") : productoAbono === "Ventas + Repartos" ? p.nombre.startsWith("Ventas + Repartos · ") : productoAbono === "Simplex" ? p.nombre === "Simplex" : p.nombre.startsWith("Ventas · ") || p.nombre === "Básico").map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                       </select>
                     </label>
 
@@ -1588,13 +1859,23 @@ export default function AdminClientes() {
 
                     {productoAbono !== "Simplex" && (
                       <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de preventistas (Ventas)
-                        <input type="number" min="0" disabled={productoAbono === "Repartos"} value={productoAbono === "Repartos" ? "0" : cupoAbono} onChange={(e) => setCupoAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                        <input type="number" min="0" disabled={["Repartos", "Express"].includes(productoAbono)} value={["Repartos", "Express"].includes(productoAbono) ? "0" : cupoAbono} onChange={(e) => setCupoAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
                       </label>
                     )}
-                    {(productoAbono === "Repartos" || productoAbono === "Ventas + Repartos") && (
-                      <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de repartidores (independiente)
+                    {(["Repartos", "Express", "Ventas + Repartos"].includes(productoAbono)) && (
+                      <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Cupo de repartidores (servicio seleccionado)
                         <input type="number" min="0" value={cupoRepartidoresAbono} onChange={(e) => setCupoRepartidoresAbono(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
                       </label>
+                    )}
+                    {productoAbono === "Express" && (
+                      <>
+                        <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Administradores Express autorizados
+                          <input type="number" min="1" step="1" value={cupoAdminsExpress} onChange={(e) => setCupoAdminsExpress(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                        </label>
+                        <label style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "700" }}>Supervisores Express autorizados
+                          <input type="number" min="1" step="1" value={cupoSupervisoresExpress} onChange={(e) => setCupoSupervisoresExpress(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", background: "#0f172a", color: "#fff", boxSizing: "border-box" }} />
+                        </label>
+                      </>
                     )}
                     {productoAbono === "Simplex" && <div style={{ fontSize: 12, color: "#94a3b8" }}>Simplex tiene su propio acceso. No comparte cupos con Ventas ni Repartos.</div>}
                   </div>
@@ -1603,16 +1884,16 @@ export default function AdminClientes() {
                     <textarea rows={2} value={notasContratoAbono} onChange={(e) => setNotasContratoAbono(e.target.value)} placeholder="Ej. precio especial primer año..." style={{ width: "100%", padding: "10px", marginTop: "5px", borderRadius: "8px", border: "1px solid #475569", backgroundColor: "#0f172a", color: "#fff", boxSizing: "border-box", resize: "vertical" }} />
                   </label>
 
-                  {(productoAbono === "Repartos" || productoAbono === "Ventas + Repartos") && (
+                  {(["Repartos", "Express", "Ventas + Repartos"].includes(productoAbono)) && (
                     <div style={{ color: "#fbbf24", fontSize: 12, marginTop: 12 }}>
-                      <strong>Vista previa, sin guardar:</strong> {productoAbono === "Repartos" ? "0 preventistas" : `${Number(cupoAbono) || 0} preventistas`} y {Number(cupoRepartidoresAbono) || 0} repartidores.
-                      {" "}El cupo de Repartos se puede registrar en el contrato y en la empresa. Esto NO habilita todavía usuarios, pantallas ni permisos de Repartos.
+                      <strong>Vista previa, sin guardar:</strong> {["Repartos", "Express"].includes(productoAbono) ? "0 preventistas" : `${Number(cupoAbono) || 0} preventistas`} y {Number(cupoRepartidoresAbono) || 0} repartidores.
+                      {" "}El contrato guarda su cupo. Express no modifica el cupo global de Repartos; los permisos y límites de usuarios Express requieren integración adicional.
                     </div>
                   )}
                   <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "10px", flexWrap: "wrap" }}>
                     {abonoEmpresaActual && <button type="button" onClick={() => setEditandoContratoAbono(false)} style={{ backgroundColor: "#475569", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: "pointer" }}>Cancelar</button>}
                     <button type="button" disabled={guardandoContratoAbono || productoAbono === "Ventas + Repartos"} onClick={guardarContratoAbono} style={{ backgroundColor: guardandoContratoAbono || productoAbono === "Ventas + Repartos" ? "#475569" : "#7c3aed", color: "#fff", border: "none", padding: "9px 13px", borderRadius: "7px", cursor: guardandoContratoAbono ? "not-allowed" : "pointer", fontWeight: "900" }}>
-                      {guardandoContratoAbono ? "Guardando..." : "💾 Guardar abono contratado"}
+                      {guardandoContratoAbono ? "Guardando..." : productoAbono === "Express" && abonoEmpresaActual && tipoContrato(abonoEmpresaActual.plan_nombre) === "Express" ? "💾 Guardar cupos Express" : "💾 Guardar abono contratado"}
                     </button>
                   </div>
                 </div>

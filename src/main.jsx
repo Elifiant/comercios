@@ -73,16 +73,28 @@ function EnrutadorSeguro() {
       if (perfilError) throw perfilError;
       if (!data) throw new Error("No se encontró el perfil de este usuario.");
 
-      const { data: rolesData, error: rolesError } = await supabase
-        .from("perfiles_roles")
-        .select("rol, activo")
-        .eq("perfil_id", userId)
-        .eq("empresa_id", data.empresa_id)
-        .eq("activo", true);
-      if (rolesError) throw rolesError;
+      // El SuperAdmin puede no pertenecer a una empresa. No consultar una
+      // columna UUID con null o con el texto "null".
+      const empresaId = typeof data.empresa_id === "string" ? data.empresa_id.trim() : data.empresa_id;
+      const empresaIdValido = typeof empresaId === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(empresaId);
+      const esSuperAdmin = String(data.rol || "").toLowerCase() === "superadmin";
+      let rolesData = [];
+      if (empresaIdValido) {
+        const { data: roles, error: rolesError } = await supabase
+          .from("perfiles_roles")
+          .select("rol, activo")
+          .eq("perfil_id", userId)
+          .eq("empresa_id", empresaId)
+          .eq("activo", true);
+        if (rolesError) throw rolesError;
+        rolesData = roles || [];
+      } else if (!esSuperAdmin) {
+        throw new Error("El perfil no tiene un identificador de empresa válido. Consultá con el administrador.");
+      }
 
-      // Publicar el perfil solamente cuando ambas consultas finalizaron correctamente.
-      setRolesExtra((rolesData || []).map(r => String(r.rol || "").toLowerCase()));
+      // Publicar el perfil solamente cuando se verificaron los permisos.
+      setRolesExtra(rolesData.map(r => String(r.rol || "").toLowerCase()));
       setPerfil(data);
     } catch (e) {
       console.error("No se pudieron verificar los permisos:", e);

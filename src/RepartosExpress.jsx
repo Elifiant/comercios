@@ -38,9 +38,22 @@ const distanciaKm = (a, b, c, d) => {
 };
 
 export default function RepartosExpress() {
+  const salirExpress = async () => {
+    if (!window.confirm("¿Querés salir de RutaComercios Express?")) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) { window.alert(`No se pudo cerrar sesión: ${error.message}`); return; }
+    window.location.replace("/");
+  };
+
   const [pedidos, setPedidos] = useState([]);
+  const [auditoriasGps, setAuditoriasGps] = useState({});
   const [identidad, setIdentidad] = useState(null);
   const [esAdminExpress, setEsAdminExpress] = useState(false);
+  // Sucursal operativa; null mantiene compatibilidad con empresas sin sucursales.
+  const sucursalOperativaRef = useRef(null);
+  const sucursalesActivasRef = useRef(0);
+  const [nombreSucursalOperativa, setNombreSucursalOperativa] = useState("");
+
   const [turnoActual, setTurnoActual] = useState(null);
   const [cargandoTurno, setCargandoTurno] = useState(false);
   const [operandoTurno, setOperandoTurno] = useState(false);
@@ -51,6 +64,7 @@ export default function RepartosExpress() {
   const [destinosHerencia, setDestinosHerencia] = useState({});
   const [operacionHerencia, setOperacionHerencia] = useState(null);
   const [errorHerencia, setErrorHerencia] = useState("");
+  const [cargandoHerencias, setCargandoHerencias] = useState(false);
   const [avisoHerencia, setAvisoHerencia] = useState("");
   const [errorTurno, setErrorTurno] = useState("");
   const [cargando, setCargando] = useState(true);
@@ -85,6 +99,8 @@ export default function RepartosExpress() {
   const [arrastrando, setArrastrando] = useState(null);
   const [cargandoRepartidores, setCargandoRepartidores] = useState(false);
   const [saldosExpress, setSaldosExpress] = useState([]);
+  const [errorSaldosExpress, setErrorSaldosExpress] = useState("");
+  const [saldosVerificados, setSaldosVerificados] = useState(false);
   const [repartidorRendicion, setRepartidorRendicion] = useState("todos");
   const [devolucionesExpress, setDevolucionesExpress] = useState([]);
   const [historialDinero, setHistorialDinero] = useState([]);
@@ -118,11 +134,18 @@ export default function RepartosExpress() {
   const cargarConfiguracion = useCallback(async (empresaId) => {
     setCargandoConfig(true);
     try {
-      const { data, error } = await supabase.from("express_configuracion")
-        .select("nombre_comercio,direccion,latitud,longitud,radio_entregas_km")
-        .eq("empresa_id", empresaId).maybeSingle();
+      const sucursalId = sucursalOperativaRef.current;
+      const { data, error } = sucursalId
+        ? await supabase.from("express_sucursales")
+            .select("nombre,direccion,latitud,longitud,radio_entregas_km")
+            .eq("empresa_id", empresaId).eq("id", sucursalId).single()
+        : await supabase.from("express_configuracion")
+            .select("nombre_comercio,direccion,latitud,longitud,radio_entregas_km")
+            .eq("empresa_id", empresaId).maybeSingle();
       if (error) throw error;
-      setConfigComercio(data || {
+      setConfigComercio(data ? {
+        ...data, nombre_comercio: data.nombre_comercio || data.nombre || ""
+      } : {
         nombre_comercio: "", direccion: "", latitud: null, longitud: null, radio_entregas_km: 5
       });
     } catch (e) { setAvisoConfig(`No se pudo leer la configuración: ${e.message}`); }
@@ -148,44 +171,13 @@ export default function RepartosExpress() {
     finally { setBuscandoUbicacion(false); }
   };
 
-  const guardarConfiguracion = async (e) => {
-    e.preventDefault();
-    if (!identidad || guardandoConfig) return;
-    const radio = Number(configComercio.radio_entregas_km);
-    if (!configComercio.nombre_comercio.trim() || !configComercio.direccion.trim()) {
-      setAvisoConfig("Completá el nombre y la dirección del comercio."); return;
-    }
-    if (!Number.isFinite(radio) || radio <= 0 || radio > 100) {
-      setAvisoConfig("El radio debe ser mayor a 0 y como máximo 100 km."); return;
-    }
-    if (!Number.isFinite(Number(configComercio.latitud)) || !Number.isFinite(Number(configComercio.longitud))
-        || configComercio.latitud === null || configComercio.longitud === null) {
-      setAvisoConfig("Confirmá la ubicación exacta tocando el mapa o eligiendo un resultado."); return;
-    }
-    setGuardandoConfig(true); setAvisoConfig("");
-    try {
-      const { error } = await supabase.from("express_configuracion").upsert({
-        empresa_id: identidad.empresaId,
-        nombre_comercio: configComercio.nombre_comercio.trim(),
-        direccion: configComercio.direccion.trim(),
-        latitud: Number(configComercio.latitud),
-        longitud: Number(configComercio.longitud),
-        radio_entregas_km: radio,
-        actualizado_en: new Date().toISOString()
-      }, { onConflict: "empresa_id" });
-      if (error) throw error;
-      setAvisoConfig("✅ Configuración del comercio guardada correctamente.");
-    } catch (e) { setAvisoConfig(`No se pudo guardar: ${e.message}`); }
-    finally { setGuardandoConfig(false); }
-  };
-
   // El turno comercial es independiente de la jornada del repartidor.
   const cargarTurnoActual = useCallback(async (empresaId, usuarioId) => {
     setCargandoTurno(true);
     setErrorTurno("");
     try {
       const { data, error } = await supabase.from("express_turnos_supervisores")
-        .select("id,jornada_id,inicio_en,estado")
+        .select("id,jornada_id,inicio_en,estado,sucursal_id")
         .eq("empresa_id", empresaId)
         .eq("supervisor_id", usuarioId)
         .eq("estado", "abierto")
@@ -219,14 +211,56 @@ export default function RepartosExpress() {
     }
   };
 
+  const finalizarTurnoComercial = async () => {
+    if (!identidad || operandoTurno || cargandoTurno || !turnoActual) return;
+    if (!window.confirm(
+      "¿Finalizar tu turno de supervisor?\n\n" +
+      "Si tenés pedidos pendientes bajo tu responsabilidad, el sistema impedirá el cierre. " +
+      "Los demás supervisores podrán seguir trabajando."
+    )) return;
+
+    setOperandoTurno(true);
+    setErrorTurno("");
+    setMensaje("");
+    try {
+      const { error } = await supabase.rpc("express_finalizar_turno");
+      if (error) throw error;
+
+      // Verificar el resultado de forma explícita: no confundir un fallo de lectura
+      // con un turno cerrado, ni intentar ejecutar dos veces el cierre.
+      const { data, error: errorVerificacion } = await supabase
+        .from("express_turnos_supervisores")
+        .select("id")
+        .eq("empresa_id", identidad.empresaId)
+        .eq("supervisor_id", identidad.usuarioId)
+        .eq("estado", "abierto")
+        .maybeSingle();
+      if (errorVerificacion) {
+        setErrorTurno("Se solicitó el cierre, pero no se pudo verificar su estado. Actualizá la pantalla antes de volver a intentarlo: " + errorVerificacion.message);
+        return;
+      }
+      if (data) {
+        setErrorTurno("Se solicitó el cierre, pero todavía figura un turno abierto. Actualizá la pantalla antes de volver a intentarlo.");
+        return;
+      }
+      setTurnoActual(null);
+      setMensaje("✅ Tu turno de supervisor finalizó correctamente.");
+    } catch (e) {
+      setErrorTurno(`No se pudo finalizar el turno: ${e.message}`);
+    } finally {
+      setOperandoTurno(false);
+    }
+  };
+
   // Consultas acotadas a la vista de cierre, sin agregar polling a Supabase.
   const cargarHerencias = async () => {
     if (!identidad) return;
+    setCargandoHerencias(true);
     setErrorHerencia("");
     try {
       const [t, h] = await Promise.all([
         supabase.from("express_turnos_supervisores")
-          .select("id,supervisor_id,estado,inicio_en")
+          .select("id,supervisor_id,estado,inicio_en,sucursal_id")
           .eq("empresa_id", identidad.empresaId).eq("estado", "abierto"),
         supabase.from("express_herencias")
           .select("id,pedido_id,turno_origen_id,turno_destino_id,estado,creada_en")
@@ -234,17 +268,48 @@ export default function RepartosExpress() {
       ]);
       if (t.error) throw t.error;
       if (h.error) throw h.error;
-      setTurnosDisponibles(t.data || []);
-      const ids = [...new Set((t.data || []).map(x => x.supervisor_id))];
+      const sucursal = sucursalOperativaRef.current;
+      // La sucursal habitual del personal se administra en SuperAdmin.
+      // Si un turno antiguo no tiene sucursal_id, comprobar su asignación vigente;
+      // nunca incluir turnos que tengan otra sucursal explícita.
+      let turnosLocales = t.data || [];
+      if (sucursal) {
+        const sinSucursal = turnosLocales.filter(x => !x.sucursal_id);
+        let asignados = new Set();
+        if (sinSucursal.length) {
+          const { data: asignaciones, error: ea } = await supabase
+            .from("express_personal_sucursales")
+            .select("perfil_id")
+            .eq("empresa_id", identidad.empresaId)
+            .eq("sucursal_id", sucursal)
+            .in("perfil_id", [...new Set(sinSucursal.map(x => x.supervisor_id))]);
+          if (ea) throw ea;
+          asignados = new Set((asignaciones || []).map(x => x.perfil_id));
+        }
+        turnosLocales = turnosLocales.filter(x =>
+          x.sucursal_id === sucursal || (!x.sucursal_id && asignados.has(x.supervisor_id))
+        );
+      }
+      setTurnosDisponibles(turnosLocales);
+      const ids = [...new Set(turnosLocales.map(x => x.supervisor_id))];
       if (ids.length) {
         const { data: perfiles, error: ep } = await supabase.from("perfiles")
           .select("id,nombre").eq("empresa_id", identidad.empresaId).in("id", ids);
         if (ep) throw ep;
         setNombresSupervisores(prev => ({ ...prev, ...Object.fromEntries((perfiles || []).map(x => [x.id, x.nombre])) }));
       }
-      setHerenciasPendientes(h.data || []);
+      setHerenciasPendientes(sucursal
+        ? (h.data || []).filter(x => turnosLocales.some(t => t.id === x.turno_destino_id || t.id === x.turno_origen_id))
+        : (h.data || []));
     } catch (e) { setErrorHerencia(`No se pudieron consultar las transferencias: ${e.message}`); }
+    finally { setCargandoHerencias(false); }
   };
+
+  // Al entrar directamente a Ver pedidos, cargar también los turnos destinatarios.
+  // La consulta es puntual, sin polling adicional.
+  useEffect(() => {
+    if (identidad?.empresaId) cargarHerencias();
+  }, [identidad?.empresaId, identidad?.usuarioId]);
 
   // Resolver nombres de turnos históricos (incluidos los ya cerrados).
   // Solo consulta al cambiar los IDs de turno presentes en los pedidos;
@@ -313,13 +378,29 @@ export default function RepartosExpress() {
   }), [pedidosDelTurno]);
 
   const cargarPedidos = useCallback(async (empresaId) => {
-    const { data, error } = await supabase
+    let consulta = supabase
       .from("express_pedidos")
       .select("id, numero_express, cliente_nombre, direccion, telefono, notas, detalle, importe_total, modalidad_cobro, estado, creado_en, entregado_en, turno_origen_id, turno_responsable_id")
-      .eq("empresa_id", empresaId)
-      .order("creado_en", { ascending: false })
-      .limit(500);
+      .eq("empresa_id", empresaId);
+    if (sucursalOperativaRef.current) consulta = consulta.eq("sucursal_id", sucursalOperativaRef.current);
+    const { data, error } = await consulta.order("creado_en", { ascending: false }).limit(500);
     if (error) throw error;
+    // Auditoría de proximidad: lectura independiente para no interrumpir pedidos si falla GPS.
+    const idsFinalizados = (data || []).filter(p => ["entregado", "no_entregado"].includes(p.estado)).map(p => p.id);
+    if (idsFinalizados.length) {
+      const { data: gps, error: errorGps } = await supabase.from("express_entregas_gps")
+        .select("pedido_id,estado_gps,distancia_m,precision_m,registrado_en")
+        .eq("empresa_id", empresaId).in("pedido_id", idsFinalizados)
+        .order("registrado_en", { ascending: false });
+      if (errorGps) {
+        console.warn("Express: auditoría GPS no disponible:", errorGps.message);
+        setAuditoriasGps({});
+      } else {
+        const porPedido = {};
+        (gps || []).forEach(g => { if (!porPedido[g.pedido_id]) porPedido[g.pedido_id] = g; });
+        setAuditoriasGps(porPedido);
+      }
+    } else setAuditoriasGps({});
     setPedidos((data || []).map(p => ({
       id: p.id,
       numero: `EX-${String(p.numero_express).padStart(6, "0")}`,
@@ -344,7 +425,15 @@ export default function RepartosExpress() {
         .select("perfil_id").eq("empresa_id", empresaId)
         .eq("rol", "express_repartidor").eq("activo", true);
       if (errRoles) throw errRoles;
-      const ids = [...new Set((roles || []).map(r => r.perfil_id))];
+      let ids = [...new Set((roles || []).map(r => r.perfil_id))];
+      if (sucursalOperativaRef.current) {
+        const { data: asignaciones, error: errorAsignaciones } = await supabase
+          .from("express_personal_sucursales").select("perfil_id")
+          .eq("empresa_id", empresaId).eq("sucursal_id", sucursalOperativaRef.current);
+        if (errorAsignaciones) throw errorAsignaciones;
+        const permitidos = new Set((asignaciones || []).map(a => a.perfil_id));
+        ids = ids.filter(id => permitidos.has(id));
+      }
       if (!ids.length) { setRepartidores([]); return; }
       const { data: perfiles, error: errPerfiles } = await supabase.from("perfiles")
         .select("id, nombre, activo").eq("empresa_id", empresaId)
@@ -363,10 +452,11 @@ export default function RepartosExpress() {
   }, []);
 
   const cargarViajes = useCallback(async (empresaId) => {
-    const { data: vs, error: ev } = await supabase.from("express_viajes")
-      .select("id, repartidor_id, estado, creado_en, salida_en")
-      .eq("empresa_id", empresaId).in("estado", ["preparando", "en_camino", "regresando"])
-      .order("creado_en", { ascending: false }).limit(100);
+    let consulta = supabase.from("express_viajes")
+      .select("id, repartidor_id, estado, creado_en, salida_en, sucursal_id")
+      .eq("empresa_id", empresaId).in("estado", ["preparando", "en_camino", "regresando"]);
+    if (sucursalOperativaRef.current) consulta = consulta.eq("sucursal_id", sucursalOperativaRef.current);
+    const { data: vs, error: ev } = await consulta.order("creado_en", { ascending: false }).limit(100);
     if (ev) throw ev;
     const ids = (vs || []).map(v => v.id);
     let relaciones = [];
@@ -405,6 +495,25 @@ export default function RepartosExpress() {
         if (!roles?.length) throw new Error("Este usuario no tiene permiso para administrar Express.");
         if (!activo) return;
         setEsAdminExpress(roles.some(r => r.rol === "express_admin"));
+        const { data: sucursales, error: errorSucursales } = await supabase
+          .from("express_sucursales").select("id,nombre")
+          .eq("empresa_id", perfil.empresa_id).eq("activa", true);
+        if (errorSucursales) throw errorSucursales;
+        sucursalesActivasRef.current = (sucursales || []).length;
+        let sucursalAsignada = null;
+        if (sucursalesActivasRef.current > 0) {
+          const { data: asignacion, error: errorAsignacion } = await supabase
+            .from("express_personal_sucursales").select("sucursal_id")
+            .eq("empresa_id", perfil.empresa_id).eq("perfil_id", user.id).maybeSingle();
+          if (errorAsignacion) throw errorAsignacion;
+          sucursalAsignada = asignacion?.sucursal_id ||
+            (sucursalesActivasRef.current === 1 ? sucursales[0].id : null);
+          if (!sucursalAsignada || !(sucursales || []).some(x => x.id === sucursalAsignada)) {
+            throw new Error("No tenés una sucursal activa asignada. Solicitá la asignación al administrador.");
+          }
+        }
+        sucursalOperativaRef.current = sucursalAsignada;
+        setNombreSucursalOperativa((sucursales || []).find(x => x.id === sucursalAsignada)?.nombre || "");
         setIdentidad({ usuarioId: user.id, empresaId: perfil.empresa_id, nombre: perfil.nombre });
         await cargarPedidos(perfil.empresa_id);
         if (activo) await cargarTurnoActual(perfil.empresa_id, user.id);
@@ -430,7 +539,7 @@ export default function RepartosExpress() {
       if (!activo || enCurso || guardando || document.visibilityState === "hidden") return;
       enCurso = true;
       try {
-        await Promise.all([cargarPedidos(identidad.empresaId), cargarViajes(identidad.empresaId), cargarJornadas(identidad.empresaId)]);
+        await Promise.all([cargarPedidos(identidad.empresaId), cargarViajes(identidad.empresaId)]);
       } catch (err) {
         console.warn("Express: no se pudieron actualizar los pedidos automáticamente.", err);
       } finally {
@@ -441,13 +550,30 @@ export default function RepartosExpress() {
       activo = false;
       clearInterval(intervalo);
     };
-  }, [identidad?.empresaId, guardando, cargarPedidos, cargarViajes, cargarJornadas]);
-  // ESCUCHAR CAMBIOS DE PEDIDOS EXPRESS EN TIEMPO REAL
+  }, [identidad?.empresaId, guardando, cargarPedidos, cargarViajes]);
+  // Al regresar a la pantalla, recuperar cambios que pudieron ocurrir
+  // mientras el dispositivo estaba suspendido o sin conexión.
+  useEffect(() => {
+    if (!identidad?.empresaId) return;
+    const alVolver = () => {
+      if (document.visibilityState !== "visible") return;
+      cargarJornadas(identidad.empresaId).catch(error => {
+        console.warn("Express: no se pudieron recuperar las jornadas al volver.", error);
+      });
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    return () => document.removeEventListener("visibilitychange", alVolver);
+  }, [identidad?.empresaId, cargarJornadas]);
+
+  // Los pedidos siguen actualizándose automáticamente. Las jornadas solo se
+  // consultan cuando Supabase informa un cambio (además de la carga inicial,
+  // actualización manual y regreso a la pantalla).
+  // REQUIERE que public.express_jornadas esté en supabase_realtime y RLS permita SELECT.
   useEffect(() => {
     if (!identidad?.empresaId) return;
 
     const canal = supabase
-      .channel(`express-pedidos-${identidad.empresaId}`)
+      .channel(`express-pedidos-y-jornadas-${identidad.empresaId}`)
       .on(
         "postgres_changes",
         {
@@ -457,12 +583,37 @@ export default function RepartosExpress() {
           filter: `empresa_id=eq.${identidad.empresaId}`,
         },
         () => {
-          Promise.all([cargarPedidos(identidad.empresaId), cargarViajes(identidad.empresaId), cargarJornadas(identidad.empresaId)]).catch((error) => {
+          Promise.all([cargarPedidos(identidad.empresaId), cargarViajes(identidad.empresaId)]).catch((error) => {
             console.error("Error al actualizar pedidos y viajes Express:", error);
           });
         }
       )
-      .subscribe();
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "express_jornadas",
+          filter: `empresa_id=eq.${identidad.empresaId}`,
+        },
+        (evento) => {
+          // Realtime ya incluye el nuevo estado: no hace falta consultar toda la tabla.
+          // Para DELETE o mensajes incompletos, recuperar el estado desde Supabase.
+          const nueva = evento.new;
+          if (evento.eventType !== "DELETE" && nueva?.repartidor_id && nueva?.estado) {
+            setJornadas(actual => ({ ...actual, [nueva.repartidor_id]: nueva.estado }));
+          } else {
+            cargarJornadas(identidad.empresaId).catch(error => {
+              console.warn("Express: no se pudo recuperar la jornada notificada.", error);
+            });
+          }
+        }
+      )
+      .subscribe(status => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("Express: conexión de notificaciones interrumpida:", status);
+        }
+      });
 
     return () => {
       supabase.removeChannel(canal);
@@ -560,7 +711,7 @@ export default function RepartosExpress() {
   const buscarDestino = async () => {
     if (!direccion.trim()) { setAvisoDestino("Escribí una dirección de entrega."); return; }
     if (configComercio.latitud == null || configComercio.longitud == null) {
-      setAvisoDestino("Primero guardá la ubicación del comercio en Configuración."); return;
+      setAvisoDestino("El dueño debe configurar la ubicación de esta sucursal desde su panel."); return;
     }
     const apiKey = import.meta.env.VITE_GEOAPIFY_API_KEY;
     if (!apiKey) { setAvisoDestino("Falta configurar Geoapify."); return; }
@@ -714,7 +865,7 @@ export default function RepartosExpress() {
       return;
     }
     if (configComercio.latitud == null || configComercio.longitud == null) {
-      window.alert("Primero configurá la ubicación del comercio."); return;
+      window.alert("El dueño debe configurar la ubicación de esta sucursal desde su panel."); return;
     }
     if (!destinoConfirmado) {
       window.alert("Buscá y confirmá la ubicación de entrega en el mapa antes de guardar."); return;
@@ -763,13 +914,9 @@ export default function RepartosExpress() {
     setErrorPantalla("");
     setMensaje("");
     try {
-      const { data, error } = await supabase.from("express_pedidos")
-        .update({ estado, actualizado_en: new Date().toISOString(),
-          ...(estado === "entregado" ? { entregado_en: new Date().toISOString() } : {}) })
-        .eq("id", id).eq("empresa_id", identidad.empresaId)
-        .select("id");
+      if (estado !== "listo") throw new Error("Cambio de estado no autorizado desde esta pantalla.");
+      const { error } = await supabase.rpc("express_marcar_listo", { p_pedido: id });
       if (error) throw error;
-      if (!data?.length) throw new Error("No se pudo actualizar el pedido.");
       await cargarPedidos(identidad.empresaId);
       setMensaje("Estado actualizado.");
     } catch (err) {
@@ -780,12 +927,15 @@ export default function RepartosExpress() {
   };
   const refrescarTodo = async () => {
     if (!identidad) return;
-    await Promise.all([cargarPedidos(identidad.empresaId), cargarRepartidores(identidad.empresaId), cargarViajes(identidad.empresaId), cargarJornadas(identidad.empresaId), cargarTurnoActual(identidad.empresaId, identidad.usuarioId)]);
+    await Promise.all([cargarPedidos(identidad.empresaId), cargarRepartidores(identidad.empresaId), cargarViajes(identidad.empresaId), cargarJornadas(identidad.empresaId), cargarTurnoActual(identidad.empresaId, identidad.usuarioId), cargarHerencias()]);
   };
 
   const cargarControlExpress = async () => {
     if (!identidad) return;
     setCargandoControl(true);
+    setErrorSaldosExpress("");
+    setSaldosVerificados(false);
+    setSaldosExpress([]);
     try {
       const [rs, ds, hd, hv] = await Promise.all([
         supabase.rpc("express_consultar_saldos"),
@@ -793,17 +943,26 @@ export default function RepartosExpress() {
         supabase.rpc("express_historial_recepciones"),
         supabase.rpc("express_historial_devoluciones")
       ]);
-      if (rs.error) throw rs.error;
-      if (ds.error) throw ds.error;
-      if (hd.error) throw hd.error;
-      if (hv.error) throw hv.error;
-      setHistorialDinero(hd.data || []);
-      setHistorialDevoluciones(hv.data || []);
-      setSaldosExpress(rs.data || []);
-      setDevolucionesExpress(ds.data || []);
-      setDevolucionesSeleccionadas(actual => actual.filter(id => (ds.data || []).some(d => d.pedido_id === id)));
-    } catch (e) { setErrorPantalla(`No se pudo consultar el control de rendiciones: ${e.message}`); }
-    finally { setCargandoControl(false); }
+      if (rs.error) {
+        setErrorSaldosExpress(`No se pudieron consultar los saldos: ${rs.error.message}`);
+        setErrorPantalla(`No se pudieron consultar los saldos: ${rs.error.message}`);
+      } else {
+        setSaldosExpress(rs.data || []);
+        setSaldosVerificados(true);
+      }
+      if (ds.error) setErrorPantalla(`No se pudieron consultar las devoluciones: ${ds.error.message}`);
+      else {
+        setDevolucionesExpress(ds.data || []);
+        setDevolucionesSeleccionadas(actual => actual.filter(id => (ds.data || []).some(d => d.pedido_id === id)));
+      }
+      if (hd.error) setErrorPantalla(`No se pudo consultar el historial de rendiciones: ${hd.error.message}`);
+      else setHistorialDinero(hd.data || []);
+      if (hv.error) setErrorPantalla(`No se pudo consultar el historial de devoluciones: ${hv.error.message}`);
+      else setHistorialDevoluciones(hv.data || []);
+    } catch (e) {
+      setErrorSaldosExpress(`No se pudieron verificar los saldos: ${e.message}`);
+      setErrorPantalla(`No se pudo consultar el control: ${e.message}`);
+    } finally { setCargandoControl(false); }
   };
 
   const recibirDineroExpress = async (repartidorId, saldo) => {
@@ -917,8 +1076,8 @@ export default function RepartosExpress() {
   const transferenciasParaMi = herenciasPendientes.filter(h => h.turno_destino_id === turnoActual?.id);
   const transferenciasEnviadas = herenciasPendientes.filter(h => h.turno_origen_id === turnoActual?.id);
   const idsParaMi = new Set(transferenciasParaMi.map(h => h.pedido_id));
-  const visibles = pedidos
-  .filter(p => esAdminExpress || (turnoActual?.id && (p.turnoResponsableId === turnoActual.id || idsParaMi.has(p.id))))
+  const pedidosVisibles = pedidos.filter(p => esAdminExpress || (turnoActual?.id && p.turnoResponsableId === turnoActual.id));
+  const visibles = pedidosVisibles
   .filter(p => filtro === "todos" || p.estado === filtro)
   .sort((a, b) => {
     if (a.estado === "entregado" && b.estado !== "entregado") return 1;
@@ -928,7 +1087,7 @@ export default function RepartosExpress() {
   const etiqueta = { preparando: "👩‍🍳 Preparando", listo: "✅ Listo para retirar", en_camino: "🛵 En camino", entregado: "📦 Entregado" };
 
   // Vista de control: solo lectura. Ningún cierre o transferencia se ejecuta desde aquí.
-  const pendientesCierre = pedidos.filter(p => !["entregado", "no_entregado", "cancelado"].includes(p.estado));
+  const pendientesCierre = pedidosVisibles.filter(p => !["entregado", "no_entregado", "cancelado"].includes(p.estado));
   const pendientesEnViajes = pendientesCierre.map(p => ({
     ...p,
     viaje: viajes.find(v => v.relaciones?.some(r => r.pedido_id === p.id)) || null
@@ -1003,7 +1162,10 @@ export default function RepartosExpress() {
           <div className="ex-marca">🛵 RutaComercios <span>Express</span></div>
           <div className="ex-subtitulo">Panel del comercio · Gestión de entregas</div>
         </div>
-        {identidad && <div className="ex-identidad">👤 {identidad.nombre || "Usuario autorizado"}<div>🍕 {configComercio.nombre_comercio?.trim() || "Comercio sin configurar"}</div></div>}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, flexWrap: "wrap" }}>
+          {identidad && <div className="ex-identidad">👤 {identidad.nombre || "Usuario autorizado"}<div>🍕 {configComercio.nombre_comercio?.trim() || "Comercio sin configurar"}</div></div>}
+          <button type="button" onClick={salirExpress} style={{ ...boton, background: "#b91c1c", color: "white" }}>🚪 SALIR</button>
+        </div>
       </header>
       <div className="ex-estructura">
         <aside className="ex-lateral" aria-label="Menú principal">
@@ -1051,8 +1213,26 @@ export default function RepartosExpress() {
         {vista === "cierre" ? (
           <section style={{ background: colores.tarjeta, border: `1px solid ${colores.borde}`, borderRadius: 14, padding: 18 }}>
             <h2 style={{ marginTop: 0 }}>🌙 Cierre y turnos</h2>
+            <div style={{ background: "#17243a", border: `1px solid ${colores.borde}`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
+              <h3 style={{ marginTop: 0 }}>🕒 Mi turno de supervisor</h3>
+              {cargandoTurno ? (
+                <p>Consultando turno...</p>
+              ) : turnoActual ? (
+                <>
+                  <p>Turno abierto desde <strong>{new Date(turnoActual.inicio_en).toLocaleString("es-AR")}</strong></p>
+                  <button type="button" disabled={operandoTurno || cargandoTurno || guardando || refrescando}
+                    onClick={finalizarTurnoComercial}
+                    style={{ ...boton, background: "#b91c1c", color: "white", padding: "14px 20px", fontWeight: 900 }}>
+                    {operandoTurno ? "⏳ FINALIZANDO..." : "🌙 FINALIZAR MI TURNO"}
+                  </button>
+                </>
+              ) : (
+                <p style={{ color: "#86efac", fontWeight: 700 }}>No tenés un turno abierto.</p>
+              )}
+              {errorTurno && <p role="alert" style={{ color: "#fca5a5" }}>{errorTurno}</p>}
+            </div>
             <p style={{ color: "#fde68a", fontWeight: 700 }}>El cierre definitivo de la jornada comercial todavía no está habilitado.</p>
-            <p style={{ color: colores.suave }}>Las transferencias de pedidos se realizan en «Ver pedidos». Aquí se habilitarán más adelante las acciones de finalizar turno y cerrar jornada, con las protecciones correspondientes.</p>
+            <p style={{ color: colores.suave }}>Las transferencias de pedidos se realizan en «Ver pedidos». Podés finalizar tu turno cuando no tengas pedidos pendientes bajo tu responsabilidad. El cierre definitivo de la jornada comercial todavía no está habilitado.</p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
               {[["Pendientes de resolver", pendientesCierre.length], ["En viajes activos", pendientesEnViajes.filter(p => p.viaje).length]].map(([nombre, valor]) => (
                 <div key={nombre} style={{ background: "#111827", border: `1px solid ${colores.borde}`, padding: 13, borderRadius: 10 }}>
@@ -1067,6 +1247,7 @@ export default function RepartosExpress() {
             <p style={{ color: colores.suave }}>Acumuladas por repartidor, incluso entre jornadas. Solo se contabilizan entregas en efectivo posteriores al corte inicial. Tarjetas y transferencias se controlarán por separado.</p>
             <button type="button" disabled={cargandoControl || operandoControl} onClick={cargarControlExpress} style={{ ...boton, background: colores.borde, color: "white", marginBottom: 15 }}>↻ Actualizar saldos</button>
             {cargandoControl && <p>Consultando saldos...</p>}
+            {!cargandoControl && !saldosVerificados && <p role="alert" style={{ color: "#fca5a5", fontWeight: 800 }}>⚠️ Saldos no verificados. No se puede afirmar que estén en cero. {errorSaldosExpress}</p>}
             <label style={{ display: "block", maxWidth: 420, margin: "0 auto 16px", textAlign: "left" }}>
               Consultar repartidor
               <select style={{ ...campo, marginTop: 6 }} value={repartidorRendicion} onChange={e => setRepartidorRendicion(e.target.value)}>
@@ -1075,8 +1256,8 @@ export default function RepartosExpress() {
               </select>
             </label>
             {!cargandoControl && repartidores.length === 0 && <p>No hay repartidores habilitados en esta empresa.</p>}
-            {!cargandoControl && repartidores.length > 0 && saldosExpress.length === 0 && <p>No hay cobros en efectivo posteriores al corte inicial. Todos los saldos están en cero.</p>}
-            {repartidores.filter(r => repartidorRendicion === "todos" || r.id === repartidorRendicion).map(r => {
+            {!cargandoControl && saldosVerificados && repartidores.length > 0 && saldosExpress.length === 0 && <p>No hay cobros en efectivo posteriores al corte inicial. Todos los saldos están en cero.</p>}
+            {saldosVerificados && repartidores.filter(r => repartidorRendicion === "todos" || r.id === repartidorRendicion).map(r => {
               const s = saldosExpress.find(item => item.repartidor_id === r.id) || { repartidor_id: r.id, total_cobrado: 0, total_rendido: 0, saldo_pendiente: 0 };
               const nombreRep = repartidores.find(r => r.id === s.repartidor_id)?.nombre || "Repartidor";
               const saldo = Number(s.saldo_pendiente || 0);
@@ -1177,70 +1358,21 @@ export default function RepartosExpress() {
           </section>
         ) : vista === "configuracion" ? (
           <section style={{ background: colores.tarjeta, border: `1px solid ${colores.borde}`, borderRadius: 14, padding: 18 }}>
-            <h2 style={{ marginTop: 0 }}>⚙️ Configuración del comercio</h2>
-            <p style={{ color: colores.suave }}>Esta ubicación es el punto de partida para calcular el radio habitual de entregas. No modifica pedidos anteriores.</p>
-            {cargandoConfig ? <p>Cargando configuración...</p> : (
-              <form onSubmit={guardarConfiguracion} style={{ display: "grid", gap: 14 }}>
-                <label>Nombre del comercio *
-                  <input style={{ ...campo, marginTop: 6 }} required maxLength={150} value={configComercio.nombre_comercio}
-                    onChange={e => setConfigComercio(c => ({ ...c, nombre_comercio: e.target.value }))} placeholder="Ej.: Pizzería Don Pedro – Quilmes" />
-                </label>
-                <label>Dirección completa del local *
-                  <input style={{ ...campo, marginTop: 6 }} required maxLength={300} value={configComercio.direccion}
-                    onChange={e => { setConfigComercio(c => ({ ...c, direccion: e.target.value, latitud: null, longitud: null })); setResultadosUbicacion([]); }}
-                    placeholder="Calle, número, localidad, provincia, Argentina" />
-                </label>
-                <button type="button" disabled={buscandoUbicacion} onClick={buscarDireccionLocal}
-                  style={{ ...boton, background: "#2563eb", color: "white" }}>{buscandoUbicacion ? "Buscando..." : "🔎 Buscar dirección en el mapa"}</button>
-                {resultadosUbicacion.length > 0 && <div style={{ display: "grid", gap: 8 }}>
-                  <strong>Elegí el resultado correcto y verificá el marcador en el mapa:</strong>
-                  {resultadosUbicacion.map((r, i) => <button type="button" key={i}
-                    onClick={() => { setConfigComercio(c => ({ ...c, latitud: r.lat, longitud: r.lon })); setResultadosUbicacion([]); }}
-                    style={{ ...boton, textAlign: "left", background: "#334155", color: "white" }}>📍 {r.nombre}</button>)}
-                </div>}
-                <div>
-                  <strong>📍 Confirmá el punto exacto del local</strong>
-                  <p style={{ color: colores.suave, fontSize: 13 }}>Tocá el mapa o arrastrá el marcador. También podés acercar el mapa con los controles.</p>
-                  <div style={{ height: 330, borderRadius: 12, overflow: "hidden" }}>
-                    <MapContainer center={[-38.4161, -63.6167]} zoom={5} style={{ height: "100%", width: "100%" }} scrollWheelZoom={false}>
-                      <TileLayer attribution='&copy; OpenStreetMap contributors'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                      <CentrarMapa posicion={configComercio.latitud != null && configComercio.longitud != null ? [Number(configComercio.latitud), Number(configComercio.longitud)] : null} />
-                      <SelectorUbicacion posicion={configComercio.latitud != null && configComercio.longitud != null ? [Number(configComercio.latitud), Number(configComercio.longitud)] : null}
-                        onElegir={([lat, lon]) => setConfigComercio(c => ({ ...c, latitud: lat, longitud: lon }))} />
-                      {configComercio.latitud != null && configComercio.longitud != null && <Circle
-                        center={[Number(configComercio.latitud), Number(configComercio.longitud)]}
-                        radius={Number(configComercio.radio_entregas_km || 5) * 1000}
-                        pathOptions={{ color: "#2563eb", fillColor: "#60a5fa", fillOpacity: 0.12 }} />}
-                    </MapContainer>
-                  </div>
-                  <p style={{ color: colores.suave, fontSize: 13 }}>
-                    {configComercio.latitud != null && configComercio.longitud != null
-                      ? `Ubicación elegida: ${Number(configComercio.latitud).toFixed(6)}, ${Number(configComercio.longitud).toFixed(6)}`
-                      : "Todavía no elegiste la ubicación del comercio."}
-                  </p>
-                </div>
-                <label style={{ display: "grid", gap: 12 }}>
-                  <strong>Radio habitual de entregas</strong>
-                  <strong style={{ fontSize: 30, color: "#93c5fd", textAlign: "center" }}>
-                    {Number(configComercio.radio_entregas_km)} km
-                  </strong>
-                  <input type="range" min="1" max="20" step="1"
-                    value={Math.min(20, Math.max(1, Number(configComercio.radio_entregas_km) || 5))}
-                    onChange={e => setConfigComercio(c => ({ ...c, radio_entregas_km: Number(e.target.value) }))}
-                    style={{ width: "100%", accentColor: "#60a5fa", cursor: "pointer", height: 34 }}
-                    aria-label="Radio habitual de entregas en kilómetros" />
-                  <span style={{ display: "flex", justifyContent: "space-between", color: colores.suave, fontSize: 13 }}>
-                    <span>1 km</span><span>20 km</span>
-                  </span>
-                </label>
-                <p style={{ color: "#fde68a", margin: 0, fontSize: 13 }}>El círculo azul representa el radio en línea recta desde el local, no la distancia por calles. Las excepciones fuera del radio se implementarán en un paso posterior.</p>
-                {avisoConfig && <p role="status" style={{ padding: 12, borderRadius: 8, background: "#0b1220" }}>{avisoConfig}</p>}
-                <button type="submit" disabled={guardandoConfig}
-                  style={{ ...boton, background: "#16a34a", color: "white", minHeight: 52 }}>
-                  {guardandoConfig ? "Guardando..." : "💾 Guardar configuración del comercio"}
-                </button>
-              </form>
+            <h2 style={{ marginTop: 0 }}>📍 Datos de la sucursal {nombreSucursalOperativa ? `· ${nombreSucursalOperativa}` : ""}</h2>
+            <p style={{ color: colores.suave }}>Estos datos los administra el dueño desde su panel. El supervisor solamente los consulta.</p>
+            {cargandoConfig ? <p>Cargando datos...</p> : (
+              <div style={{ display: "grid", gap: 12 }}>
+                <div><strong>Comercio:</strong> {configComercio.nombre_comercio || "Sin configurar"}</div>
+                <div><strong>Dirección:</strong> {configComercio.direccion || "Sin configurar"}</div>
+                <div><strong>Radio de entregas:</strong> {configComercio.radio_entregas_km ?? "Sin configurar"} km</div>
+                <div><strong>Ubicación GPS:</strong> {configComercio.latitud != null && configComercio.longitud != null
+                  ? `${Number(configComercio.latitud).toFixed(6)}, ${Number(configComercio.longitud).toFixed(6)}`
+                  : "Pendiente de configurar por el dueño"}</div>
+                {(configComercio.latitud == null || configComercio.longitud == null || !configComercio.direccion) && (
+                  <p style={{ color: "#fde68a" }}>⚠️ El dueño debe completar la dirección y ubicación GPS de esta sucursal desde su panel antes de cargar entregas.</p>
+                )}
+                {avisoConfig && <p role="status">{avisoConfig}</p>}
+              </div>
             )}
           </section>
         ) : vista === "asignar" ? (
@@ -1252,8 +1384,8 @@ export default function RepartosExpress() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))", gap: 16 }}>
               <div style={{ background: "#111827", borderRadius: 12, padding: 14 }}>
                 <h3>📋 Pedidos listos para salir</h3>
-                {pedidos.filter(p => p.estado === "listo" && !pedidoEnBorrador(p.id)).length === 0 && <p style={{ color: colores.suave }}>No hay pedidos listos sin asignar.</p>}
-                {pedidos.filter(p => p.estado === "listo" && !pedidoEnBorrador(p.id)).map(p => (
+                {pedidosVisibles.filter(p => p.estado === "listo" && !pedidoEnBorrador(p.id)).length === 0 && <p style={{ color: colores.suave }}>No hay pedidos listos sin asignar.</p>}
+                {pedidosVisibles.filter(p => p.estado === "listo" && !pedidoEnBorrador(p.id)).map(p => (
                   <div key={p.id} draggable onDragStart={e => { e.dataTransfer.setData("text/plain", p.id); e.dataTransfer.effectAllowed = "move"; setArrastrando(p.id); }} onDragEnd={() => setArrastrando(null)}
                     style={{ border: `1px solid ${colores.borde}`, background: arrastrando === p.id ? "#334155" : colores.tarjeta, borderRadius: 10, padding: 12, marginBottom: 10, cursor: "grab" }}>
                     <strong>☰ {p.numero} · {p.nombre}</strong>
@@ -1419,11 +1551,38 @@ export default function RepartosExpress() {
             <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
               <strong>🤝 Transferencias de pedidos</strong>
               <span style={{ color: colores.suave, fontSize: 13 }}>Recibidas: {transferenciasParaMi.length} · Enviadas: {transferenciasEnviadas.length}</span>
-              <button type="button" onClick={cargarHerencias} disabled={Boolean(operacionHerencia)} style={{ ...boton, background: "#334155", color: "white", padding: "8px 12px" }}>↻ Actualizar</button>
+              <button type="button" onClick={cargarHerencias} disabled={Boolean(operacionHerencia) || cargandoHerencias} style={{ ...boton, background: "#334155", color: "white", padding: "8px 12px" }}>{cargandoHerencias ? "⏳ Consultando..." : "↻ Actualizar"}</button>
             </div>
             {errorHerencia && <p role="alert" style={{ color: "#fca5a5" }}>{errorHerencia}</p>}
             {avisoHerencia && <p role="status" style={{ color: "#86efac" }}>{avisoHerencia}</p>}
-            {visibles.length === 0 && <p style={{ color: colores.suave }}>No hay pedidos en esta selección.</p>}
+            {/* La herencia recibida debe poder aceptarse ANTES de que el pedido pase a este turno.
+                No depender de pedidosVisibles ni de que RLS permita leer el pedido ajeno. */}
+            {transferenciasParaMi.length > 0 && (
+              <section aria-label="Herencias recibidas pendientes" style={{ display: "grid", gap: 9, marginBottom: 15 }}>
+                <strong style={{ color: "#fde68a" }}>📥 Herencias recibidas pendientes de aceptar</strong>
+                {transferenciasParaMi.map(h => {
+                  const pedido = pedidos.find(p => p.id === h.pedido_id);
+                  const turnoOrigen = turnosDisponibles.find(t => t.id === h.turno_origen_id);
+                  const supervisorOrigen = turnoOrigen ? nombresSupervisores[turnoOrigen.supervisor_id] : null;
+                  return (
+                    <div key={h.id} style={{ padding: 13, borderRadius: 10, border: "1px solid #a16207", background: "#29200e" }}>
+                      <div style={{ fontWeight: 800, color: "#fef3c7" }}>
+                        {pedido ? `${pedido.numero} · ${pedido.nombre}` : "Pedido pendiente de recibir"}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#fde68a", marginTop: 5 }}>
+                        {supervisorOrigen ? `Enviado por ${supervisorOrigen}. ` : ""}El pedido todavía está bajo responsabilidad del supervisor saliente.
+                      </div>
+                      <button type="button" disabled={Boolean(operacionHerencia)}
+                        onClick={() => ejecutarHerencia("aceptar", h.id, pedido?.numero || "pendiente")}
+                        style={{ ...boton, background: "#15803d", color: "white", marginTop: 10 }}>
+                        {operacionHerencia === h.id ? "⏳ Aceptando..." : "✓ ACEPTAR HERENCIA"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </section>
+            )}
+            {visibles.length === 0 && transferenciasParaMi.length === 0 && <p style={{ color: colores.suave }}>No hay pedidos en esta selección.</p>}
             <div className="ex-lista-pedidos" style={{ display: "grid", gap: 7 }}>
               {visibles.map(p => (
                 <article className="ex-pedido" key={p.id} style={{ border: `1px solid ${colores.borde}`, borderRadius: 10, padding: 10, background: "#111827" }}>
@@ -1493,6 +1652,18 @@ export default function RepartosExpress() {
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", marginTop: 4, color: colores.suave, fontSize: 12 }}>
                       <span>🕒 Pedido: {p.creado || "Sin fecha registrada"}</span>
                       {p.estado === "entregado" && p.entregadoEn && <span>✓ Entregado: {new Date(p.entregadoEn).toLocaleString("es-AR")}</span>}
+                      {["entregado", "no_entregado"].includes(p.estado) && (() => {
+                        const gps = auditoriasGps[p.id];
+                        if (!gps) return <span style={{ color: "#cbd5e1" }}>📍 GPS: sin registro de verificación</span>;
+                        if (gps.estado_gps !== "medido" || gps.distancia_m == null)
+                          return <span style={{ color: "#fbbf24" }}>📍 GPS: no verificado ({gps.estado_gps === "sin_destino" ? "destino sin coordenadas" : "sin ubicación nueva"})</span>;
+                        const fuera = Number(gps.distancia_m) > 100;
+                        return <span style={{ color: fuera ? "#fbbf24" : "#86efac", fontWeight: 700 }}>
+                          {fuera ? "⚠️" : "📍"} GPS: {Number(gps.distancia_m).toLocaleString("es-AR")} m del destino
+                          {fuera ? " · Fuera del margen (100 m)" : " · Dentro del margen"}
+                          {gps.precision_m != null ? ` · Precisión ±${gps.precision_m} m` : ""}
+                        </span>;
+                      })()}
                     </div>
                   </div>
                   {p.turnoResponsableId === turnoActual?.id && !idsParaMi.has(p.id) && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
@@ -1506,6 +1677,7 @@ export default function RepartosExpress() {
                         <select aria-label="Supervisor que recibirá el pedido" value={destinosHerencia[p.id] || ""} onChange={e => setDestinosHerencia(prev => ({ ...prev, [p.id]: e.target.value }))} style={{ ...campo, maxWidth: 310 }}>
                           <option value="">Elegir supervisor con turno abierto...</option>
                           {turnosDisponibles.filter(t => t.id !== turnoActual.id).map(t => <option key={t.id} value={t.id}>{nombresSupervisores[t.supervisor_id] || `Supervisor ${t.supervisor_id.slice(0, 8)}`}</option>)}
+                          {cargandoHerencias && <option value="" disabled>Consultando turnos abiertos...</option>}
                         </select>
                         <button type="button" disabled={Boolean(operacionHerencia) || !destinosHerencia[p.id]} onClick={() => ejecutarHerencia("ofrecer", p.id, p.numero)} style={{ ...boton, background: "#2563eb", color: "white", padding: "9px 12px", fontSize: 12 }}>➡️ CONFIRMAR TRANSFERENCIA</button>
                       </div>
@@ -1515,7 +1687,7 @@ export default function RepartosExpress() {
                 </article>
               ))}
             </div>
-            <p style={{ color: colores.suave, fontSize: 12, marginTop: 10 }}>Últimos 500 pedidos. Para asignarlos, usá «Preparar viajes». {esAdminExpress ? "Vista general del administrador." : "Vista operativa de tu turno y transferencias recibidas."}</p>
+            <p style={{ color: colores.suave, fontSize: 12, marginTop: 10 }}>Pedidos de tu responsabilidad actual (consulta limitada a los últimos 500 de la empresa). Para asignarlos, usá «Preparar viajes». {esAdminExpress ? "Vista general del administrador." : "Vista operativa de tu turno y transferencias recibidas."}</p>
           </section>
         )}
           </>
