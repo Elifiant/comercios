@@ -58,6 +58,14 @@ export default function AdminClientes() {
     "Mayorista San Martín Golosinas": { dia: "10", estado: "Por Vencer", color: "#f59e0b", cupo: 3 }
   });
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
+  const [mostrarPanelCobros, setMostrarPanelCobros] = useState(false);
+  const [cobroSeleccionado, setCobroSeleccionado] = useState(null);
+  const [fechaImputacion, setFechaImputacion] = useState(() => new Date().toLocaleDateString("en-CA"));
+  const [proximoCobro, setProximoCobro] = useState("");
+  const [importeImputacion, setImporteImputacion] = useState("0");
+  const [referenciaImputacion, setReferenciaImputacion] = useState("");
+  const [guardandoImputacion, setGuardandoImputacion] = useState(false);
+  const [modoModalPago, setModoModalPago] = useState("abonos");
   const [planesCatalogo, setPlanesCatalogo] = useState([]);
   const [variantesCatalogo, setVariantesCatalogo] = useState([]);
   const [abonoEmpresaActual, setAbonoEmpresaActual] = useState(null);
@@ -333,7 +341,8 @@ export default function AdminClientes() {
     }
   };
 
-  const abrirRegistrarPago = async (emp) => {
+  const abrirRegistrarPago = async (emp, modo = "abonos") => {
+    setModoModalPago(modo);
     setEmpresaPago(emp);
     const t = tarifasMap[emp] || {};
     const empresaDB = empresasRegistros.find(e => e.nombre === emp);
@@ -390,6 +399,49 @@ export default function AdminClientes() {
     setDiaCorteAbono(contrato?.dia_corte == null ? String(t.diaCorte || "") : String(contrato.dia_corte));
     setNotasContratoAbono(contrato?.notas || "");
     setMostrarModalPago(true);
+  };
+
+  const abrirImputarCobro = (empresa, contrato) => {
+    setCobroSeleccionado({ empresa, contrato });
+    setFechaImputacion(new Date().toLocaleDateString("en-CA"));
+    setImporteImputacion(String(Number(contrato.precio_acordado ?? 0)));
+    setReferenciaImputacion("");
+    // Propuesta basada en el vencimiento vigente, NO en la fecha de pago.
+    if (contrato.proximo_vencimiento) {
+      const [anio, mes, dia] = contrato.proximo_vencimiento.split("-").map(Number);
+      const meses = Number(contrato.meses) || 1;
+      const destino = new Date(anio, mes - 1 + meses, 1);
+      const ultimoDia = new Date(destino.getFullYear(), destino.getMonth() + 1, 0).getDate();
+      destino.setDate(Math.min(dia, ultimoDia));
+      setProximoCobro(`${destino.getFullYear()}-${String(destino.getMonth() + 1).padStart(2, "0")}-${String(destino.getDate()).padStart(2, "0")}`);
+    } else setProximoCobro("");
+  };
+
+  const confirmarImputacion = async (e) => {
+    e.preventDefault();
+    if (guardandoImputacion || !cobroSeleccionado) return;
+    const { empresa, contrato } = cobroSeleccionado;
+    if (!fechaImputacion || !proximoCobro) return alert("Completá ambas fechas.");
+    if (proximoCobro <= contrato.proximo_vencimiento) return alert("El próximo vencimiento debe ser posterior al actual.");
+    if (importeImputacion.trim() === "" || !Number.isFinite(Number(importeImputacion)) || Number(importeImputacion) < 0) return alert("Ingresá un importe válido; puede ser 0.");
+    if (!window.confirm(`¿Imputar ${contrato.moneda || "ARS"} $${Number(importeImputacion).toLocaleString("es-AR")} a ${empresa.nombre} (${contrato.plan_nombre})?\nVencimiento anterior: ${contrato.proximo_vencimiento}\nPróximo vencimiento: ${proximoCobro}`)) return;
+    setGuardandoImputacion(true);
+    try {
+      const { error } = await supabase.rpc("superadmin_imputar_cobro_abono", {
+        p_contrato_id: contrato.id,
+        p_vencimiento_anterior: contrato.proximo_vencimiento,
+        p_proximo_vencimiento: proximoCobro,
+        p_fecha_pago: fechaImputacion,
+        p_monto: Number(importeImputacion),
+        p_referencia: referenciaImputacion.trim() || null
+      });
+      if (error) throw error;
+      setCobroSeleccionado(null);
+      await cargarDatos();
+      alert("✅ Renovación imputada y próximo vencimiento actualizado.");
+    } catch (err) {
+      alert("No se confirmó la imputación: " + (err.message || "Error desconocido") + "\nNo vuelvas a intentarlo sin revisar el historial.");
+    } finally { setGuardandoImputacion(false); }
   };
 
   const seleccionarContratoActivo = (contrato) => {
@@ -649,6 +701,12 @@ export default function AdminClientes() {
     if (guardandoPagoRef.current) return;
     guardandoPagoRef.current = true;
     setGuardandoPago(true);
+    if (modoModalPago === "cobros") {
+      guardandoPagoRef.current = false;
+      setGuardandoPago(false);
+      alert("La imputación desde Cobros está temporalmente protegida: primero debemos habilitar el guardado conjunto de pago y vencimiento en Supabase. No se registró ningún movimiento.");
+      return;
+    }
     try {
       const empresaDB = empresasRegistros.find(e => e.nombre === empresaPago);
       if (!empresaDB?.id) throw new Error("No encontré la empresa en Supabase");
@@ -982,42 +1040,30 @@ export default function AdminClientes() {
   const cobradoARS = historialPagos.filter(h => h.moneda === "ARS" && (h.estado === "Confirmado" || h.estado === "Acreditado")).reduce((acc, h) => acc + Number(h.monto || 0), 0);
   const cobradoUSDT = historialPagos.filter(h => h.moneda === "USDT" && h.estado === "Confirmado").reduce((acc, h) => acc + Number(h.monto || 0), 0);
 
-    const diaHoy = new Date().getDate();
-  const diaManana = diaHoy + 1;
-  let empresasHoy = [];
-  let empresasManana = [];
-  let empresas15Dias = [];
+  // El semáforo usa los mismos vencimientos reales que Cobros generales.
+  const hoyLocal = new Date();
+  const hoyUTC = Date.UTC(hoyLocal.getFullYear(), hoyLocal.getMonth(), hoyLocal.getDate());
+  const empresasHoy = [];
+  const empresasManana = [];
+  const empresas15Dias = [];
 
-  empresas.forEach(emp => {
-    const t = tarifasMap[emp] || {};
-    const cInfo = diasCorteMap[emp] || {};
-    const empresaDB = empresasRegistros.find(e => e.nombre === emp);
-    const contratos = (contratosTabla[empresaDB?.id] || []).filter(c => c.activo);
-    const contratoPrincipal = contratos[0] || null;
-    const diaCorte = Number(contratoPrincipal?.dia_corte ?? t.diaCobro ?? t.dia_cobro ?? cInfo.dia ?? 5);
-
-    // Mostrar exclusivamente la moneda y el precio pactados en los contratos activos.
-    // Si hay más de una moneda, no convertir ni mezclar importes.
-    const importes = contratos.length > 0
-      ? contratos.reduce((acumulado, contrato) => {
-          const moneda = contrato.moneda || "ARS";
-          acumulado[moneda] = (acumulado[moneda] || 0) + Number(contrato.precio_acordado ?? 0);
-          return acumulado;
-        }, {})
-      : { [t.moneda || "ARS"]: Number(t.valor ?? t.tarifa ?? 0) * (t.tipo === "plana" ? 1 : Number(t.cupo ?? cInfo.cupo ?? 0)) };
-    const importeTexto = Object.entries(importes)
-      .map(([moneda, total]) => `${moneda} $${Number(total).toLocaleString("es-AR")}`)
-      .join(" · ");
-    const item = { empresa: emp, importeTexto, dia: diaCorte };
-
-    if (diaCorte === diaHoy) {
-      empresasHoy.push(item);
-    } else if (diaCorte === diaManana) {
-      empresasManana.push(item);
-    } else if (diaCorte > diaHoy && diaCorte <= diaHoy + 15) {
-      empresas15Dias.push(item);
-    }
-  });;
+  empresasRegistros.forEach(empresa => {
+    const contratos = (contratosTabla[empresa.id] || []).filter(c => c.activo && c.proximo_vencimiento);
+    contratos.forEach(contrato => {
+      const partes = contrato.proximo_vencimiento.split("-").map(Number);
+      if (partes.length !== 3 || partes.some(n => !Number.isFinite(n))) return;
+      const vencimientoUTC = Date.UTC(partes[0], partes[1] - 1, partes[2]);
+      const diasRestantes = Math.round((vencimientoUTC - hoyUTC) / 86400000);
+      const item = {
+        empresa: empresa.nombre,
+        importeTexto: `${contrato.moneda || "ARS"} $${Number(contrato.precio_acordado ?? 0).toLocaleString("es-AR")}`,
+        dia: partes[2]
+      };
+      if (diasRestantes === 0) empresasHoy.push(item);
+      else if (diasRestantes === 1) empresasManana.push(item);
+      else if (diasRestantes >= 2 && diasRestantes <= 15) empresas15Dias.push(item);
+    });
+  });
 
   return (
     <main style={{ minHeight: "100vh", backgroundColor: "#0f172a", color: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif", padding: "24px" }}>
@@ -1030,6 +1076,9 @@ export default function AdminClientes() {
           <p style={{ margin: "4px 0 0 0", color: "#94a3b8", fontSize: "13px" }}>Control financiero, gestión completa de empresas y bajas de preventistas</p>
         </div>
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setMostrarPanelCobros(true)} style={{ backgroundColor: "#047857", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px" }}>
+            💰 Cobros generales
+          </button>
           <button type="button" onClick={() => setMostrarPlanesAbonos(true)} style={{ backgroundColor: "#7c3aed", color: "#fff", border: "none", padding: "10px 18px", borderRadius: "8px", cursor: "pointer", fontWeight: "700", fontSize: "13px", boxShadow: "0 4px 12px rgba(124,58,237,0.25)" }}>
             📋 Planes y Abonos
           </button>
@@ -1196,20 +1245,25 @@ export default function AdminClientes() {
                 <th style={{ padding: "12px 8px" }}>EMPRESA & PAÍS</th>
                 <th style={{ padding: "12px 8px" }}>CUPOS PREVENTISTAS</th>
                 <th style={{ padding: "12px 8px" }}>MODELO & TARIFA</th>
-                <th style={{ padding: "12px 8px" }}>DÍA DE CORTE</th>
+                <th style={{ padding: "12px 8px" }}>PRÓXIMO VENCIMIENTO</th>
                 <th style={{ padding: "12px 8px" }}>ESTADO COBRO</th>
                 <th style={{ padding: "12px 8px", textAlign: "right" }}>ACCIONES</th>
               </tr>
             </thead>
             <tbody>
-              {empresas.map((emp) => {
+              {[...empresas].sort((a, b) => {
+                const fechaMasProxima = (nombre) => {
+                  const empresa = empresasRegistros.find(e => e.nombre === nombre);
+                  const fechas = (contratosTabla[empresa?.id] || [])
+                    .filter(c => c.activo && c.proximo_vencimiento)
+                    .map(c => c.proximo_vencimiento);
+                  return fechas.length ? fechas.sort()[0] : "9999-12-31";
+                };
+                const comparacion = fechaMasProxima(a).localeCompare(fechaMasProxima(b));
+                return comparacion || a.localeCompare(b, "es");
+              }).map((emp) => {
                 const t = tarifasMap[emp] || {};
                 const cInfoRaw = diasCorteMap[emp] || {};
-                const estadoTexto = t.estado_pago || cInfoRaw.estado || "Al Día";
-                const esAlDia = (estadoTexto === "Al Día");
-                const esPorVencer = (estadoTexto === "Por Vencer");
-                const colorBadge = esAlDia ? "#10b981" : esPorVencer ? "#f59e0b" : "#ef4444";
-                const bgBadge = esAlDia ? "rgba(16, 185, 129, 0.15)" : esPorVencer ? "rgba(245, 158, 11, 0.15)" : "rgba(239, 68, 68, 0.15)";
                 
                 const prevsCount = preventistas.filter(p => (p.empresa || "").toLowerCase() === emp.toLowerCase() && p.rol === "preventista").length;
                 const empresaDB = empresasRegistros.find(e => e.nombre === emp);
@@ -1218,6 +1272,23 @@ export default function AdminClientes() {
                 const ventas = contratosVigentes.find(c => tipoContrato(c.plan_nombre) === "Ventas");
                 const integrado = contratosVigentes.find(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos");
                 const contratoPrincipal = contratosVigentes[0] || null;
+                // Estado calculado solo con la fecha real de los contratos activos.
+                // Si hay varios contratos, mostramos el vencimiento más próximo.
+                const fechasVencimiento = contratosVigentes
+                  .map(c => c.proximo_vencimiento)
+                  .filter(Boolean)
+                  .sort();
+                const proximoVencimiento = fechasVencimiento[0] || null;
+                const fechaVencimientoUTC = proximoVencimiento
+                  ? Date.parse(`${proximoVencimiento}T00:00:00Z`)
+                  : null;
+                const diasRestantes = fechaVencimientoUTC === null ? null : Math.round((fechaVencimientoUTC - hoyUTC) / 86400000);
+                const estadoTexto = diasRestantes === null ? "Sin vencimiento" : diasRestantes < 0
+                  ? `Vencido hace ${Math.abs(diasRestantes)} día(s)`
+                  : diasRestantes === 0 ? "Vence hoy"
+                  : diasRestantes <= 7 ? `Vence en ${diasRestantes} día(s)` : "Al día";
+                const colorBadge = diasRestantes === null ? "#94a3b8" : diasRestantes <= 0 ? "#ef4444" : diasRestantes <= 7 ? "#f59e0b" : "#10b981";
+                const bgBadge = diasRestantes === null ? "rgba(148, 163, 184, 0.15)" : diasRestantes <= 0 ? "rgba(239, 68, 68, 0.15)" : diasRestantes <= 7 ? "rgba(245, 158, 11, 0.15)" : "rgba(16, 185, 129, 0.15)";
                 const soloRepartos = Boolean(reparto && !ventas && !integrado);
                 const cupoMax = soloRepartos ? 0 : Number(ventas?.cupo_preventistas ?? integrado?.cupo_preventistas ?? t.cupo ?? cInfoRaw.cupo ?? 0);
                 const cupoRepartidores = Number(reparto?.cupo_repartidores ?? integrado?.cupo_repartidores ?? empresaDB?.cupo_repartidores ?? 0);
@@ -1251,7 +1322,7 @@ export default function AdminClientes() {
                     </td>
                     <td style={{ padding: "12px 8px" }}>
                       <span style={{ padding: "4px 8px", backgroundColor: "#0f172a", borderRadius: "6px", fontSize: "12px", color: "#cbd5e1" }}>
-                        📅 Día {diaCorte} c/mes
+                        {proximoVencimiento ? `📅 ${proximoVencimiento.split("-").reverse().join("/")}` : "Sin vencimiento registrado"}
                       </span>
                     </td>
                     <td style={{ padding: "12px 8px" }}>
@@ -1265,6 +1336,9 @@ export default function AdminClientes() {
                       </button>
                       <button type="button" onClick={() => abrirRegistrarPago(emp)} style={{ backgroundColor: "#059669", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
                         💳 Abonos
+                      </button>
+                      <button type="button" onClick={() => abrirRegistrarPago(emp, "cobros")} style={{ backgroundColor: "#047857", color: "#fff", border: "none", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "700", marginRight: "6px" }}>
+                        💰 Cobros
                       </button>
                       <button type="button" onClick={() => abrirEditarEmpresa(emp)} style={{ backgroundColor: "#334155", color: "#f8fafc", border: "1px solid #475569", padding: "6px 12px", borderRadius: "6px", cursor: "pointer", fontSize: "12px", fontWeight: "600", marginRight: "6px" }}>
                         ✏️ Editar
@@ -1318,6 +1392,10 @@ export default function AdminClientes() {
             </div>
 
             <div style={{ padding: "24px" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+                <button type="button" onClick={() => { const emp = empresaDetalleModal; setEmpresaDetalleModal(null); abrirRegistrarPago(emp, "cobros"); }} style={{ background: "#047857", color: "white", border: 0, borderRadius: 8, padding: "10px 15px", fontWeight: 800, cursor: "pointer" }}>💰 Cobros de esta empresa</button>
+                <button type="button" onClick={() => { const emp = empresaDetalleModal; setEmpresaDetalleModal(null); abrirRegistrarPago(emp, "abonos"); }} style={{ background: "#7c3aed", color: "white", border: 0, borderRadius: 8, padding: "10px 15px", fontWeight: 800, cursor: "pointer" }}>💳 Abonos</button>
+              </div>
               
               {/* Administración de sucursales: exclusiva de SuperAdmin */}
               {(() => {
@@ -1687,13 +1765,77 @@ export default function AdminClientes() {
         </div>
       )}
 
+      {/* PANEL GENERAL DE COBROS: vencimientos reales de contratos activos */}
+      {mostrarPanelCobros && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 29000, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 14 }}>
+          <div style={{ background: "#1e293b", color: "#f8fafc", borderRadius: 14, width: "100%", maxWidth: 1000, maxHeight: "92vh", overflowY: "auto", padding: 22, boxSizing: "border-box" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <h2 style={{ margin: 0 }}>💰 Cobros y próximos vencimientos</h2>
+              <button type="button" onClick={() => setMostrarPanelCobros(false)} style={{ background: "#334155", color: "white", border: 0, borderRadius: 8, padding: 10, cursor: "pointer" }}>✕ Cerrar</button>
+            </div>
+            <p style={{ color: "#cbd5e1", fontSize: 13 }}>Todas las empresas se muestran juntas. Cada vencimiento corresponde a un contrato activo. Un importe $0 no representa dinero cobrado.</p>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 750, fontSize: 13 }}>
+                <thead><tr>{["Empresa", "Servicio", "Periodicidad", "Importe", "Próximo vencimiento", "Situación", "Acción"].map(h => <th key={h} style={{ textAlign: "left", padding: 10, borderBottom: "1px solid #475569" }}>{h}</th>)}</tr></thead>
+                <tbody>{empresasRegistros.flatMap(emp => (contratosTabla[emp.id] || []).filter(c => c.activo).map(c => ({ emp, c })))
+                  .sort((a, b) => (a.c.proximo_vencimiento || "9999-12-31").localeCompare(b.c.proximo_vencimiento || "9999-12-31"))
+                  .map(({ emp, c }) => {
+                    const hoy = new Date();
+                    const hoyLocal = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+                    const fecha = c.proximo_vencimiento ? new Date(`${c.proximo_vencimiento}T00:00:00`) : null;
+                    const dias = fecha ? Math.round((fecha - hoyLocal) / 86400000) : null;
+                    const situacion = dias === null ? "Sin fecha" : dias < 0 ? `Vencido hace ${-dias} día(s)` : dias === 0 ? "Vence hoy" : `Faltan ${dias} día(s)`;
+                    const color = dias === null ? "#94a3b8" : dias < 0 ? "#fca5a5" : dias <= 3 ? "#fbbf24" : "#86efac";
+                    const meses = Number(c.meses || 1);
+                    const frecuencia = ({1:"Mensual",3:"Trimestral",6:"Semestral",12:"Anual"})[meses] || `${meses} meses`;
+                    return <tr key={c.id}>
+                      <td style={{ padding: 10, borderBottom: "1px solid #334155" }}><strong>{emp.nombre}</strong></td>
+                      <td style={{ padding: 10, borderBottom: "1px solid #334155" }}>{c.plan_nombre || "Abono"}</td>
+                      <td style={{ padding: 10, borderBottom: "1px solid #334155" }}>{frecuencia}</td>
+                      <td style={{ padding: 10, borderBottom: "1px solid #334155" }}>{c.moneda || "ARS"} ${Number(c.precio_acordado || 0).toLocaleString("es-AR")}</td>
+                      <td style={{ padding: 10, borderBottom: "1px solid #334155" }}>{c.proximo_vencimiento ? c.proximo_vencimiento.split("-").reverse().join("/") : "—"}</td>
+                      <td style={{ padding: 10, borderBottom: "1px solid #334155", color, fontWeight: 800 }}>{situacion}</td>
+                      <td style={{ padding: 10, borderBottom: "1px solid #334155" }}><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}><button type="button" onClick={() => abrirImputarCobro(emp, c)} style={{ background: "#059669", color: "white", border: 0, borderRadius: 7, padding: "8px 10px", cursor: "pointer", fontWeight: 800 }}>💰 Imputar cobro</button><button type="button" onClick={() => { setMostrarPanelCobros(false); abrirRegistrarPago(emp.nombre, "abonos"); }} style={{ background: "#334155", color: "white", border: 0, borderRadius: 7, padding: "8px 10px", cursor: "pointer" }}>Ver abono</button></div></td>
+                    </tr>;
+                  })}</tbody>
+              </table>
+            </div>
+            <h3 style={{ marginBottom: 8 }}>Últimos movimientos registrados</h3>
+            <div style={{ maxHeight: 230, overflowY: "auto", fontSize: 13 }}>
+              {historialPagos.slice(0, 20).map((p, i) => <div key={p.id || i} style={{ padding: "8px 0", borderBottom: "1px solid #334155" }}>{p.empresa || empresasRegistros.find(e => e.id === p.empresa_id)?.nombre || "Empresa"} · {p.fecha} · {p.moneda || "ARS"} ${Number(p.monto || 0).toLocaleString("es-AR")} · {p.bonificado ? "Bonificado" : Number(p.monto || 0) === 0 ? "Sin ingreso de dinero" : "Movimiento registrado"}</div>)}
+            </div>
+            <p style={{ color: "#cbd5e1", fontSize: 12 }}>Las renovaciones de $0 también se imputan manualmente. El pago y el vencimiento se guardan juntos en Supabase.</p>
+          </div>
+        </div>
+      )}
+
+      {cobroSeleccionado && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 31000, background: "rgba(0,0,0,.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: 14 }}>
+          <form onSubmit={confirmarImputacion} style={{ width: "100%", maxWidth: 480, background: "#1e293b", color: "white", borderRadius: 14, padding: 22, display: "grid", gap: 13 }}>
+            <h2 style={{ margin: 0 }}>💰 Imputar cobro</h2>
+            <strong>{cobroSeleccionado.empresa.nombre} · {cobroSeleccionado.contrato.plan_nombre}</strong>
+            <div>Vencimiento actual: <strong>{cobroSeleccionado.contrato.proximo_vencimiento?.split("-").reverse().join("/") || "Sin fecha"}</strong></div>
+            <div>Periodicidad: {({ 1: "Mensual", 3: "Trimestral", 6: "Semestral", 12: "Anual" })[Number(cobroSeleccionado.contrato.meses)] || `${cobroSeleccionado.contrato.meses} meses`}</div>
+            <label>Importe ({cobroSeleccionado.contrato.moneda || "ARS"}; puede ser 0)<input type="number" min="0" step="any" required value={importeImputacion} onChange={e => setImporteImputacion(e.target.value)} style={{ width: "100%", padding: 10, marginTop: 5, boxSizing: "border-box" }} /></label>
+            <label>Fecha del pago<input type="date" required value={fechaImputacion} onChange={e => setFechaImputacion(e.target.value)} style={{ width: "100%", padding: 10, marginTop: 5, boxSizing: "border-box" }} /></label>
+            <label>Próximo vencimiento (editable)<input type="date" required value={proximoCobro} onChange={e => setProximoCobro(e.target.value)} style={{ width: "100%", padding: 10, marginTop: 5, boxSizing: "border-box" }} /></label>
+            <label>Referencia u observación (opcional)<input type="text" value={referenciaImputacion} onChange={e => setReferenciaImputacion(e.target.value)} style={{ width: "100%", padding: 10, marginTop: 5, boxSizing: "border-box" }} /></label>
+            <div style={{ fontSize: 12, color: "#cbd5e1" }}>El próximo vencimiento se propone desde el vencimiento actual, no desde la fecha en que pagaron. Podés cambiarlo.</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" disabled={guardandoImputacion} onClick={() => setCobroSeleccionado(null)} style={{ padding: 11 }}>Cancelar</button>
+              <button type="submit" disabled={guardandoImputacion} style={{ padding: 11, background: "#059669", color: "white", border: 0, borderRadius: 7, fontWeight: 800 }}>{guardandoImputacion ? "Guardando..." : "✓ Confirmar imputación"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* MODAL GESTIÓN DE ABONO */}
       {mostrarModalPago && empresaPago && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 30000, padding: "16px" }}>
           <div style={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "14px", padding: "22px", width: "100%", maxWidth: "620px", maxHeight: "92vh", overflowY: "auto", boxSizing: "border-box", boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "16px", borderBottom: "1px solid #334155", paddingBottom: "12px" }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: "18px", color: "#f8fafc" }}>💳 Gestión de Abono</h3>
+                <h3 style={{ margin: 0, fontSize: "18px", color: "#f8fafc" }}>{modoModalPago === "cobros" ? "💰 Cobros / movimientos" : "💳 Gestión de Abono"}</h3>
                 <div style={{ color: "#38bdf8", fontWeight: "800", marginTop: "3px" }}>{empresaPago}</div>
               </div>
               <button type="button" onClick={() => setMostrarModalPago(false)} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}>✕</button>
@@ -1724,6 +1866,7 @@ export default function AdminClientes() {
               );
             })()}
 
+            {modoModalPago === "abonos" && (
             <div style={{ backgroundColor: "#111827", border: "1px solid #475569", borderRadius: "12px", padding: "14px", marginBottom: "16px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                 <div>
@@ -1900,6 +2043,7 @@ export default function AdminClientes() {
               )}
             </div>
 
+            )}
             <div style={{ margin: "18px 0 10px", color: "#34d399", fontSize: "12px", fontWeight: "900" }}>💰 REGISTRAR COBRO / MOVIMIENTO</div>
 
             <form onSubmit={guardarPago}>
