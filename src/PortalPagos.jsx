@@ -152,19 +152,50 @@ export default function PortalPagos() {
 
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#071629,#0b2038)", color: "#f8fafc", fontFamily: "system-ui,-apple-system,sans-serif", paddingBottom: 8 }}>
-      <header style={{ borderBottom: "1px solid #29415f", padding: "8px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-          <a href="/supervisor" style={{ ...smallButton, textDecoration: "none", padding: "12px 18px", fontWeight: 700 }}>← Volver a Supervisión</a>
+      <style>{`
+        .pp-header, .pp-header-left, .pp-main, .pp-summary > *, .pp-methods > *, .pp-method-content > * { min-width: 0; }
+        .pp-methods button, .pp-actions button { overflow-wrap: anywhere; }
+        @media (max-width: 850px) {
+          .pp-header { padding: 16px !important; flex-wrap: wrap; align-items: flex-start !important; gap: 12px !important; }
+          .pp-header-left { flex-wrap: wrap; gap: 12px !important; width: 100%; }
+          .pp-back { display: inline-flex; min-height: 44px; align-items: center; box-sizing: border-box; }
+          .pp-title { font-size: 22px !important; line-height: 1.2; overflow-wrap: anywhere; }
+          .pp-account { font-size: 13px; padding: 7px 12px !important; }
+          .pp-main { padding: 0 14px 24px !important; margin-top: 14px !important; }
+          .pp-summary { grid-template-columns: 1fr !important; gap: 12px !important; }
+          .pp-summary section { padding: 16px !important; overflow-wrap: anywhere; }
+          .pp-summary section > div:nth-child(2) { font-size: 22px !important; }
+          .pp-payment-heading { flex-direction: column; align-items: flex-start !important; gap: 8px !important; }
+          .pp-methods { grid-template-columns: 1fr !important; gap: 12px !important; }
+          .pp-methods button { width: 100%; min-height: 90px; }
+          .pp-method-content { gap: 12px !important; }
+          .pp-method-content img { width: 100px !important; max-width: 30% !important; flex-shrink: 0; }
+          .pp-method-title { font-size: 18px !important; line-height: 1.25; }
+          .pp-other-options { grid-template-columns: repeat(2, minmax(0,1fr)) !important; gap: 12px !important; }
+          .pp-actions { grid-template-columns: 1fr !important; gap: 10px !important; }
+          .pp-actions button { min-height: 52px; padding: 12px 14px !important; }
+          .pp-modal-backdrop { padding: 12px !important; overflow-y: auto; align-items: center; }
+          .pp-modal-box { box-sizing: border-box; width: 100% !important; max-width: 620px; max-height: calc(100dvh - 24px); overflow-y: auto; padding: 18px !important; overflow-wrap: anywhere; }
+        }
+        @media (max-width: 380px) {
+          .pp-main { padding-left: 10px !important; padding-right: 10px !important; }
+          .pp-method-content { flex-wrap: wrap; }
+          .pp-method-content img { max-width: 100% !important; }
+        }
+      `}</style>
+      <header className="pp-header" style={{ borderBottom: "1px solid #29415f", padding: "8px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18 }}>
+        <div className="pp-header-left" style={{ display: "flex", alignItems: "center", gap: 28 }}>
+          <a className="pp-back" href="/supervisor" style={{ ...smallButton, textDecoration: "none", padding: "12px 18px", fontWeight: 700 }}>← Volver a Supervisión</a>
           <div>
-            <div style={{ fontSize: 27, fontWeight: 850 }}>💳 Portal de Suscripción & Pagos</div>
+            <div className="pp-title" style={{ fontSize: 27, fontWeight: 850 }}>💳 Portal de Suscripción & Pagos</div>
             <div style={{ color: "#cbd5e1", marginTop: 2 }}>Empresa activa: <strong style={{ color: "#38bdf8" }}>{empresa?.nombre || "—"}</strong></div>
           </div>
         </div>
-        <div style={{ border: "1px solid #087f5b", background: "rgba(16,185,129,.13)", color: "#55ef9f", borderRadius: 28, padding: "9px 18px", fontWeight: 800 }}>● {empresa?.activo === false ? "Cuenta inactiva" : "Cuenta activa"}</div>
+        <div className="pp-account" style={{ border: "1px solid #087f5b", background: "rgba(16,185,129,.13)", color: "#55ef9f", borderRadius: 28, padding: "9px 18px", fontWeight: 800 }}>● {empresa?.activo === false ? "Cuenta inactiva" : "Cuenta activa"}</div>
       </header>
 
-      <main style={{ maxWidth: 1460, margin: "8px auto 0", padding: "0 22px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 18 }}>
+      <main className="pp-main" style={{ maxWidth: 1460, margin: "8px auto 0", padding: "0 22px" }}>
+        <div className="pp-summary" style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 18 }}>
           <section style={{ ...panel, padding: 13 }}>
             <div style={{ color: "#cbd5e1", fontSize: 13, fontWeight: 800 }}>ESTADO DEL SERVICIO</div>
             <div style={{ fontSize: 25, fontWeight: 850, marginTop: 8 }}>{planNombre} · {empresa?.activo === false ? "Inactivo" : "Activo"}</div>
@@ -192,14 +223,14 @@ export default function PortalPagos() {
         </div>
 
         <section style={{ ...panel, padding: 11, marginTop: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 20 }}>
+          <div className="pp-payment-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 20 }}>
             <div><div style={{ fontSize: 24, fontWeight: 850 }}>💳 Medios de pago</div><div style={{ color: "#cbd5e1" }}>Elegí una opción para ver los detalles.</div></div>
             <div style={{ color: "#cbd5e1", fontSize: 12 }}>🔒 Cada empresa solo puede ver su propia información.</div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginTop: 16 }}>
+          <div className="pp-methods" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginTop: 16 }}>
             <button onClick={() => setModal("bch")} style={{ ...smallButton, padding: 12, textAlign: "left", border: "2px solid #22e58b", boxShadow: "0 0 22px rgba(34,229,139,.16)" }}>
-              <div style={{ display: "flex", gap: 18, alignItems: "center" }}><img
+              <div className="pp-method-content" style={{ display: "flex", gap: 18, alignItems: "center" }}><img
                   src="/bch-aceptamos.jpg"
                   alt="Aceptamos Bitcoin Cash"
                   style={{
@@ -210,18 +241,18 @@ export default function PortalPagos() {
                     borderRadius: "6px",
                     display: "block"
                   }}
-                /><div><div style={{ fontSize: 22, fontWeight: 850 }}>Bitcoin Cash (BCH) / Cripto</div><div style={{ display: "inline-block", color: "#55ef9f", border: "1px solid #16a34a", borderRadius: 20, padding: "3px 10px", marginTop: 5, fontWeight: 800 }}>Medio de pago preferencial</div><div style={{ color: "#cbd5e1", marginTop: 7 }}>BCH · USDT · USDC · otras criptomonedas</div></div></div>
+                /><div><div className="pp-method-title" style={{ fontSize: 22, fontWeight: 850 }}>Bitcoin Cash (BCH) / Cripto</div><div style={{ display: "inline-block", color: "#55ef9f", border: "1px solid #16a34a", borderRadius: 20, padding: "3px 10px", marginTop: 5, fontWeight: 800 }}>Medio de pago preferencial</div><div style={{ color: "#cbd5e1", marginTop: 7 }}>BCH · USDT · USDC · otras criptomonedas</div></div></div>
               <div style={{ marginTop: 16, color: "#e2e8f0", lineHeight: 1.7 }}>✓ Rápido y seguro &nbsp; · &nbsp; ✓ Alternativa a medios bancarios &nbsp; · &nbsp; ✓ Consultá condiciones especiales si aplican</div>
             </button>
 
             <button onClick={() => setModal("otros")} style={{ ...smallButton, padding: 12, textAlign: "left" }}>
-              <div style={{ display: "flex", gap: 18, alignItems: "center" }}><div style={{ fontSize: 46 }}>💳</div><div><div style={{ fontSize: 22, fontWeight: 850 }}>Otras formas de pago</div><div style={{ color: "#38bdf8", marginTop: 5 }}>Transferencia, tarjetas, billeteras y más</div></div></div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 18, fontSize: 13 }}><div>🏦<br/><b>Transferencia</b><br/>CBU / CVU / Alias</div><div>💳<br/><b>Tarjetas</b><br/>Crédito / Débito</div><div>🤝<br/><b>Mercado Pago</b><br/>Dinero en cuenta</div><div>👛<br/><b>Otras opciones</b><br/>Consultar</div></div>
+              <div className="pp-method-content" style={{ display: "flex", gap: 18, alignItems: "center" }}><div style={{ fontSize: 46 }}>💳</div><div><div className="pp-method-title" style={{ fontSize: 22, fontWeight: 850 }}>Otras formas de pago</div><div style={{ color: "#38bdf8", marginTop: 5 }}>Transferencia, tarjetas, billeteras y más</div></div></div>
+              <div className="pp-other-options" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 18, fontSize: 13 }}><div>🏦<br/><b>Transferencia</b><br/>CBU / CVU / Alias</div><div>💳<br/><b>Tarjetas</b><br/>Crédito / Débito</div><div>🤝<br/><b>Mercado Pago</b><br/>Dinero en cuenta</div><div>👛<br/><b>Otras opciones</b><br/>Consultar</div></div>
             </button>
           </div>
         </section>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginTop: 16 }}>
+        <div className="pp-actions" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18, marginTop: 16 }}>
           <button onClick={abrirHistorialPagos} style={{ ...smallButton, padding: 9, textAlign: "left", fontSize: 16, fontWeight: 800 }}>📄 &nbsp; Historial de pagos <span style={{ float: "right" }}>›</span></button>
           <button onClick={() => abrirWhatsApp(`Hola, envío un comprobante de pago de ${empresa?.nombre || "mi empresa"}.`)} style={{ ...smallButton, padding: 9, textAlign: "left", fontSize: 16, fontWeight: 800 }}>✉️ &nbsp; Enviar comprobante <span style={{ float: "right" }}>›</span></button>
           <button onClick={() => abrirWhatsApp(`Hola, tengo una consulta sobre la cuenta de ${empresa?.nombre || "mi empresa"}.`)} style={{ ...smallButton, padding: 9, textAlign: "left", fontSize: 16, fontWeight: 800 }}>💬 &nbsp; Consultas / Soporte <span style={{ float: "right" }}>›</span></button>
@@ -257,5 +288,5 @@ export default function PortalPagos() {
 }
 
 function Modal({ children, onClose }) {
-  return <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.68)", display: "grid", placeItems: "center", zIndex: 9999, padding: 20 }}><div onClick={e => e.stopPropagation()} style={{ width: "min(620px,94vw)", background: "#102139", border: "1px solid #365477", borderRadius: 16, padding: 24, boxShadow: "0 25px 80px rgba(0,0,0,.45)" }}><button onClick={onClose} style={{ float: "right", border: 0, background: "transparent", color: "white", fontSize: 24, cursor: "pointer" }}>×</button>{children}</div></div>;
+  return <div className="pp-modal-backdrop" onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.68)", display: "grid", placeItems: "center", zIndex: 9999, padding: 20 }}><div className="pp-modal-box" onClick={e => e.stopPropagation()} style={{ width: "min(620px,94vw)", background: "#102139", border: "1px solid #365477", borderRadius: 16, padding: 24, boxShadow: "0 25px 80px rgba(0,0,0,.45)" }}><button onClick={onClose} style={{ float: "right", border: 0, background: "transparent", color: "white", fontSize: 24, cursor: "pointer" }}>×</button>{children}</div></div>;
 }
