@@ -3633,9 +3633,9 @@ useEffect(() => {
 
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="supervisor-responsive" style={{ minHeight: "100vh", backgroundColor: "#f8fafc", color: "#0f172a", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       {/* CABECERA PRINCIPAL */}
-      <header style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+      <header className="supervisor-cabecera" style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "10px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         {/* IZQUIERDA: MARCA Y LOGO OFICIAL */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <img src="/logo.svg" alt="RutaComercios" style={{ width: "34px", height: "34px", objectFit: "contain" }} />
@@ -3716,6 +3716,44 @@ useEffect(() => {
       </header>
 
       <style>{`
+        /* Adaptación visual del Supervisor; no altera datos ni operaciones. */
+        .supervisor-responsive { width: 100%; min-width: 0; overflow-x: clip; box-sizing: border-box; }
+        .supervisor-responsive *, .supervisor-responsive *::before, .supervisor-responsive *::after { box-sizing: border-box; }
+        .supervisor-pestanas { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+        .supervisor-pestanas > button { flex: 0 0 auto; white-space: nowrap; }
+        .supervisor-contenido { min-width: 0; }
+        .supervisor-contenido img, .supervisor-contenido svg { max-width: 100%; }
+        @media (max-width: 700px) {
+          .supervisor-cabecera { padding: 12px !important; align-items: flex-start !important; }
+          .supervisor-cabecera > div { max-width: 100%; }
+          .supervisor-cabecera > div:last-child { width: 100%; gap: 7px !important; }
+          .supervisor-cabecera > div:last-child > * { max-width: 100%; }
+          .supervisor-pestanas { padding: 0 12px !important; gap: 16px !important; }
+          .supervisor-pestanas > button { padding: 13px 2px !important; min-height: 44px; font-size: 13px !important; }
+          .supervisor-contenido { padding: 12px !important; width: 100%; }
+          .supervisor-contenido > div { max-width: 100%; min-width: 0; }
+          .supervisor-contenido input, .supervisor-contenido select, .supervisor-contenido textarea { max-width: 100%; }
+          .supervisor-contenido button { min-height: 36px; }
+          .supervisor-contenido [style*="grid-template-columns: repeat(4, 1fr)"],
+          .supervisor-contenido [style*="grid-template-columns: repeat(5, 1fr)"],
+          .supervisor-contenido [style*="grid-template-columns: repeat(3, 1fr)"],
+          .supervisor-contenido [style*="grid-template-columns: repeat(3, 1fr)"] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .supervisor-contenido [style*="grid-template-columns: minmax(220px, 2fr)"],
+          .supervisor-contenido [style*="grid-template-columns: minmax(180px, 2fr)"],
+          .supervisor-contenido [style*="grid-template-columns: minmax(180px,2fr)"],
+          .supervisor-contenido [style*="grid-template-columns: minmax(100px, 0.5fr)"],
+          .supervisor-contenido [style*="grid-template-columns: 28px 90px"] { grid-template-columns: minmax(0, 1fr) !important; }
+          .supervisor-contenido [style*="grid-template-columns: repeat(auto-fit"] { min-width: 0; }
+          .supervisor-contenido [style*="min-width: 720px"],
+          .supervisor-contenido [style*="min-width: 700px"],
+          .supervisor-contenido [style*="min-width: 650px"] { max-width: none; }
+          .flota-con-grafico { grid-template-columns: minmax(0, 1fr) !important; }
+          .supervisor-mapa-layout { grid-template-columns: minmax(0, 1fr) !important; }
+        }
+        @media (max-width: 420px) {
+          .supervisor-contenido [style*="grid-template-columns: repeat(4, 1fr)"],
+          .supervisor-contenido [style*="grid-template-columns: repeat(5, 1fr)"] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+        }
         @media (max-width: 700px) {
           .supervisor-mapa-layout {
             grid-template-columns: minmax(0, 1fr) !important;
@@ -3729,7 +3767,7 @@ useEffect(() => {
       `}</style>
 
       {/* PESTAÑAS */}
-      <div style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px" }}>
+      <div className="supervisor-pestanas" style={{ backgroundColor: "#ffffff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: "20px" }}>
         <button
           onClick={() => setSeccionActiva("monitoreo")}
           style={{ padding: "12px 0", background: "none", border: "none", borderBottom: seccionActiva === "monitoreo" ? "2px solid #2563eb" : "2px solid transparent", color: seccionActiva === "monitoreo" ? "#2563eb" : "#64748b", fontWeight: "700", fontSize: "13px", cursor: "pointer" }}
@@ -3798,7 +3836,7 @@ useEffect(() => {
         </button>
       </div>
 
-      <main style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
+      <main className="supervisor-contenido" style={{ padding: "16px 24px", maxWidth: "1500px", margin: "0 auto" }}>
         {preConfirmacionImportacion && vistaPreviaClientes && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.72)", zIndex: 12500, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
             <div style={{ width: "min(900px, 96vw)", maxHeight: "88vh", overflow: "auto", background: "#fff", borderRadius: "14px", padding: "16px" }}>
