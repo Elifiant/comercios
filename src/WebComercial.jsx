@@ -10,6 +10,7 @@ export default function WebComercial() {
   const [errorProfesionales, setErrorProfesionales] = useState("");
   const [filtroEspecialidad, setFiltroEspecialidad] = useState("");
   const [filtroLocalidad, setFiltroLocalidad] = useState("");
+  const [categoriaActiva, setCategoriaActiva] = useState("Todos");
   const supabaseORCUrl = "https://iovgsaumodtqtbyjfbsw.supabase.co";
   const supabaseORCClavePublica = "sb_publishable_ALRQ7bDeEbwOb_ZKpe-pWg_HodZYLqC";
 
@@ -43,11 +44,34 @@ export default function WebComercial() {
   }, [directorioAbierto]);
 
   const normalizarTexto = texto => String(texto || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").trim();
+  const categoriasOficios = [
+    { nombre: "Todos", icono: "🧰", terminos: [] },
+    { nombre: "Electricistas", icono: "⚡", terminos: ["electric", "instalaciones electricas"] },
+    { nombre: "Plomeros", icono: "🚰", terminos: ["plomer", "fontaner", "gasfiter"] },
+    { nombre: "Albañiles", icono: "🧱", terminos: ["albanil", "albaniler", "construccion"] },
+    { nombre: "Aires acondicionados", icono: "❄️", terminos: ["aire acondicionado", "aires acondicionados", "refrigeracion", "climatizacion", "split"] },
+    { nombre: "Gasistas", icono: "🔥", terminos: ["gasista", "instalaciones de gas"] },
+    { nombre: "Pintores", icono: "🎨", terminos: ["pintor", "pintura"] },
+    { nombre: "Cerrajeros", icono: "🔑", terminos: ["cerrajer"] },
+    { nombre: "Carpinteros", icono: "🪚", terminos: ["carpinter"] },
+    { nombre: "Herreros", icono: "🔧", terminos: ["herrer", "soldador"] },
+    { nombre: "Techistas", icono: "🏠", terminos: ["techista", "techos", "zinguer"] },
+    { nombre: "Jardineros", icono: "🌿", terminos: ["jardiner", "paisajis", "poda"] },
+    { nombre: "Otros oficios", icono: "🛠️", terminos: [] },
+  ];
+  const categoriaCoincide = (especialidad, categoria) => {
+    if (categoria === "Todos") return true;
+    const texto = normalizarTexto(especialidad);
+    const conocidas = categoriasOficios.filter(c => c.nombre !== "Todos" && c.nombre !== "Otros oficios");
+    if (categoria === "Otros oficios") return !conocidas.some(c => c.terminos.some(t => texto.includes(t)));
+    const seleccionada = categoriasOficios.find(c => c.nombre === categoria);
+    return seleccionada ? seleccionada.terminos.some(t => texto.includes(t)) : true;
+  };
   const profesionalesFiltrados = profesionalesPublicos.filter(p =>
+    categoriaCoincide(p.especialidad, categoriaActiva) &&
     normalizarTexto(p.especialidad).includes(normalizarTexto(filtroEspecialidad)) &&
     normalizarTexto(p.localidad).includes(normalizarTexto(filtroLocalidad))
   );
-
 
   const toggleFaq = (idx) => {
     setFaqAbierta(faqAbierta === idx ? null : idx);
@@ -164,11 +188,25 @@ export default function WebComercial() {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 14, margin: "24px 0" }}>
             <label style={{ display: "grid", gap: 7, fontWeight: 800 }}>Especialidad
-              <input value={filtroEspecialidad} onChange={e => setFiltroEspecialidad(e.target.value)} placeholder="Ej.: Electricista, plomero..." style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }} />
+              <input value={filtroEspecialidad} onChange={e => { setFiltroEspecialidad(e.target.value); setCategoriaActiva("Todos"); }} placeholder="Ej.: Electricista, plomero..." style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }} />
             </label>
             <label style={{ display: "grid", gap: 7, fontWeight: 800 }}>Localidad
               <input value={filtroLocalidad} onChange={e => setFiltroLocalidad(e.target.value)} placeholder="Ej.: Quilmes, Bernal..." style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }} />
             </label>
+          </div>
+          <div style={{ margin: "0 0 24px" }}>
+            <div style={{ fontWeight: 850, fontSize: 16, marginBottom: 12 }}>Elegí un oficio</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
+              {categoriasOficios.map(categoria => {
+                const activa = categoriaActiva === categoria.nombre;
+                return <button key={categoria.nombre} type="button"
+                  aria-pressed={activa}
+                  onClick={() => { setCategoriaActiva(categoria.nombre); setFiltroEspecialidad(""); }}
+                  style={{ border: activa ? "2px solid #6d28d9" : "1px solid #cbd5e1", background: activa ? "#ede9fe" : "#fff", color: activa ? "#5b21b6" : "#334155", padding: "11px 15px", borderRadius: 999, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>
+                  <span aria-hidden="true">{categoria.icono}</span> {categoria.nombre}
+                </button>;
+              })}
+            </div>
           </div>
           {cargandoProfesionales ? <p>Cargando profesionales publicados...</p> : errorProfesionales ? <p role="alert" style={{ color: "#b91c1c" }}>{errorProfesionales}</p> : (
             <>
