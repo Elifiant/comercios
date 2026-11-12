@@ -1,8 +1,53 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 export default function WebComercial() {
   const [faqAbierta, setFaqAbierta] = useState(null);
   const [solucionActiva, setSolucionActiva] = useState(0);
+  // Directorio público independiente del ingreso a ORC Oficios.
+  const [directorioAbierto, setDirectorioAbierto] = useState(() => window.location.hash === "#profesionales");
+  const [profesionalesPublicos, setProfesionalesPublicos] = useState([]);
+  const [cargandoProfesionales, setCargandoProfesionales] = useState(false);
+  const [errorProfesionales, setErrorProfesionales] = useState("");
+  const [filtroEspecialidad, setFiltroEspecialidad] = useState("");
+  const [filtroLocalidad, setFiltroLocalidad] = useState("");
+  const supabaseORCUrl = "https://iovgsaumodtqtbyjfbsw.supabase.co";
+  const supabaseORCClavePublica = "sb_publishable_ALRQ7bDeEbwOb_ZKpe-pWg_HodZYLqC";
+
+  useEffect(() => {
+    const sincronizarRuta = () => setDirectorioAbierto(window.location.hash === "#profesionales");
+    window.addEventListener("hashchange", sincronizarRuta);
+    return () => window.removeEventListener("hashchange", sincronizarRuta);
+  }, []);
+
+  useEffect(() => {
+    if (!directorioAbierto) return;
+    const controlador = new AbortController();
+    async function consultarProfesionales() {
+      setCargandoProfesionales(true);
+      setErrorProfesionales("");
+      try {
+        const respuesta = await fetch(`${supabaseORCUrl}/rest/v1/orc_profesionales_publicos?select=nombre,especialidad,localidad,whatsapp&order=nombre.asc&limit=1000`, {
+          headers: { apikey: supabaseORCClavePublica }, signal: controlador.signal,
+        });
+        if (!respuesta.ok) throw new Error(`Error ${respuesta.status}`);
+        const datos = await respuesta.json();
+        setProfesionalesPublicos(Array.isArray(datos) ? datos : []);
+      } catch (error) {
+        if (error.name !== "AbortError") setErrorProfesionales("No pudimos cargar el directorio. Intentá nuevamente más tarde.");
+      } finally {
+        if (!controlador.signal.aborted) setCargandoProfesionales(false);
+      }
+    }
+    consultarProfesionales();
+    return () => controlador.abort();
+  }, [directorioAbierto]);
+
+  const normalizarTexto = texto => String(texto || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").trim();
+  const profesionalesFiltrados = profesionalesPublicos.filter(p =>
+    normalizarTexto(p.especialidad).includes(normalizarTexto(filtroEspecialidad)) &&
+    normalizarTexto(p.localidad).includes(normalizarTexto(filtroLocalidad))
+  );
+
 
   const toggleFaq = (idx) => {
     setFaqAbierta(faqAbierta === idx ? null : idx);
@@ -106,6 +151,49 @@ export default function WebComercial() {
     },
   ];
 
+
+  if (directorioAbierto) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a", fontFamily: "Inter, system-ui, sans-serif", padding: "28px 16px 70px", boxSizing: "border-box" }}>
+        <div style={{ maxWidth: 940, margin: "0 auto" }}>
+          <a href="#soluciones" style={{ display: "inline-block", color: "#6d28d9", textDecoration: "none", fontWeight: 800, marginBottom: 26 }}>← Volver a RutaComercios</a>
+          <div style={{ background: "linear-gradient(125deg,#6d28d9,#4338ca)", borderRadius: 22, padding: "30px 26px", color: "white" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, opacity: .9 }}>ORC OFICIOS · DIRECTORIO PÚBLICO</div>
+            <h1 style={{ fontSize: "clamp(27px,5vw,42px)", margin: "12px 0" }}>Encontrá un profesional para tu trabajo</h1>
+            <p style={{ fontSize: 16, lineHeight: 1.6, margin: 0 }}>Buscá por especialidad y localidad. Contactá directamente por WhatsApp, sin registrarte.</p>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 14, margin: "24px 0" }}>
+            <label style={{ display: "grid", gap: 7, fontWeight: 800 }}>Especialidad
+              <input value={filtroEspecialidad} onChange={e => setFiltroEspecialidad(e.target.value)} placeholder="Ej.: Electricista, plomero..." style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }} />
+            </label>
+            <label style={{ display: "grid", gap: 7, fontWeight: 800 }}>Localidad
+              <input value={filtroLocalidad} onChange={e => setFiltroLocalidad(e.target.value)} placeholder="Ej.: Quilmes, Bernal..." style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }} />
+            </label>
+          </div>
+          {cargandoProfesionales ? <p>Cargando profesionales publicados...</p> : errorProfesionales ? <p role="alert" style={{ color: "#b91c1c" }}>{errorProfesionales}</p> : (
+            <>
+              <p style={{ fontWeight: 800, color: "#475569" }}>{profesionalesFiltrados.length} profesional{profesionalesFiltrados.length === 1 ? "" : "es"} encontrado{profesionalesFiltrados.length === 1 ? "" : "s"}</p>
+              {profesionalesFiltrados.length === 0 && <p style={{ background: "white", padding: 22, borderRadius: 12, border: "1px solid #e2e8f0" }}>Todavía no hay profesionales publicados que coincidan con tu búsqueda.</p>}
+              <div style={{ display: "grid", gap: 12 }}>
+                {profesionalesFiltrados.map((profesional, i) => {
+                  const numero = String(profesional.whatsapp || "").replace(/\D/g, "");
+                  return <article key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 16, padding: 20, border: "1px solid #e2e8f0", borderRadius: 16, background: "white" }}>
+                    <div>
+                      <h2 style={{ fontSize: 20, margin: "0 0 7px" }}>{profesional.nombre}</h2>
+                      <div style={{ fontWeight: 750, color: "#6d28d9" }}>🧰 {profesional.especialidad}</div>
+                      <div style={{ color: "#475569", marginTop: 7 }}>📍 {profesional.localidad}</div>
+                    </div>
+                    {numero && <a href={`https://wa.me/${numero}?text=${encodeURIComponent(`Hola, te encontré en ORC Oficios y quisiera consultar por un trabajo.`)}`} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "13px 18px", background: "#16a34a", color: "white", borderRadius: 11, fontWeight: 900, textDecoration: "none" }}>💬 Contactar por WhatsApp</a>}
+                  </article>;
+                })}
+              </div>
+            </>
+          )}
+          <p style={{ marginTop: 30, color: "#64748b", fontSize: 13 }}>Los perfiles son publicados voluntariamente por los profesionales. ORC Oficios no verifica ni garantiza los servicios ofrecidos.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -299,7 +387,12 @@ export default function WebComercial() {
                      <div className="rc-beneficios">
                        {actual.beneficios.map((beneficio, idx) => <div key={beneficio} className="rc-beneficio"><span aria-hidden="true" style={{ color: actual.color, fontWeight: 900, fontSize: 19 }}>{["✓", "✓", "✓", "✓"][idx]}</span>{beneficio}</div>)}
                      </div>
-                     <a className="rc-panel-boton" href={actual.enlace}>{actual.accion} →</a>
+                                           {solucionActiva === 0 ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 11, position: "relative", zIndex: 1 }}>
+                          <a className="rc-panel-boton" href="https://orc.rutacomercios.com">SOY PROFESIONAL O COMERCIANTE →</a>
+                          <a className="rc-panel-boton" href="#profesionales" style={{ background: "#16a34a" }}>🔎 BUSCO UN PROFESIONAL →</a>
+                        </div>
+                      ) : <a className="rc-panel-boton" href={actual.enlace}>{actual.accion} →</a>}
                    </article>
                  </div>
                );
