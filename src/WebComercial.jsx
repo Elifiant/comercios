@@ -27,7 +27,7 @@ export default function WebComercial() {
       setCargandoProfesionales(true);
       setErrorProfesionales("");
       try {
-        const respuesta = await fetch(`${supabaseORCUrl}/rest/v1/orc_profesionales_publicos?select=nombre,especialidad,localidad,whatsapp&order=nombre.asc&limit=1000`, {
+        const respuesta = await fetch(`${supabaseORCUrl}/rest/v1/orc_profesionales_publicos?select=nombre,especialidad,especialidades,localidad,whatsapp&order=nombre.asc&limit=1000`, {
           headers: { apikey: supabaseORCClavePublica }, signal: controlador.signal,
         });
         if (!respuesta.ok) throw new Error(`Error ${respuesta.status}`);
@@ -67,9 +67,12 @@ export default function WebComercial() {
     const seleccionada = categoriasOficios.find(c => c.nombre === categoria);
     return seleccionada ? seleccionada.terminos.some(t => texto.includes(t)) : true;
   };
+  const oficiosDe = p => Array.isArray(p.especialidades) && p.especialidades.length ? p.especialidades : [p.especialidad];
   const profesionalesFiltrados = profesionalesPublicos.filter(p =>
-    categoriaCoincide(p.especialidad, categoriaActiva) &&
-    normalizarTexto(p.especialidad).includes(normalizarTexto(filtroEspecialidad)) &&
+    (categoriaActiva === 'Otros oficios'
+      ? oficiosDe(p).every(e => categoriaCoincide(e, categoriaActiva))
+      : oficiosDe(p).some(e => categoriaCoincide(e, categoriaActiva))) &&
+    oficiosDe(p).some(e => normalizarTexto(e).includes(normalizarTexto(filtroEspecialidad))) &&
     normalizarTexto(p.localidad).includes(normalizarTexto(filtroLocalidad))
   );
 
@@ -218,7 +221,7 @@ export default function WebComercial() {
                   return <article key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 16, padding: 20, border: "1px solid #e2e8f0", borderRadius: 16, background: "white" }}>
                     <div>
                       <h2 style={{ fontSize: 20, margin: "0 0 7px" }}>{profesional.nombre}</h2>
-                      <div style={{ fontWeight: 750, color: "#6d28d9" }}>🧰 {profesional.especialidad}</div>
+                      <div style={{ fontWeight: 750, color: "#6d28d9" }}>🧰 {oficiosDe(profesional).join(" · ")}</div>
                       <div style={{ color: "#475569", marginTop: 7 }}>📍 {profesional.localidad}</div>
                     </div>
                     {numero && <a href={`https://wa.me/${numero}?text=${encodeURIComponent(`Hola, te encontré en ORC Oficios y quisiera consultar por un trabajo.`)}`} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "13px 18px", background: "#16a34a", color: "white", borderRadius: 11, fontWeight: 900, textDecoration: "none" }}>💬 Contactar por WhatsApp</a>}
