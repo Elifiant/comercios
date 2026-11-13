@@ -432,6 +432,7 @@ export default function WebComercial() {
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 11, position: "relative", zIndex: 1 }}>
                           <a className="rc-panel-boton" href="https://orc.rutacomercios.com">SOY PROFESIONAL O COMERCIANTE →</a>
                           <a className="rc-panel-boton" href="#profesionales" style={{ background: "#16a34a" }}>🔎 BUSCO UN PROFESIONAL →</a>
+                          <a className="rc-panel-boton" href="https://orc.rutacomercios.com/?vista=buscar-articulos" style={{ background: "#0f766e" }}>🏷️ BUSCO ARTÍCULOS Y OFERTAS →</a>
                         </div>
                       ) : <a className="rc-panel-boton" href={actual.enlace}>{actual.accion} →</a>}
                    </article>
