@@ -1,4 +1,11 @@
 {
+  "redirects": [
+    {
+      "source": "/orc",
+      "destination": "/#profesionales",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
