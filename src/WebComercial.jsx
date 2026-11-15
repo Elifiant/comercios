@@ -220,7 +220,7 @@ export default function WebComercial() {
                   const numero = String(profesional.whatsapp || "").replace(/\D/g, "");
                   return <article key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 16, padding: 20, border: "1px solid #e2e8f0", borderRadius: 16, background: "white" }}>
                     <div>
-                      <h2 style={{ fontSize: 20, margin: "0 0 7px" }}>{profesional.nombre}</h2>
+                      <h2 style={{ fontSize: 20, margin: "0 0 7px", color: "#0f172a", WebkitTextFillColor: "#0f172a", fontWeight: 900 }}>{profesional.nombre}</h2>
                       <div style={{ fontWeight: 750, color: "#6d28d9" }}>🧰 {oficiosDe(profesional).join(" · ")}</div>
                       <div style={{ color: "#475569", marginTop: 7 }}>📍 {profesional.localidad}</div>
                     </div>
