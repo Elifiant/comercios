@@ -236,7 +236,16 @@ export default function WebComercial() {
 
   if (directorioAbierto) {
     return (
-      <div style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a", colorScheme: "light", fontFamily: "Inter, system-ui, sans-serif", padding: "28px 16px 70px", boxSizing: "border-box" }}>
+      <div className="orc-directorio" style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a", colorScheme: "light", fontFamily: "Inter, system-ui, sans-serif", padding: "28px 16px 70px", boxSizing: "border-box" }}>
+        <style>{`
+          @media (prefers-color-scheme: dark) {
+            .orc-directorio { background: #0f172a !important; color: #f8fafc !important; }
+            .orc-directorio .orc-tarjeta-profesional { background: #1e293b !important; border-color: #475569 !important; color: #f8fafc !important; }
+            .orc-directorio .orc-tarjeta-profesional .orc-nombre { color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; }
+            .orc-directorio .orc-tarjeta-profesional .orc-oficio { color: #c4b5fd !important; -webkit-text-fill-color: #c4b5fd !important; }
+            .orc-directorio .orc-tarjeta-profesional .orc-zonas { color: #e2e8f0 !important; -webkit-text-fill-color: #e2e8f0 !important; }
+          }
+        `}</style>
         <div style={{ maxWidth: 940, margin: "0 auto" }}>
           <a href="#soluciones" style={{ display: "inline-block", color: "#6d28d9", textDecoration: "none", fontWeight: 800, marginBottom: 26 }}>← Volver a RutaComercios</a>
           <div style={{ background: "linear-gradient(125deg,#6d28d9,#4338ca)", borderRadius: 22, padding: "30px 26px", color: "white" }}>
@@ -303,7 +312,7 @@ export default function WebComercial() {
                   const fotoUrl = profesional.usuario_id
                     ? `${supabaseORCUrl}/storage/v1/object/public/orc-fotos-profesionales/${encodeURIComponent(profesional.usuario_id)}/perfil.jpg`
                     : null;
-                  return <article key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexDirection: "column", gap: 14, padding: 20, border: "1px solid #e2e8f0", borderRadius: 17, background: "#ffffff", color: "#0f172a", colorScheme: "light", boxShadow: "0 5px 18px rgba(15,23,42,.04)" }}>
+                  return <article className="orc-tarjeta-profesional" key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexDirection: "column", gap: 14, padding: 20, border: "1px solid #e2e8f0", borderRadius: 17, background: "#ffffff", color: "#0f172a", colorScheme: "light", boxShadow: "0 5px 18px rgba(15,23,42,.04)" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 13 }}>
                       <div aria-hidden="true" style={{ width: 56, height: 56, borderRadius: 15, background: "#ede9fe", display: "flex", justifyContent: "center", alignItems: "center", fontSize: 27, flexShrink: 0, overflow: "hidden" }}>
                         <span style={{ position: "relative", width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
@@ -312,11 +321,11 @@ export default function WebComercial() {
                         </span>
                       </div>
                       <div style={{ minWidth: 0 }}>
-                        <h3 style={{ fontSize: 19, lineHeight: 1.3, margin: "0 0 6px", color: "#0f172a", WebkitTextFillColor: "#0f172a", fontWeight: 900, overflowWrap: "anywhere" }}>{profesional.nombre}</h3>
-                        <div style={{ color: "#6d28d9", fontWeight: 800, fontSize: 14 }}>{especialidades.join(" · ") || "Oficios y servicios"}</div>
+                        <h3 className="orc-nombre" style={{ fontSize: 19, lineHeight: 1.3, margin: "0 0 6px", color: "#0f172a", WebkitTextFillColor: "#0f172a", fontWeight: 900, overflowWrap: "anywhere" }}>{profesional.nombre}</h3>
+                        <div className="orc-oficio" style={{ color: "#6d28d9", fontWeight: 800, fontSize: 14 }}>{especialidades.join(" · ") || "Oficios y servicios"}</div>
                       </div>
                     </div>
-                    <div style={{ color: "#475569", fontSize: 14 }}>📍 Zonas publicadas: <strong>{profesional.localidad || "No informada"}</strong></div>
+                    <div className="orc-zonas" style={{ color: "#475569", fontSize: 14 }}>📍 Zonas publicadas: <strong>{profesional.localidad || "No informada"}</strong></div>
                     {zona === 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#f0fdf4", color: "#166534", fontSize: 13, fontWeight: 750 }}>✓ Atiende el partido correspondiente a tu búsqueda</div>}
                     {zona > 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#fffbeb", color: "#92400e", fontSize: 13, fontWeight: 750 }}>📍 {zona === 1 ? "Partido vecino" : "Otra zona"} · Consultá si atiende en {filtroLocalidad.trim()}</div>}
                     {numero ? <a href={`https://wa.me/${numero}?text=${encodeURIComponent(`Hola, te encontré en ORC Oficios. Quisiera consultar por un trabajo${filtroLocalidad.trim() ? ` en ${filtroLocalidad.trim()}` : ""}. ¿Atendés esa zona?`)}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: "auto", padding: "13px 16px", background: "#16a34a", color: "white", borderRadius: 11, fontWeight: 900, textDecoration: "none", textAlign: "center" }}>💬 Consultar por WhatsApp</a> : <div style={{ marginTop: "auto", padding: 12, color: "#64748b", background: "#f8fafc", borderRadius: 10, fontSize: 13 }}>Sin WhatsApp publicado</div>}
