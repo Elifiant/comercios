@@ -83,14 +83,28 @@ export default function WebComercial() {
     "san francisco solano": ["quilmes", "san jose", "berazategui"],
   };
   const zonaBuscada = normalizarTexto(filtroLocalidad);
+  // La localidad publicada puede contener varias zonas separadas por comas.
+  const zonasDelProfesional = profesional => String(profesional.localidad || "")
+    .split(/[,;\n]+/).map(normalizarTexto).filter(Boolean);
+  // Vecindad bidireccional: si A figura junto a B, también se reconoce B junto a A.
+  const vecinasDe = zona => {
+    const vecinas = new Set(localidadesCercanas[zona] || []);
+    Object.entries(localidadesCercanas).forEach(([origen, destinos]) => {
+      if (destinos.includes(zona)) vecinas.add(origen);
+    });
+    return vecinas;
+  };
   const clasificarZona = profesional => {
     if (!zonaBuscada) return 0;
-    const base = normalizarTexto(profesional.localidad);
-    if (base === zonaBuscada || base.includes(zonaBuscada)) return 0;
-    if (alcanceLocalidad !== "exacta" && (localidadesCercanas[zonaBuscada] || []).includes(base)) return 1;
+    const zonas = zonasDelProfesional(profesional);
+    if (zonas.some(z => z === zonaBuscada)) return 0;
+    if (alcanceLocalidad === "exacta") return -1;
+    const vecinas = vecinasDe(zonaBuscada);
+    if (zonas.some(z => vecinas.has(z))) return 1;
     if (alcanceLocalidad === "amplia") return 2;
     return -1;
   };
+
   const profesionalesFiltrados = profesionalesPublicos
     .filter(p => categoriaActiva === "Otros oficios"
       ? oficiosDe(p).every(e => categoriaCoincide(e, categoriaActiva))
@@ -224,18 +238,22 @@ export default function WebComercial() {
               })}
             </div>
             <label style={{ display: "grid", gap: 8, fontWeight: 850, fontSize: 17 }}>2. ¿Dónde necesitás el servicio?
-              <input value={filtroLocalidad} onChange={e => setFiltroLocalidad(e.target.value)} placeholder="Ej.: Bernal, Quilmes, Wilde..." autoComplete="address-level2" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
+              <input value={filtroLocalidad} onChange={e => setFiltroLocalidad(e.target.value)} placeholder="Ej.: Bernal, Quilmes, Wilde..." autoComplete="off" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", WebkitTextFillColor: "#0f172a", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
             </label>
-            <fieldset style={{ border: 0, padding: 0, margin: "18px 0 0" }}>
-              <legend style={{ fontWeight: 800, marginBottom: 10 }}>Amplitud de la búsqueda</legend>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 22px", color: "#334155", fontSize: 14 }}>
-                {[["exacta", "Solo esa localidad"], ["cercanas", "Incluir localidades cercanas"], ["amplia", "Ampliar la búsqueda"]].map(([valor, etiqueta]) => (
-                  <label key={valor} style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
-                    <input type="radio" name="alcance-directorio" value={valor} checked={alcanceLocalidad === valor} onChange={() => setAlcanceLocalidad(valor)} /> {etiqueta}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            <fieldset style={{ border: 0, padding: 0, margin: "18px 0 0", minWidth: 0 }}>
+               <legend style={{ fontWeight: 800, marginBottom: 10 }}>Amplitud de la búsqueda</legend>
+               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                 {[["exacta", "📍", "Solo esa localidad"], ["cercanas", "🏘️", "Localidades cercanas"], ["amplia", "🌎", "Ampliar búsqueda"]].map(([valor, icono, etiqueta]) => {
+                   const activo = alcanceLocalidad === valor;
+                   return <button key={valor} type="button" aria-pressed={activo}
+                     onClick={() => setAlcanceLocalidad(valor)}
+                     style={{ minWidth: 0, minHeight: 68, padding: "10px 5px", borderRadius: 12, border: activo ? "2px solid #6d28d9" : "1px solid #cbd5e1", background: activo ? "#ede9fe" : "#fff", color: activo ? "#5b21b6" : "#334155", cursor: "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: 13, lineHeight: 1.3, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, overflowWrap: "anywhere" }}>
+                     <span aria-hidden="true" style={{ fontSize: 21 }}>{icono}</span>
+                     <span>{etiqueta}</span>
+                   </button>;
+                 })}
+               </div>
+             </fieldset>
             <p style={{ margin: "14px 0 0", fontSize: 12, lineHeight: 1.6, color: "#64748b" }}>Las localidades cercanas son sugerencias orientativas. La disponibilidad para trabajar en tu zona debe consultarse con cada profesional.</p>
           </section>
           {cargandoProfesionales ? <p>Cargando profesionales publicados...</p> : errorProfesionales ? <p role="alert" style={{ color: "#b91c1c" }}>{errorProfesionales}</p> : (
