@@ -8,8 +8,8 @@ export default function WebComercial() {
   const [profesionalesPublicos, setProfesionalesPublicos] = useState([]);
   const [cargandoProfesionales, setCargandoProfesionales] = useState(false);
   const [errorProfesionales, setErrorProfesionales] = useState("");
-  const [filtroEspecialidad, setFiltroEspecialidad] = useState("");
   const [filtroLocalidad, setFiltroLocalidad] = useState("");
+  const [alcanceLocalidad, setAlcanceLocalidad] = useState("cercanas");
   const [categoriaActiva, setCategoriaActiva] = useState("Todos");
   const supabaseORCUrl = "https://iovgsaumodtqtbyjfbsw.supabase.co";
   const supabaseORCClavePublica = "sb_publishable_ALRQ7bDeEbwOb_ZKpe-pWg_HodZYLqC";
@@ -68,13 +68,35 @@ export default function WebComercial() {
     return seleccionada ? seleccionada.terminos.some(t => texto.includes(t)) : true;
   };
   const oficiosDe = p => Array.isArray(p.especialidades) && p.especialidades.length ? p.especialidades : [p.especialidad];
-  const profesionalesFiltrados = profesionalesPublicos.filter(p =>
-    (categoriaActiva === 'Otros oficios'
+  // Relaciones orientativas entre localidades, sin GPS ni servicios externos.
+  // No implican que un profesional acepte trabajos fuera de su localidad.
+  const localidadesCercanas = {
+    bernal: ["quilmes", "don bosco", "wilde", "ezpeleta"],
+    quilmes: ["bernal", "ezpeleta", "don bosco", "san francisco solano"],
+    "don bosco": ["bernal", "wilde", "quilmes"],
+    wilde: ["don bosco", "bernal", "villa dominico", "avellaneda"],
+    ezpeleta: ["quilmes", "bernal", "berazategui"],
+    berazategui: ["ezpeleta", "quilmes", "ranelagh", "platanos"],
+    avellaneda: ["wilde", "villa dominico", "sarandi", "gerli"],
+    "villa dominico": ["wilde", "sarandi", "avellaneda"],
+    sarandi: ["villa dominico", "avellaneda", "wilde"],
+    "san francisco solano": ["quilmes", "san jose", "berazategui"],
+  };
+  const zonaBuscada = normalizarTexto(filtroLocalidad);
+  const clasificarZona = profesional => {
+    if (!zonaBuscada) return 0;
+    const base = normalizarTexto(profesional.localidad);
+    if (base === zonaBuscada || base.includes(zonaBuscada)) return 0;
+    if (alcanceLocalidad !== "exacta" && (localidadesCercanas[zonaBuscada] || []).includes(base)) return 1;
+    if (alcanceLocalidad === "amplia") return 2;
+    return -1;
+  };
+  const profesionalesFiltrados = profesionalesPublicos
+    .filter(p => categoriaActiva === "Otros oficios"
       ? oficiosDe(p).every(e => categoriaCoincide(e, categoriaActiva))
-      : oficiosDe(p).some(e => categoriaCoincide(e, categoriaActiva))) &&
-    oficiosDe(p).some(e => normalizarTexto(e).includes(normalizarTexto(filtroEspecialidad))) &&
-    normalizarTexto(p.localidad).includes(normalizarTexto(filtroLocalidad))
-  );
+      : oficiosDe(p).some(e => categoriaCoincide(e, categoriaActiva)))
+    .filter(p => clasificarZona(p) !== -1)
+    .sort((a, b) => clasificarZona(a) - clasificarZona(b) || String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"));
 
   const toggleFaq = (idx) => {
     setFaqAbierta(faqAbierta === idx ? null : idx);
@@ -187,50 +209,66 @@ export default function WebComercial() {
           <div style={{ background: "linear-gradient(125deg,#6d28d9,#4338ca)", borderRadius: 22, padding: "30px 26px", color: "white" }}>
             <div style={{ fontSize: 13, fontWeight: 800, opacity: .9 }}>ORC OFICIOS · DIRECTORIO PÚBLICO</div>
             <h1 style={{ fontSize: "clamp(27px,5vw,42px)", margin: "12px 0" }}>Encontrá un profesional para tu trabajo</h1>
-            <p style={{ fontSize: 16, lineHeight: 1.6, margin: 0 }}>Buscá por especialidad y localidad. Contactá directamente por WhatsApp, sin registrarte.</p>
+            <p style={{ fontSize: 16, lineHeight: 1.6, margin: 0 }}>Elegí un oficio y una localidad. Contactá por WhatsApp, sin registrarte ni compartir tu ubicación.</p>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 14, margin: "24px 0" }}>
-            <label style={{ display: "grid", gap: 7, fontWeight: 800 }}>Especialidad
-              <input value={filtroEspecialidad} onChange={e => { setFiltroEspecialidad(e.target.value); setCategoriaActiva("Todos"); }} placeholder="Ej.: Electricista, plomero..." style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }} />
-            </label>
-            <label style={{ display: "grid", gap: 7, fontWeight: 800 }}>Localidad
-              <input value={filtroLocalidad} onChange={e => setFiltroLocalidad(e.target.value)} placeholder="Ej.: Quilmes, Bernal..." style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }} />
-            </label>
-          </div>
-          <div style={{ margin: "0 0 24px" }}>
-            <div style={{ fontWeight: 850, fontSize: 16, marginBottom: 12 }}>Elegí un oficio</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
+          <section style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 20, padding: "22px", margin: "20px 0", boxShadow: "0 8px 25px rgba(15,23,42,.04)" }}>
+            <div style={{ fontWeight: 850, fontSize: 17, marginBottom: 13 }}>1. ¿Qué oficio necesitás?</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginBottom: 25 }}>
               {categoriasOficios.map(categoria => {
                 const activa = categoriaActiva === categoria.nombre;
-                return <button key={categoria.nombre} type="button"
-                  aria-pressed={activa}
-                  onClick={() => { setCategoriaActiva(categoria.nombre); setFiltroEspecialidad(""); }}
+                return <button key={categoria.nombre} type="button" aria-pressed={activa}
+                  onClick={() => setCategoriaActiva(categoria.nombre)}
                   style={{ border: activa ? "2px solid #6d28d9" : "1px solid #cbd5e1", background: activa ? "#ede9fe" : "#fff", color: activa ? "#5b21b6" : "#334155", padding: "11px 15px", borderRadius: 999, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>
                   <span aria-hidden="true">{categoria.icono}</span> {categoria.nombre}
                 </button>;
               })}
             </div>
-          </div>
+            <label style={{ display: "grid", gap: 8, fontWeight: 850, fontSize: 17 }}>2. ¿Dónde necesitás el servicio?
+              <input value={filtroLocalidad} onChange={e => setFiltroLocalidad(e.target.value)} placeholder="Ej.: Bernal, Quilmes, Wilde..." autoComplete="address-level2" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
+            </label>
+            <fieldset style={{ border: 0, padding: 0, margin: "18px 0 0" }}>
+              <legend style={{ fontWeight: 800, marginBottom: 10 }}>Amplitud de la búsqueda</legend>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 22px", color: "#334155", fontSize: 14 }}>
+                {[["exacta", "Solo esa localidad"], ["cercanas", "Incluir localidades cercanas"], ["amplia", "Ampliar la búsqueda"]].map(([valor, etiqueta]) => (
+                  <label key={valor} style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                    <input type="radio" name="alcance-directorio" value={valor} checked={alcanceLocalidad === valor} onChange={() => setAlcanceLocalidad(valor)} /> {etiqueta}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <p style={{ margin: "14px 0 0", fontSize: 12, lineHeight: 1.6, color: "#64748b" }}>Las localidades cercanas son sugerencias orientativas. La disponibilidad para trabajar en tu zona debe consultarse con cada profesional.</p>
+          </section>
           {cargandoProfesionales ? <p>Cargando profesionales publicados...</p> : errorProfesionales ? <p role="alert" style={{ color: "#b91c1c" }}>{errorProfesionales}</p> : (
             <>
-              <p style={{ fontWeight: 800, color: "#475569" }}>{profesionalesFiltrados.length} profesional{profesionalesFiltrados.length === 1 ? "" : "es"} encontrado{profesionalesFiltrados.length === 1 ? "" : "s"}</p>
-              {profesionalesFiltrados.length === 0 && <p style={{ background: "white", padding: 22, borderRadius: 12, border: "1px solid #e2e8f0" }}>Todavía no hay profesionales publicados que coincidan con tu búsqueda.</p>}
-              <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "18px 0" }}>
+                <h2 style={{ margin: 0, fontSize: 20, color: "#0f172a" }}>Profesionales encontrados: {profesionalesFiltrados.length}</h2>
+                {(categoriaActiva !== "Todos" || filtroLocalidad || alcanceLocalidad !== "cercanas") && <button type="button" onClick={() => { setCategoriaActiva("Todos"); setFiltroLocalidad(""); setAlcanceLocalidad("cercanas"); }} style={{ border: "1px solid #cbd5e1", background: "white", color: "#475569", padding: "9px 13px", borderRadius: 9, cursor: "pointer", fontWeight: 750 }}>Limpiar filtros</button>}
+              </div>
+              {profesionalesFiltrados.length === 0 && <p style={{ background: "white", padding: 22, borderRadius: 12, border: "1px solid #e2e8f0" }}>No encontramos profesionales con esos filtros. Probá otra localidad o ampliá la búsqueda.</p>}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,340px),1fr))", gap: 14 }}>
                 {profesionalesFiltrados.map((profesional, i) => {
                   const numero = String(profesional.whatsapp || "").replace(/\D/g, "");
-                  return <article key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 16, padding: 20, border: "1px solid #e2e8f0", borderRadius: 16, background: "white" }}>
-                    <div>
-                      <h2 style={{ fontSize: 20, margin: "0 0 7px", color: "#0f172a", WebkitTextFillColor: "#0f172a", fontWeight: 900 }}>{profesional.nombre}</h2>
-                      <div style={{ fontWeight: 750, color: "#6d28d9" }}>🧰 {oficiosDe(profesional).join(" · ")}</div>
-                      <div style={{ color: "#475569", marginTop: 7 }}>📍 {profesional.localidad}</div>
+                  const zona = clasificarZona(profesional);
+                  const especialidades = oficiosDe(profesional).filter(Boolean);
+                  const primeraCategoria = categoriasOficios.find(c => c.nombre !== "Todos" && c.nombre !== "Otros oficios" && especialidades.some(e => categoriaCoincide(e, c.nombre)));
+                  return <article key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexDirection: "column", gap: 14, padding: 20, border: "1px solid #e2e8f0", borderRadius: 17, background: "white", boxShadow: "0 5px 18px rgba(15,23,42,.04)" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 13 }}>
+                      <div aria-hidden="true" style={{ width: 56, height: 56, borderRadius: 15, background: "#ede9fe", display: "flex", justifyContent: "center", alignItems: "center", fontSize: 27, flexShrink: 0 }}>{primeraCategoria?.icono || "🧰"}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <h3 style={{ fontSize: 19, lineHeight: 1.3, margin: "0 0 6px", color: "#0f172a", WebkitTextFillColor: "#0f172a", fontWeight: 900, overflowWrap: "anywhere" }}>{profesional.nombre}</h3>
+                        <div style={{ color: "#6d28d9", fontWeight: 800, fontSize: 14 }}>{especialidades.join(" · ") || "Oficios y servicios"}</div>
+                      </div>
                     </div>
-                    {numero && <a href={`https://wa.me/${numero}?text=${encodeURIComponent(`Hola, te encontré en ORC Oficios y quisiera consultar por un trabajo.`)}`} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", padding: "13px 18px", background: "#16a34a", color: "white", borderRadius: 11, fontWeight: 900, textDecoration: "none" }}>💬 Contactar por WhatsApp</a>}
+                    <div style={{ color: "#475569", fontSize: 14 }}>📍 Localidad: <strong>{profesional.localidad || "No informada"}</strong></div>
+                    {zona === 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#f0fdf4", color: "#166534", fontSize: 13, fontWeight: 750 }}>✓ Está en la localidad buscada</div>}
+                    {zona > 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#fffbeb", color: "#92400e", fontSize: 13, fontWeight: 750 }}>📍 {zona === 1 ? "Localidad cercana" : "Otra localidad"} · Consultá si atiende en {filtroLocalidad.trim()}</div>}
+                    {numero ? <a href={`https://wa.me/${numero}?text=${encodeURIComponent(`Hola, te encontré en ORC Oficios. Quisiera consultar por un trabajo${filtroLocalidad.trim() ? ` en ${filtroLocalidad.trim()}` : ""}. ¿Atendés esa zona?`)}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: "auto", padding: "13px 16px", background: "#16a34a", color: "white", borderRadius: 11, fontWeight: 900, textDecoration: "none", textAlign: "center" }}>💬 Consultar por WhatsApp</a> : <div style={{ marginTop: "auto", padding: 12, color: "#64748b", background: "#f8fafc", borderRadius: 10, fontSize: 13 }}>Sin WhatsApp publicado</div>}
                   </article>;
                 })}
               </div>
             </>
           )}
-          <p style={{ marginTop: 30, color: "#64748b", fontSize: 13 }}>Los perfiles son publicados voluntariamente por los profesionales. ORC Oficios no verifica ni garantiza los servicios ofrecidos.</p>
+          <p style={{ marginTop: 30, color: "#64748b", fontSize: 13 }}>Los perfiles son publicados voluntariamente por los profesionales. ORC Oficios no verifica ni garantiza los servicios ofrecidos. Las sugerencias de localidades no confirman cobertura.</p>
         </div>
       </div>
     );
