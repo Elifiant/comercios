@@ -28,7 +28,7 @@ export default function WebComercial() {
       setCargandoProfesionales(true);
       setErrorProfesionales("");
       try {
-        const respuesta = await fetch(`${supabaseORCUrl}/rest/v1/orc_profesionales_publicos?select=nombre,especialidad,especialidades,localidad,whatsapp&order=nombre.asc&limit=1000`, {
+        const respuesta = await fetch(`${supabaseORCUrl}/rest/v1/orc_profesionales_publicos?select=usuario_id,nombre,especialidad,especialidades,localidad,whatsapp&order=nombre.asc&limit=1000`, {
           headers: { apikey: supabaseORCClavePublica }, signal: controlador.signal,
         });
         if (!respuesta.ok) throw new Error(`Error ${respuesta.status}`);
@@ -236,7 +236,7 @@ export default function WebComercial() {
 
   if (directorioAbierto) {
     return (
-      <div style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a", fontFamily: "Inter, system-ui, sans-serif", padding: "28px 16px 70px", boxSizing: "border-box" }}>
+      <div style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a", colorScheme: "light", fontFamily: "Inter, system-ui, sans-serif", padding: "28px 16px 70px", boxSizing: "border-box" }}>
         <div style={{ maxWidth: 940, margin: "0 auto" }}>
           <a href="#soluciones" style={{ display: "inline-block", color: "#6d28d9", textDecoration: "none", fontWeight: 800, marginBottom: 26 }}>← Volver a RutaComercios</a>
           <div style={{ background: "linear-gradient(125deg,#6d28d9,#4338ca)", borderRadius: 22, padding: "30px 26px", color: "white" }}>
@@ -300,9 +300,17 @@ export default function WebComercial() {
                   const zona = clasificarZona(profesional);
                   const especialidades = oficiosDe(profesional).filter(Boolean);
                   const primeraCategoria = categoriasOficios.find(c => c.nombre !== "Todos" && c.nombre !== "Otros oficios" && especialidades.some(e => categoriaCoincide(e, c.nombre)));
-                  return <article key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexDirection: "column", gap: 14, padding: 20, border: "1px solid #e2e8f0", borderRadius: 17, background: "white", boxShadow: "0 5px 18px rgba(15,23,42,.04)" }}>
+                  const fotoUrl = profesional.usuario_id
+                    ? `${supabaseORCUrl}/storage/v1/object/public/orc-fotos-profesionales/${encodeURIComponent(profesional.usuario_id)}/perfil.jpg`
+                    : null;
+                  return <article key={`${profesional.whatsapp}-${i}`} style={{ display: "flex", flexDirection: "column", gap: 14, padding: 20, border: "1px solid #e2e8f0", borderRadius: 17, background: "#ffffff", color: "#0f172a", colorScheme: "light", boxShadow: "0 5px 18px rgba(15,23,42,.04)" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 13 }}>
-                      <div aria-hidden="true" style={{ width: 56, height: 56, borderRadius: 15, background: "#ede9fe", display: "flex", justifyContent: "center", alignItems: "center", fontSize: 27, flexShrink: 0 }}>{primeraCategoria?.icono || "🧰"}</div>
+                      <div aria-hidden="true" style={{ width: 56, height: 56, borderRadius: 15, background: "#ede9fe", display: "flex", justifyContent: "center", alignItems: "center", fontSize: 27, flexShrink: 0, overflow: "hidden" }}>
+                        <span style={{ position: "relative", width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                          {primeraCategoria?.icono || "🧰"}
+                          {fotoUrl && <img src={fotoUrl} alt="" loading="lazy" onError={e => { e.currentTarget.style.display = "none"; }} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", background: "#ede9fe" }} />}
+                        </span>
+                      </div>
                       <div style={{ minWidth: 0 }}>
                         <h3 style={{ fontSize: 19, lineHeight: 1.3, margin: "0 0 6px", color: "#0f172a", WebkitTextFillColor: "#0f172a", fontWeight: 900, overflowWrap: "anywhere" }}>{profesional.nombre}</h3>
                         <div style={{ color: "#6d28d9", fontWeight: 800, fontSize: 14 }}>{especialidades.join(" · ") || "Oficios y servicios"}</div>
