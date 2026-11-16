@@ -9,6 +9,7 @@ export default function WebComercial() {
   const [cargandoProfesionales, setCargandoProfesionales] = useState(false);
   const [errorProfesionales, setErrorProfesionales] = useState("");
   const [filtroLocalidad, setFiltroLocalidad] = useState("");
+  const [zonaSeleccionada, setZonaSeleccionada] = useState(null);
   const [alcanceLocalidad, setAlcanceLocalidad] = useState("cercanas");
   const [categoriaActiva, setCategoriaActiva] = useState("Todos");
   const supabaseORCUrl = "https://iovgsaumodtqtbyjfbsw.supabase.co";
@@ -68,41 +69,59 @@ export default function WebComercial() {
     return seleccionada ? seleccionada.terminos.some(t => texto.includes(t)) : true;
   };
   const oficiosDe = p => Array.isArray(p.especialidades) && p.especialidades.length ? p.especialidades : [p.especialidad];
-  // Relaciones orientativas entre localidades, sin GPS ni servicios externos.
-  // No implican que un profesional acepte trabajos fuera de su localidad.
-  const localidadesCercanas = {
-    bernal: ["quilmes", "don bosco", "wilde", "ezpeleta"],
-    quilmes: ["bernal", "ezpeleta", "don bosco", "san francisco solano"],
-    "don bosco": ["bernal", "wilde", "quilmes"],
-    wilde: ["don bosco", "bernal", "villa dominico", "avellaneda"],
-    ezpeleta: ["quilmes", "bernal", "berazategui"],
-    berazategui: ["ezpeleta", "quilmes", "ranelagh", "platanos"],
-    avellaneda: ["wilde", "villa dominico", "sarandi", "gerli"],
-    "villa dominico": ["wilde", "sarandi", "avellaneda"],
-    sarandi: ["villa dominico", "avellaneda", "wilde"],
-    "san francisco solano": ["quilmes", "san jose", "berazategui"],
+  // Catálogo inicial de equivalencias verificables. No confundir coincidencias parciales.
+  // Los profesionales publican partidos en el campo localidad (compatibilidad actual).
+  const zonasConocidas = [
+    ["Lomas de Zamora", "Lomas de Zamora", "Partido"],
+    ["Lomas del Mirador", "La Matanza", "Localidad"],
+    ["Tres Lomas", "Tres Lomas", "Partido"],
+    ["Quilmes", "Quilmes", "Partido"], ["Bernal", "Quilmes", "Localidad"],
+    ["Don Bosco", "Quilmes", "Localidad"], ["Ezpeleta", "Quilmes", "Localidad"],
+    ["San Francisco Solano", "Quilmes", "Localidad"],
+    ["Avellaneda", "Avellaneda", "Partido"], ["Wilde", "Avellaneda", "Localidad"],
+    ["Villa Domínico", "Avellaneda", "Localidad"], ["Sarandí", "Avellaneda", "Localidad"],
+    ["Berazategui", "Berazategui", "Partido"], ["Ranelagh", "Berazategui", "Localidad"],
+    ["Plátanos", "Berazategui", "Localidad"],
+    ["Lanús", "Lanús", "Partido"], ["Remedios de Escalada", "Lanús", "Localidad"],
+    ["La Matanza", "La Matanza", "Partido"], ["San Justo", "La Matanza", "Localidad"],
+    ["Ramos Mejía", "La Matanza", "Localidad"], ["Ciudad Evita", "La Matanza", "Localidad"],
+    ["Florencio Varela", "Florencio Varela", "Partido"],
+    ["Almirante Brown", "Almirante Brown", "Partido"], ["Adrogué", "Almirante Brown", "Localidad"],
+    ["Banfield", "Lomas de Zamora", "Localidad"], ["Temperley", "Lomas de Zamora", "Localidad"],
+    ["Turdera", "Lomas de Zamora", "Localidad"], ["Llavallol", "Lomas de Zamora", "Localidad"]
+  ];
+  const partidosVecinos = {
+    quilmes: ["avellaneda", "berazategui", "florencio varela", "almirante brown", "lanus"],
+    avellaneda: ["quilmes", "lanus"],
+    "lomas de zamora": ["lanus", "almirante brown", "la matanza", "esteban echeverria"],
+    "la matanza": ["lomas de zamora", "tres de febrero", "moron", "merlo", "ezeiza"],
+    berazategui: ["quilmes", "florencio varela"],
+    lanus: ["avellaneda", "quilmes", "lomas de zamora"],
+    "almirante brown": ["quilmes", "lomas de zamora", "florencio varela"]
   };
   const zonaBuscada = normalizarTexto(filtroLocalidad);
-  // La localidad publicada puede contener varias zonas separadas por comas.
+  const sugerenciasZona = zonaBuscada.length >= 2
+    ? zonasConocidas.filter(([nombre]) => normalizarTexto(nombre).includes(zonaBuscada)).slice(0, 8)
+    : [];
+  const coincidenciaUnica = zonasConocidas.filter(([nombre]) => normalizarTexto(nombre) === zonaBuscada);
+  const zonaActiva = zonaSeleccionada && normalizarTexto(zonaSeleccionada[0]) === zonaBuscada
+    ? zonaSeleccionada : coincidenciaUnica.length === 1 ? coincidenciaUnica[0] : null;
+  const partidoBuscado = zonaActiva ? normalizarTexto(zonaActiva[1]) : null;
   const zonasDelProfesional = profesional => String(profesional.localidad || "")
     .split(/[,;\n]+/).map(normalizarTexto).filter(Boolean);
-  // Vecindad bidireccional: si A figura junto a B, también se reconoce B junto a A.
-  const vecinasDe = zona => {
-    const vecinas = new Set(localidadesCercanas[zona] || []);
-    Object.entries(localidadesCercanas).forEach(([origen, destinos]) => {
-      if (destinos.includes(zona)) vecinas.add(origen);
-    });
-    return vecinas;
-  };
   const clasificarZona = profesional => {
     if (!zonaBuscada) return 0;
     const zonas = zonasDelProfesional(profesional);
-    if (zonas.some(z => z === zonaBuscada)) return 0;
-    if (alcanceLocalidad === "exacta") return -1;
-    const vecinas = vecinasDe(zonaBuscada);
-    if (zonas.some(z => vecinas.has(z))) return 1;
-    if (alcanceLocalidad === "amplia") return 2;
-    return -1;
+    if (partidoBuscado) {
+      if (zonas.some(z => z === partidoBuscado || z === zonaBuscada)) return 0;
+      if (alcanceLocalidad === "exacta") return -1;
+      const vecinas = partidosVecinos[partidoBuscado] || [];
+      if (zonas.some(z => vecinas.includes(z))) return 1;
+    } else {
+      // Texto sin seleccionar: solo coincidencia completa, nunca por prefijo.
+      if (zonas.includes(zonaBuscada)) return 0;
+    }
+    return alcanceLocalidad === "amplia" ? 2 : -1;
   };
 
   const profesionalesFiltrados = profesionalesPublicos
@@ -238,8 +257,20 @@ export default function WebComercial() {
               })}
             </div>
             <label style={{ display: "grid", gap: 8, fontWeight: 850, fontSize: 17 }}>2. ¿Dónde necesitás el servicio?
-              <input value={filtroLocalidad} onChange={e => setFiltroLocalidad(e.target.value)} placeholder="Ej.: Bernal, Quilmes, Wilde..." autoComplete="off" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", WebkitTextFillColor: "#0f172a", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
+              <input value={filtroLocalidad} onChange={e => { setFiltroLocalidad(e.target.value); setZonaSeleccionada(null); }} placeholder="Ej.: Lomas, Bernal, Wilde..." autoComplete="off" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", WebkitTextFillColor: "#0f172a", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
             </label>
+            {zonaBuscada.length >= 2 && !zonaActiva && sugerenciasZona.length > 0 && (
+              <div role="listbox" aria-label="Elegí una localidad o partido" style={{ marginTop: 8, border: "1px solid #cbd5e1", borderRadius: 12, overflow: "hidden" }}>
+                {sugerenciasZona.map(([nombre, partido, tipo]) => (
+                  <button type="button" key={`${nombre}-${partido}`} onClick={() => { setFiltroLocalidad(nombre); setZonaSeleccionada([nombre, partido, tipo]); }}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", border: 0, borderBottom: "1px solid #e2e8f0", background: "#fff", color: "#0f172a", cursor: "pointer", fontSize: 15 }}>
+                    <strong>{nombre}</strong> — {tipo === "Partido" ? "Partido de Buenos Aires" : `Localidad · Partido de ${partido}`}
+                  </button>
+                ))}
+              </div>
+            )}
+            {zonaActiva && <p style={{ color: "#166534", fontSize: 13, margin: "8px 0 0" }}>✓ {zonaActiva[2] === "Partido" ? "Partido" : "Localidad"}: {zonaActiva[0]} · Cobertura por partido: {zonaActiva[1]}</p>}
+            {zonaBuscada.length >= 2 && !zonaActiva && sugerenciasZona.length === 0 && <p style={{ color: "#64748b", fontSize: 13 }}>No está en el catálogo inicial. Probá escribir el nombre completo del partido.</p>}
             <fieldset style={{ border: 0, padding: 0, margin: "18px 0 0", minWidth: 0 }}>
                <legend style={{ fontWeight: 800, marginBottom: 10 }}>Amplitud de la búsqueda</legend>
                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
@@ -260,7 +291,7 @@ export default function WebComercial() {
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "18px 0" }}>
                 <h2 style={{ margin: 0, fontSize: 20, color: "#0f172a" }}>Profesionales encontrados: {profesionalesFiltrados.length}</h2>
-                {(categoriaActiva !== "Todos" || filtroLocalidad || alcanceLocalidad !== "cercanas") && <button type="button" onClick={() => { setCategoriaActiva("Todos"); setFiltroLocalidad(""); setAlcanceLocalidad("cercanas"); }} style={{ border: "1px solid #cbd5e1", background: "white", color: "#475569", padding: "9px 13px", borderRadius: 9, cursor: "pointer", fontWeight: 750 }}>Limpiar filtros</button>}
+                {(categoriaActiva !== "Todos" || filtroLocalidad || alcanceLocalidad !== "cercanas") && <button type="button" onClick={() => { setCategoriaActiva("Todos"); setFiltroLocalidad(""); setZonaSeleccionada(null); setAlcanceLocalidad("cercanas"); }} style={{ border: "1px solid #cbd5e1", background: "white", color: "#475569", padding: "9px 13px", borderRadius: 9, cursor: "pointer", fontWeight: 750 }}>Limpiar filtros</button>}
               </div>
               {profesionalesFiltrados.length === 0 && <p style={{ background: "white", padding: 22, borderRadius: 12, border: "1px solid #e2e8f0" }}>No encontramos profesionales con esos filtros. Probá otra localidad o ampliá la búsqueda.</p>}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,340px),1fr))", gap: 14 }}>
@@ -277,9 +308,9 @@ export default function WebComercial() {
                         <div style={{ color: "#6d28d9", fontWeight: 800, fontSize: 14 }}>{especialidades.join(" · ") || "Oficios y servicios"}</div>
                       </div>
                     </div>
-                    <div style={{ color: "#475569", fontSize: 14 }}>📍 Localidad: <strong>{profesional.localidad || "No informada"}</strong></div>
-                    {zona === 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#f0fdf4", color: "#166534", fontSize: 13, fontWeight: 750 }}>✓ Está en la localidad buscada</div>}
-                    {zona > 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#fffbeb", color: "#92400e", fontSize: 13, fontWeight: 750 }}>📍 {zona === 1 ? "Localidad cercana" : "Otra localidad"} · Consultá si atiende en {filtroLocalidad.trim()}</div>}
+                    <div style={{ color: "#475569", fontSize: 14 }}>📍 Zonas publicadas: <strong>{profesional.localidad || "No informada"}</strong></div>
+                    {zona === 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#f0fdf4", color: "#166534", fontSize: 13, fontWeight: 750 }}>✓ Atiende el partido correspondiente a tu búsqueda</div>}
+                    {zona > 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#fffbeb", color: "#92400e", fontSize: 13, fontWeight: 750 }}>📍 {zona === 1 ? "Partido vecino" : "Otra zona"} · Consultá si atiende en {filtroLocalidad.trim()}</div>}
                     {numero ? <a href={`https://wa.me/${numero}?text=${encodeURIComponent(`Hola, te encontré en ORC Oficios. Quisiera consultar por un trabajo${filtroLocalidad.trim() ? ` en ${filtroLocalidad.trim()}` : ""}. ¿Atendés esa zona?`)}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: "auto", padding: "13px 16px", background: "#16a34a", color: "white", borderRadius: 11, fontWeight: 900, textDecoration: "none", textAlign: "center" }}>💬 Consultar por WhatsApp</a> : <div style={{ marginTop: "auto", padding: 12, color: "#64748b", background: "#f8fafc", borderRadius: 10, fontSize: 13 }}>Sin WhatsApp publicado</div>}
                   </article>;
                 })}
