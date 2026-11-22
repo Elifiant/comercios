@@ -114,25 +114,23 @@ export default function WebComercial() {
     "almirante brown": ["quilmes", "lomas de zamora", "florencio varela"]
   };
   const zonaBuscada = normalizarTexto(filtroLocalidad);
+  // Solo partidos, departamentos y comunas.
   const zonasDeProvincia = provinciaDirectorioORC
-    ? [
-        ...departamentosDirectorioORC.map(nombre => [
-          nombre,
-          nombre,
-          "Partido"
-        ]),
-        ...(provinciaDirectorioORC === "Buenos Aires"
-          ? zonasConocidas.filter(([, , tipo]) => tipo === "Localidad")
-          : [])
-      ]
-    : zonasConocidas;
+    ? departamentosDirectorioORC.map(nombre => [
+        nombre, nombre, "Division"
+      ])
+    : zonasConocidas.filter(([, , tipo]) => tipo === "Partido");
 
   const sugerenciasZona = zonaBuscada.length >= 2
     ? zonasDeProvincia.filter(([nombre]) =>
         normalizarTexto(nombre).includes(zonaBuscada)
       ).slice(0, 8)
     : [];
-  const coincidenciaUnica = zonasDeProvincia.filter(([nombre]) => normalizarTexto(nombre) === zonaBuscada);
+
+  const coincidenciaUnica = zonasDeProvincia.filter(([nombre]) =>
+    normalizarTexto(nombre) === zonaBuscada
+  );
+
   const zonaActiva = zonaSeleccionada && normalizarTexto(zonaSeleccionada[0]) === zonaBuscada
     ? zonaSeleccionada : coincidenciaUnica.length === 1 ? coincidenciaUnica[0] : null;
   const partidoBuscado = zonaActiva ? normalizarTexto(zonaActiva[1]) : null;
@@ -341,14 +339,16 @@ export default function WebComercial() {
               {errorGeografiaDirectorioORC && <p role="alert" style={{ color: "#b91c1c" }}>{errorGeografiaDirectorioORC}</p>}
             </div>
             <label style={{ display: "grid", gap: 8, fontWeight: 850, fontSize: 17 }}>O buscá por nombre (zonas anteriores)
-              <input className="orc-busqueda-localidad" value={filtroLocalidad} onChange={e => { setFiltroLocalidad(e.target.value); setZonaSeleccionada(null); }} placeholder="Ej.: Lomas, Bernal, Wilde..." autoComplete="off" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", WebkitTextFillColor: "#0f172a", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
+              <input className="orc-busqueda-localidad" value={filtroLocalidad} onChange={e => { setFiltroLocalidad(e.target.value); setDepartamentoDirectorioORC(""); setZonaSeleccionada(null); }} placeholder="Ej.: Lomas, Bernal, Wilde..." autoComplete="off" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", WebkitTextFillColor: "#0f172a", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
             </label>
             {zonaBuscada.length >= 2 && !zonaActiva && sugerenciasZona.length > 0 && (
               <div role="listbox" aria-label="Elegí una localidad o partido" style={{ marginTop: 8, border: "1px solid #cbd5e1", borderRadius: 12, overflow: "hidden" }}>
                 {sugerenciasZona.map(([nombre, partido, tipo]) => (
-                  <button type="button" key={`${nombre}-${partido}`} onClick={() => { setFiltroLocalidad(nombre); setZonaSeleccionada([nombre, partido, tipo]); }}
+                  <button type="button" key={`${nombre}-${partido}`} onClick={() => { setFiltroLocalidad(nombre); setDepartamentoDirectorioORC(nombre); setZonaSeleccionada([nombre, partido, tipo]); }}
                     style={{ display: "block", width: "100%", textAlign: "left", padding: "12px 14px", border: 0, borderBottom: "1px solid #e2e8f0", background: "#fff", color: "#0f172a", cursor: "pointer", fontSize: 15 }}>
-                    <strong>{nombre}</strong> — {tipo === "Partido" ? "Partido de Buenos Aires" : `Localidad · Partido de ${partido}`}
+                    <strong>{nombre}</strong> — {provinciaDirectorioORC
+  ? `${provinciaDirectorioORC === "Buenos Aires" ? "Partido" : provinciaDirectorioORC === "Ciudad Autónoma de Buenos Aires" ? "Comuna" : "Departamento"} de ${provinciaDirectorioORC}`
+  : "Partido de Buenos Aires"}
                   </button>
                 ))}
               </div>
