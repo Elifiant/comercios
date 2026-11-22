@@ -238,6 +238,19 @@ export default function WebComercial() {
     return (
       <div className="orc-directorio" style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a", colorScheme: "light", fontFamily: "Inter, system-ui, sans-serif", padding: "28px 16px 70px", boxSizing: "border-box" }}>
         <style>{`
+          /* Mantener legible la búsqueda de localidad en Safari/iOS con modo oscuro. */
+          .orc-directorio .orc-busqueda-localidad {
+            color-scheme: light !important;
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-text-fill-color: #0f172a !important;
+            caret-color: #0f172a !important;
+          }
+          .orc-directorio .orc-busqueda-localidad::placeholder {
+            color: #64748b !important;
+            -webkit-text-fill-color: #64748b !important;
+            opacity: 1;
+          }
           @media (prefers-color-scheme: dark) {
             .orc-directorio { background: #0f172a !important; color: #f8fafc !important; }
             .orc-directorio .orc-tarjeta-profesional { background: #1e293b !important; border-color: #475569 !important; color: #f8fafc !important; }
@@ -266,7 +279,7 @@ export default function WebComercial() {
               })}
             </div>
             <label style={{ display: "grid", gap: 8, fontWeight: 850, fontSize: 17 }}>2. ¿Dónde necesitás el servicio?
-              <input value={filtroLocalidad} onChange={e => { setFiltroLocalidad(e.target.value); setZonaSeleccionada(null); }} placeholder="Ej.: Lomas, Bernal, Wilde..." autoComplete="off" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", WebkitTextFillColor: "#0f172a", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
+              <input className="orc-busqueda-localidad" value={filtroLocalidad} onChange={e => { setFiltroLocalidad(e.target.value); setZonaSeleccionada(null); }} placeholder="Ej.: Lomas, Bernal, Wilde..." autoComplete="off" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", WebkitTextFillColor: "#0f172a", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
             </label>
             {zonaBuscada.length >= 2 && !zonaActiva && sugerenciasZona.length > 0 && (
               <div role="listbox" aria-label="Elegí una localidad o partido" style={{ marginTop: 8, border: "1px solid #cbd5e1", borderRadius: 12, overflow: "hidden" }}>
