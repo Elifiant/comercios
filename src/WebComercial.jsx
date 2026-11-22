@@ -114,17 +114,44 @@ export default function WebComercial() {
     "almirante brown": ["quilmes", "lomas de zamora", "florencio varela"]
   };
   const zonaBuscada = normalizarTexto(filtroLocalidad);
+  const zonasDeProvincia = provinciaDirectorioORC
+    ? [
+        ...departamentosDirectorioORC.map(nombre => [
+          nombre,
+          nombre,
+          "Partido"
+        ]),
+        ...(provinciaDirectorioORC === "Buenos Aires"
+          ? zonasConocidas.filter(([, , tipo]) => tipo === "Localidad")
+          : [])
+      ]
+    : zonasConocidas;
+
   const sugerenciasZona = zonaBuscada.length >= 2
-    ? zonasConocidas.filter(([nombre]) => normalizarTexto(nombre).includes(zonaBuscada)).slice(0, 8)
+    ? zonasDeProvincia.filter(([nombre]) =>
+        normalizarTexto(nombre).includes(zonaBuscada)
+      ).slice(0, 8)
     : [];
-  const coincidenciaUnica = zonasConocidas.filter(([nombre]) => normalizarTexto(nombre) === zonaBuscada);
+  const coincidenciaUnica = zonasDeProvincia.filter(([nombre]) => normalizarTexto(nombre) === zonaBuscada);
   const zonaActiva = zonaSeleccionada && normalizarTexto(zonaSeleccionada[0]) === zonaBuscada
     ? zonaSeleccionada : coincidenciaUnica.length === 1 ? coincidenciaUnica[0] : null;
   const partidoBuscado = zonaActiva ? normalizarTexto(zonaActiva[1]) : null;
   const zonasDelProfesional = profesional => String(profesional.localidad || "")
     .split(/[,;\n]+/).map(normalizarTexto).filter(Boolean);
   const clasificarZona = profesional => {
-    if (!zonaBuscada && !departamentoDirectorioORC) return 0;
+    if (!zonaBuscada && !departamentoDirectorioORC && !provinciaDirectorioORC) return 0;
+
+    if (provinciaDirectorioORC && !departamentoDirectorioORC && !zonaBuscada) {
+      const provincia = normalizarTexto(provinciaDirectorioORC);
+      const zonas = zonasDelProfesional(profesional);
+      const departamentos = departamentosDirectorioORC.map(normalizarTexto);
+      const coincide = zonas.some(z =>
+        z.endsWith(`(${provincia})`) ||
+        (provinciaDirectorioORC === "Buenos Aires" &&
+          departamentos.includes(z))
+      );
+      return coincide ? 0 : -1;
+    }
     if (departamentoDirectorioORC && provinciaDirectorioORC) {
       const buscada = normalizarTexto(zonaGeograficaORC(departamentoDirectorioORC, provinciaDirectorioORC));
       const simple = normalizarTexto(departamentoDirectorioORC);
