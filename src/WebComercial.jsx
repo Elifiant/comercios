@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { provinciasGeograficasORC, departamentosGeograficosORC, zonaGeograficaORC, normalizarGeografiaORC } from "./geografiaORC";
 
 export default function WebComercial() {
   const [faqAbierta, setFaqAbierta] = useState(null);
@@ -9,6 +10,19 @@ export default function WebComercial() {
   const [cargandoProfesionales, setCargandoProfesionales] = useState(false);
   const [errorProfesionales, setErrorProfesionales] = useState("");
   const [filtroLocalidad, setFiltroLocalidad] = useState("");
+  const [provinciaDirectorioORC, setProvinciaDirectorioORC] = useState("");
+  const [departamentoDirectorioORC, setDepartamentoDirectorioORC] = useState("");
+  const [departamentosDirectorioORC, setDepartamentosDirectorioORC] = useState([]);
+  const [errorGeografiaDirectorioORC, setErrorGeografiaDirectorioORC] = useState("");
+  useEffect(() => {
+    let activo = true;
+    setDepartamentosDirectorioORC([]);
+    setErrorGeografiaDirectorioORC("");
+    if (!provinciaDirectorioORC) return;
+    departamentosGeograficosORC(provinciaDirectorioORC).then(lista => { if (activo) setDepartamentosDirectorioORC(lista); })
+      .catch(() => { if (activo) setErrorGeografiaDirectorioORC("No se pudieron cargar los departamentos. Revisá tu conexión."); });
+    return () => { activo = false; };
+  }, [provinciaDirectorioORC]);
   const [zonaSeleccionada, setZonaSeleccionada] = useState(null);
   const [alcanceLocalidad, setAlcanceLocalidad] = useState("cercanas");
   const [categoriaActiva, setCategoriaActiva] = useState("Todos");
@@ -110,7 +124,13 @@ export default function WebComercial() {
   const zonasDelProfesional = profesional => String(profesional.localidad || "")
     .split(/[,;\n]+/).map(normalizarTexto).filter(Boolean);
   const clasificarZona = profesional => {
-    if (!zonaBuscada) return 0;
+    if (!zonaBuscada && !departamentoDirectorioORC) return 0;
+    if (departamentoDirectorioORC && provinciaDirectorioORC) {
+      const buscada = normalizarTexto(zonaGeograficaORC(departamentoDirectorioORC, provinciaDirectorioORC));
+      const simple = normalizarTexto(departamentoDirectorioORC);
+      if (zonasDelProfesional(profesional).some(z => z === buscada || (provinciaDirectorioORC === "Buenos Aires" && z === simple))) return 0;
+      return alcanceLocalidad === "amplia" ? 2 : -1;
+    }
     const zonas = zonasDelProfesional(profesional);
     if (partidoBuscado) {
       if (zonas.some(z => z === partidoBuscado || z === zonaBuscada)) return 0;
@@ -278,7 +298,22 @@ export default function WebComercial() {
                 </button>;
               })}
             </div>
-            <label style={{ display: "grid", gap: 8, fontWeight: 850, fontSize: 17 }}>2. ¿Dónde necesitás el servicio?
+            <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
+              <label style={{ display: "grid", gap: 6, fontWeight: 800 }}>2. Provincia
+                <select value={provinciaDirectorioORC} onChange={e => { setProvinciaDirectorioORC(e.target.value); setDepartamentoDirectorioORC(""); setFiltroLocalidad(""); setZonaSeleccionada(null); }} style={{ padding: 13, fontSize: 16, borderRadius: 10, background: "#fff", color: "#0f172a", colorScheme: "light" }}>
+                  <option value="">Elegí una provincia (opcional)</option>
+                  {provinciasGeograficasORC.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+              {provinciaDirectorioORC && <label style={{ display: "grid", gap: 6, fontWeight: 800 }}>Partido / Departamento / Comuna
+                <select value={departamentoDirectorioORC} onChange={e => { setDepartamentoDirectorioORC(e.target.value); setFiltroLocalidad(""); setZonaSeleccionada(null); }} style={{ padding: 13, fontSize: 16, borderRadius: 10, background: "#fff", color: "#0f172a", colorScheme: "light" }}>
+                  <option value="">Elegí una división</option>
+                  {departamentosDirectorioORC.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </label>}
+              {errorGeografiaDirectorioORC && <p role="alert" style={{ color: "#b91c1c" }}>{errorGeografiaDirectorioORC}</p>}
+            </div>
+            <label style={{ display: "grid", gap: 8, fontWeight: 850, fontSize: 17 }}>O buscá por nombre (zonas anteriores)
               <input className="orc-busqueda-localidad" value={filtroLocalidad} onChange={e => { setFiltroLocalidad(e.target.value); setZonaSeleccionada(null); }} placeholder="Ej.: Lomas, Bernal, Wilde..." autoComplete="off" style={{ padding: "14px", fontSize: 16, borderRadius: 11, border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", WebkitTextFillColor: "#0f172a", width: "100%", boxSizing: "border-box", fontFamily: "inherit" }} />
             </label>
             {zonaBuscada.length >= 2 && !zonaActiva && sugerenciasZona.length > 0 && (
@@ -313,7 +348,7 @@ export default function WebComercial() {
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "18px 0" }}>
                 <h2 style={{ margin: 0, fontSize: 20, color: "#0f172a" }}>Profesionales encontrados: {profesionalesFiltrados.length}</h2>
-                {(categoriaActiva !== "Todos" || filtroLocalidad || alcanceLocalidad !== "cercanas") && <button type="button" onClick={() => { setCategoriaActiva("Todos"); setFiltroLocalidad(""); setZonaSeleccionada(null); setAlcanceLocalidad("cercanas"); }} style={{ border: "1px solid #cbd5e1", background: "white", color: "#475569", padding: "9px 13px", borderRadius: 9, cursor: "pointer", fontWeight: 750 }}>Limpiar filtros</button>}
+                {(categoriaActiva !== "Todos" || filtroLocalidad || provinciaDirectorioORC || alcanceLocalidad !== "cercanas") && <button type="button" onClick={() => { setCategoriaActiva("Todos"); setFiltroLocalidad(""); setZonaSeleccionada(null); setAlcanceLocalidad("cercanas"); setProvinciaDirectorioORC(""); setDepartamentoDirectorioORC(""); }} style={{ border: "1px solid #cbd5e1", background: "white", color: "#475569", padding: "9px 13px", borderRadius: 9, cursor: "pointer", fontWeight: 750 }}>Limpiar filtros</button>}
               </div>
               {profesionalesFiltrados.length === 0 && <p style={{ background: "white", padding: 22, borderRadius: 12, border: "1px solid #e2e8f0" }}>No encontramos profesionales con esos filtros. Probá otra localidad o ampliá la búsqueda.</p>}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,340px),1fr))", gap: 14 }}>
@@ -339,8 +374,8 @@ export default function WebComercial() {
                       </div>
                     </div>
                     <div className="orc-zonas" style={{ color: "#475569", fontSize: 14 }}>📍 Zonas publicadas: <strong>{profesional.localidad || "No informada"}</strong></div>
-                    {zona === 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#f0fdf4", color: "#166534", fontSize: 13, fontWeight: 750 }}>✓ Atiende el partido correspondiente a tu búsqueda</div>}
-                    {zona > 0 && zonaBuscada && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#fffbeb", color: "#92400e", fontSize: 13, fontWeight: 750 }}>📍 {zona === 1 ? "Partido vecino" : "Otra zona"} · Consultá si atiende en {filtroLocalidad.trim()}</div>}
+                    {zona === 0 && (zonaBuscada || departamentoDirectorioORC) && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#f0fdf4", color: "#166534", fontSize: 13, fontWeight: 750 }}>✓ Atiende el partido correspondiente a tu búsqueda</div>}
+                    {zona > 0 && (zonaBuscada || departamentoDirectorioORC) && <div style={{ padding: "9px 11px", borderRadius: 10, background: "#fffbeb", color: "#92400e", fontSize: 13, fontWeight: 750 }}>📍 {zona === 1 ? "Partido vecino" : "Otra zona"} · Consultá si atiende en {filtroLocalidad.trim()}</div>}
                     {numero ? <a href={`https://wa.me/${numero}?text=${encodeURIComponent(`Hola, te encontré en ORC Oficios. Quisiera consultar por un trabajo${filtroLocalidad.trim() ? ` en ${filtroLocalidad.trim()}` : ""}. ¿Atendés esa zona?`)}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", marginTop: "auto", padding: "13px 16px", background: "#16a34a", color: "white", borderRadius: 11, fontWeight: 900, textDecoration: "none", textAlign: "center" }}>💬 Consultar por WhatsApp</a> : <div style={{ marginTop: "auto", padding: 12, color: "#64748b", background: "#f8fafc", borderRadius: 10, fontSize: 13 }}>Sin WhatsApp publicado</div>}
                   </article>;
                 })}
