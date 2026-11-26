@@ -485,6 +485,10 @@ export default function AdminClientes() {
       (productoAbono !== "Simplex" && tipoContrato(c.plan_nombre) === "Simplex")
     )) return alert("Simplex no se puede combinar con Ventas ni Repartos. Revisá primero los contratos activos de esta empresa.");
     if (contratosActivosEmpresa.some(c => tipoContrato(c.plan_nombre) === "Ventas + Repartos") && productoAbono !== "Ventas + Repartos") return alert("Esta empresa ya tiene un contrato integrado. No se puede modificar un servicio por separado sin revisar ese contrato.");
+    // No reemplazar un contrato de Ventas existente mediante el circuito antiguo.
+    if (productoAbono === "Ventas" && contratosActivosEmpresa.some(c => tipoContrato(c.plan_nombre) === "Ventas")) {
+      return alert("Los cambios del contrato de Ventas existente se gestionan desde Administración General.");
+    }
     if (productoAbono === "Ventas + Repartos") return alert("El plan integrado requiere cupos independientes para ambos servicios. Todavía no está habilitado el guardado.");
     if (productoAbono === "Express") {
       const admins = Number(cupoAdminsExpress);
@@ -699,6 +703,9 @@ export default function AdminClientes() {
   const guardarPago = async (e) => {
     e.preventDefault();
     if (guardandoPagoRef.current) return;
+    if (["ampliacion", "reduccion"].includes(tipoMovimientoPago) || cambioTemporalPago) {
+      return alert("Los cambios de cupos se gestionan exclusivamente desde Administración General.");
+    }
     guardandoPagoRef.current = true;
     setGuardandoPago(true);
     if (modoModalPago === "cobros") {
@@ -741,24 +748,7 @@ export default function AdminClientes() {
       const conceptoFinal = conceptoPago || (tipoMovimientoPago === "primer_abono" ? "Alta / Primer abono" : tipoMovimientoPago === "renovacion" ? "Renovación de abono" : tipoMovimientoPago === "bonificacion" ? "Abono excepcional / bonificación" : tipoMovimientoPago === "ampliacion" ? "Ampliación de preventistas" : "Reducción de preventistas");
       const cambioPermanente = (esAmpliacion || esReduccion) && !cambioTemporalPago;
 
-      if (cambioPermanente) {
-        const { error } = await supabase.rpc("registrar_cambio_cupo", {
-          p_empresa_id: empresaDB.id,
-          p_empresa: empresaPago,
-          p_tipo_movimiento: tipoMovimientoPago,
-          p_concepto: conceptoFinal,
-          p_cambio_preventistas: cambioFirmado,
-          p_nuevo_cupo: cupoResultante,
-          p_monto: Number(montoPago) || 0,
-          p_moneda: monedaPago,
-          p_metodo: metodoPago,
-          p_comprobante: comprobantePago || null,
-          p_cambio_temporal: false,
-          p_periodo_desde: periodoDesdePago || null,
-          p_periodo_hasta: periodoHastaPago || null
-        });
-        if (error) throw error;
-      } else {
+      {
         const { error } = await supabase.from("pagos_empresas").insert([{
           empresa: empresaPago,
           empresa_id: empresaDB.id,
@@ -2046,6 +2036,7 @@ export default function AdminClientes() {
             )}
             <div style={{ margin: "18px 0 10px", color: "#34d399", fontSize: "12px", fontWeight: "900" }}>💰 REGISTRAR COBRO / MOVIMIENTO</div>
 
+            <div style={{ color: "#fbbf24", fontSize: "12px", marginBottom: "10px" }}>Las ampliaciones y reducciones de cupos se gestionan en Administración General.</div>
             <form onSubmit={guardarPago}>
               <label style={{ display: "block", fontSize: "12px", color: "#94a3b8", marginBottom: "5px", fontWeight: "700" }}>Tipo de operación</label>
               <select value={tipoMovimientoPago} onChange={(e) => {
@@ -2064,8 +2055,7 @@ export default function AdminClientes() {
                 <option value="primer_abono">🆕 Alta / Primer abono</option>
                 <option value="renovacion">🔄 Renovar abono</option>
                 <option value="bonificacion">🎁 Abono excepcional / Bonificación</option>
-                <option value="ampliacion">➕ Ampliar preventistas</option>
-                <option value="reduccion">➖ Reducir preventistas</option>
+
               </select>
 
               <div style={{ marginBottom: "14px" }}>
